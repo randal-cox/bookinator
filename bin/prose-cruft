@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Run the experimental prose-detector bake-off over local chapters."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / ".bookinator" / "packages"))
+sys.path.insert(0, str(ROOT))
+
+from bookinator.prose_cruft import analyze
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--book", default="Shadow")
+    parser.add_argument("--chapters", default="1-3", help="manuscript chapter numbers, e.g. 1-3 or 1,4,10")
+    parser.add_argument("--output", default=".bookinator/reports/prose-cruft-bakeoff.json")
+    args = parser.parse_args()
+
+    wanted: set[int] = set()
+    for part in args.chapters.split(","):
+        if "-" in part:
+            first, last = (int(value) for value in part.split("-", 1))
+            wanted.update(range(first, last + 1))
+        else:
+            wanted.add(int(part))
+
+    library = json.loads((ROOT / ".bookinator" / "library.json").read_text())
+    books = library.get("books", []) if isinstance(library, dict) else library
+    book = next((item for item in books if str(item.get("title", "")).casefold() == args.book.casefold()), None)
+    if not book:
+        raise SystemExit(f"Book not found: {args.book}")
+    storage_id = book.get("manuscriptId") or book["id"]
+    chapters = json.loads((ROOT / ".bookinator" / "books" / storage_id / "extracted-chapters.json").read_text())
+    selected = []
+    for chapter in chapters:
+        label = str(chapter.get("title") or chapter.get("chapterLabel") or "")
+        match = re.search(r"\bCHAPTER\s+(\d+)\b", label, re.I)
+        manuscript_number = int(match.group(1)) if match else None
+        if manuscript_number in wanted:
+            selected.append(chapter)
+    report = {"schema": "bookinator-prose-cruft-bakeoff-v1", "book": book["title"], "chapters": []}
+    for chapter in selected:
+        result = analyze(str(chapter.get("text") or ""))
+        counts = Counter(str(item["detector"]) for item in result["findings"])
+        label = str(chapter.get("title") or chapter.get("chapterLabel") or "")
+        manuscript_number = int(re.search(r"\bCHAPTER\s+(\d+)\b", label, re.I).group(1))
+        report["chapters"].append({"number": manuscript_number, "title": chapter.get("title"), **result})
+        print(f"Chapter {manuscript_number}: {len(result['findings'])} hits " + ", ".join(f"{name} {count}" for name, count in sorted(counts.items())))
+        if result["errors"]:
+            print(f"  detector errors: {result['errors']}")
+
+    output = ROOT / args.output
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    markdown = [f"# Prose cruft bake-off: {report['book']}", "", "Experimental high-recall output. Every warning is a candidate, not a verdict.", ""]
+    for chapter in report["chapters"]:
+        markdown.extend([f"## Chapter {chapter['number']}", ""])
+        grouped: dict[tuple[int, int, str], list[dict[str, object]]] = {}
+        for item in chapter["findings"]:
+            key = (int(item["sentenceStart"]), int(item["sentenceEnd"]), str(item["sentence"]))
+            grouped.setdefault(key, []).append(item)
+        for (start, end, sentence), items in grouped.items():
+            markdown.extend([f"### Characters {start:,}–{end:,}", "", f"> {sentence.replace(chr(10), ' ')}", ""])
+            for item in items:
+                markdown.append(f"- **{item['detector']} · {item['rule']}** — {item['message']}")
+            markdown.append("")
+    markdown_output = output.with_suffix(".md")
+    markdown_output.write_text("\n".join(markdown) + "\n")
+    print(f"Wrote {output}")
+    print(f"Wrote {markdown_output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

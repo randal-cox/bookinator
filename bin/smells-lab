@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Run the production Smells artifact builder without mutating a pipeline."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / ".bookinator" / "packages"))
+sys.path.insert(0, str(ROOT))
+
+from bookinator.server.__main__ import analyze_chapter_smells
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--chapter", type=int, default=1)
+    parser.add_argument("--model", default="qwen2.5:32B")
+    parser.add_argument("--limit", type=int)
+    args = parser.parse_args()
+    library = json.loads((ROOT / ".bookinator" / "library.json").read_text())
+    book = next(item for item in library if item.get("title") == "Shadow")
+    chapters = json.loads((ROOT / ".bookinator" / "books" / book["manuscriptId"] / "extracted-chapters.json").read_text())
+    chapter = next(item for item in chapters if str(item.get("title") or "").strip().upper() == f"CHAPTER {args.chapter}")
+    result = analyze_chapter_smells(chapter, args.model, run_key=f"smells-lab-{args.chapter}", candidate_limit=args.limit)
+    output = ROOT / ".bookinator" / "reports" / f"smells-chapter-{args.chapter}.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    print(f"Chapter {args.chapter}: {len(result['candidates'])} candidates; {result['kept']} kept, {result['dismissed']} dismissed, {result['informational']} informational")
+    print(output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

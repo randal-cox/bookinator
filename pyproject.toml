@@ -1,0 +1,18 @@
+[project]
+name = "bookinator"
+version = "0.1.0"
+description = "Local-first AI-assisted manuscript analysis"
+license = "BUSL-1.1"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+ingestion = ["PyMuPDF>=1.26,<2"]
+emotions = ["transformers>=4.48,<5", "torch>=2.2,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071f4a" />
+    <title>Bookinator</title>
+    <link rel="icon" href="/assets/bookinator.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css?v=roadmap-arrows-62" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#about/story" data-page="about" aria-label="About Bookinator">
+          <img src="/assets/bookinator.svg" alt="" />
+          <span><strong>Bookinator</strong><small>Find what the author forgot.</small></span>
+        </a>
+        <button class="navigation-toggle" id="navigation-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation" aria-label="Open navigation">
+          <span class="navigation-toggle-lines" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="navigation-toggle-status" aria-hidden="true"><i class="navigation-toggle-pulse"></i><b id="navigation-toggle-alert" hidden></b></span>
+        </button>
+        <nav class="primary-navigation" id="primary-navigation" aria-label="Primary navigation">
+          <button class="primary-nav-item active" type="button" data-page="books"><strong>Books</strong><small>Library</small></button>
+          <button class="primary-nav-item analysis-nav" id="analysis-nav" type="button" data-page="analysis"><strong>Analysis</strong><small id="current-analysis-book">No book selected</small></button>
+          <button class="primary-nav-item pipeline-nav" id="pipeline-nav" type="button" data-page="pipeline"><span><i class="pipeline-nav-pulse" aria-hidden="true"></i><strong>Pipeline</strong><b class="pipeline-nav-alert" id="pipeline-nav-alert" hidden></b></span><small id="pipeline-nav-status">Checking queue</small></button>
+          <button class="primary-nav-item machine-nav" id="machine-nav" type="button" data-page="machine"><span><i class="machine-nav-mark" aria-hidden="true"></i><strong>Machine</strong></span><small id="machine-nav-status">Local</small></button>
+        </nav>
+      </header>
+
+      <main class="library-page" id="books-page">
+        <header class="library-heading">
+          <div>
+            <p class="context">Your manuscript library</p>
+            <h1>Books</h1>
+            <p>Every draft, thread, and finding stays together in its own local project.</p>
+          </div>
+        </header>
+
+        <section class="library-command-bar" aria-label="Book library commands">
+          <button class="library-command intake-command" id="add-book" type="button" title="Add EPUB, PDF, DOCX, Markdown, text, or Bookinator JSON"><span class="command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg></span><small>Add Book</small></button>
+          <span class="command-divider" aria-hidden="true"></span>
+          <button class="library-command danger-command" id="delete-books" type="button" disabled><span class="command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></span><small>Delete</small></button>
+          <button class="library-command" id="export-books" type="button" disabled><span class="command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M8 8l4-4 4 4M5 20h14"/></svg></span><small>Export</small></button>
+          <input class="sr-only" id="book-intake-file" type="file" accept="application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/json,text/plain,text/markdown,.pdf,.docx,.epub,.txt,.md,.json">
+        </section>
+
+        <section class="library-tools" aria-label="Book library tools">
+          <label class="search-control">
+            <span aria-hidden="true">⌕</span>
+            <span class="sr-only">Search books</span>
+            <input id="search" type="search" placeholder="Search titles and authors" />
+          </label>
+          <label class="filter-control">Show
+            <select id="status-filter">
+              <option value="all">All books</option>
+              <option value="new">Not started</option>
+              <option value="reading">Reading</option>
+              <option value="complete">Analyzed</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="book-directory" id="book-directory" aria-live="polite"></section>
+      </main>
+
+      <main class="pipeline-page" id="pipeline-page" hidden>
+        <header class="pipeline-heading">
+          <div>
+            <p class="context">Library work queue</p>
+            <h1>Pipeline</h1>
+            <p>Bookinator works through eligible books by priority, then advances each book chapter by chapter.</p>
+          </div>
+        </header>
+
+        <section class="library-pipeline-panel" id="library-pipeline-panel" aria-label="Global analysis queue">
+          <div id="library-pipeline-progress" aria-live="polite"></div>
+          <button class="library-pipeline-toggle action-button" id="toggle-library-pipeline" type="button" hidden>
+            <span class="command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></svg></span>
+            <small>Start</small>
+          </button>
+        </section>
+
+        <section class="pipeline-queue-section" aria-labelledby="pipeline-queue-title">
+          <header><div><h2 id="pipeline-queue-title">Books in the queue</h2><p id="pipeline-queue-summary">Checking eligible books…</p></div></header>
+          <div class="pipeline-book-list" id="pipeline-book-list" aria-live="polite"></div>
+        </section>
+
+        <section class="pipeline-diagnostics-section" aria-labelledby="pipeline-diagnostics-title">
+          <header><div><h2 id="pipeline-diagnostics-title">Analysis problems</h2><p id="pipeline-diagnostics-summary">Checking every book and analysis stage…</p></div></header>
+          <div class="pipeline-diagnostics-list" id="pipeline-diagnostics-list" aria-live="polite"></div>
+        </section>
+      </main>
+
+      <main class="article-page" id="article-page" hidden>
+        <header class="article-hero" id="article-hero"></header>
+        <nav class="article-tabs" id="article-tabs" aria-label="Page topics"></nav>
+        <article class="article-body" id="article-body"></article>
+      </main>
+
+      <main class="book-workspace" id="book-page" hidden>
+        <header class="book-workspace-header" id="book-workspace-header"></header>
+        <nav class="article-tabs book-workspace-tools" id="book-tabs" aria-label="Book workspace"></nav>
+        <section class="book-workspace-body" id="book-workspace-body"></section>
+      </main>
+
+      <footer class="app-footer">
+        <a class="footer-brand" href="#about/story" data-page="about"><img src="/assets/bookinator.svg" alt=""><span><strong>Bookinator</strong><small>Local manuscript intelligence</small></span></a>
+        <nav class="footer-links" aria-label="Bookinator information">
+          <a href="#docs/overview" data-page="docs">Docs</a>
+          <a href="#guide/start" data-page="guide">Guide</a>
+          <a href="#roadmap/priorities" data-page="roadmap">Roadmap</a>
+          <a href="/docs/presentations/">Resources</a>
+          <a href="#legal/privacy" data-page="legal">Legal</a>
+          <a href="#about/story" data-page="about">About</a>
+        </nav>
+        <span class="footer-local">⌂ Private by design<br><small id="library-count">0 books on this computer</small></span>
+      </footer>
+    </div>
+
+    <div class="app-tooltip" id="app-tooltip" role="tooltip" hidden></div>
+
+    <div class="backdrop" id="welcome-dialog" hidden>
+      <section class="welcome-dialog" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+        <img src="/assets/bookinator.svg" alt="" />
+        <p class="context">A developmental editor for the long haul</p>
+        <h2 id="welcome-title">Finding the plot holes<br />before your readers fall in.</h2>
+        <p>Bookinator reads locally, keeps track of what your manuscript asks readers to remember, and shows its evidence when something doesn’t add up.</p>
+        <div class="privacy-promise"><span>⌂</span><div><strong>Your books stay here.</strong><small>Bookinator talks only to the local tools running on this computer.</small></div></div>
+        <button class="primary-button" id="meet-bookinator" type="button">Meet Bookinator</button>
+      </section>
+    </div>
+
+    <div class="backdrop" id="add-dialog" hidden>
+      <section class="standard-dialog" role="dialog" aria-modal="true" aria-labelledby="add-title">
+        <button class="dialog-close" data-close="add-dialog" aria-label="Close">×</button>
+        <header class="dialog-heading">
+          <div><p class="context" id="book-dialog-context">New book</p><h2 id="add-title">Bring in a manuscript</h2><p id="book-dialog-description">Drop in a PDF, ebook, or text manuscript. Bookinator will inspect its opening locally, suggest the title and author, and let you correct either before continuing.</p></div>
+        </header>
+        <form id="book-form">
+          <label class="manuscript-well" id="manuscript-well">
+            <input id="book-file" type="file" accept="application/pdf,text/plain,.pdf,.docx,.epub,.txt,.md" />
+            <span class="well-icon">⇣</span>
+            <strong id="manuscript-well-title">Drop your manuscript into the well</strong>
+            <small id="manuscript-well-copy">PDF, DOCX, EPUB, TXT, or Markdown</small>
+            <em id="file-name"></em>
+          </label>
+          <div class="identity-status" id="identity-status" hidden></div>
+          <div class="identity-fields">
+            <label>Title<input id="book-title" required placeholder="Bookinator will look for it" /></label>
+            <label>Author<input id="book-author" placeholder="Bookinator will look for this too" /></label>
+          </div>
+          <fieldset class="book-mark-editor">
+            <legend>Book icon <small>Optional — the title initial is the fallback</small></legend>
+            <div class="book-mark-preview" id="book-mark-preview" role="button" tabindex="0" aria-label="Current book icon. Drop or paste an image, or press to choose one." title="Drop or paste an image here, or press to choose one">B</div>
+            <div class="book-mark-controls">
+              <label class="mark-text-label"><span class="sr-only">Short mark</span><input id="book-mark-text" maxlength="24" placeholder="ABC" aria-label="Up to three characters" /></label>
+              <div class="mark-actions">
+                <button type="button" class="emoji-trigger" id="choose-emoji" aria-label="Choose emoji" title="Choose emoji">☺</button>
+                <label class="image-mark-well" id="image-mark-well"><input id="book-mark-image" type="file" accept="image/*" /><span>Choose image</span></label>
+                <button type="button" id="use-title-mark">✨ Use title</button>
+              </div>
+              <div class="mark-appearance">
+                <label class="book-color-control"><input id="book-mark-color" type="color" value="#071f4a" /><span>Book color</span></label>
+                <label class="outline-control"><input id="book-mark-outline" type="checkbox" checked /> Add outline</label>
+              </div>
+            </div>
+            <p class="book-mark-image-status" id="book-mark-image-status" aria-live="polite">Drop, paste, or choose an image · ⌘V on macOS, Ctrl+V on Windows and Linux</p>
+          </fieldset>
+          <footer><button type="button" data-close="add-dialog">Cancel</button><button class="primary-button" id="save-book" type="submit">Add to library</button></footer>
+        </form>
+      </section>
+    </div>
+
+    <div class="backdrop" id="system-dialog" hidden>
+      <section class="standard-dialog system-dialog" role="dialog" aria-modal="true" aria-labelledby="system-title">
+        <button class="dialog-close" data-close="system-dialog" aria-label="Close">×</button>
+        <header class="dialog-heading"><div><p class="context">Local reading engine</p><h2 id="system-title">Machine</h2><p id="system-subtitle">Server and components on this computer.</p></div></header>
+        <nav class="system-dialog-tabs" aria-label="Local system views">
+          <button type="button" data-system-panel="machine" aria-current="page">Machine</button>
+          <button type="button" data-system-panel="models">Models</button>
+        </nav>
+        <section id="machine-panel" class="system-panel">
+          <div id="system-checks" class="system-checks"><p>Checking the machine…</p></div>
+        </section>
+        <section id="models-panel" class="system-panel" hidden>
+          <div class="models-queue-status" id="models-queue-status" aria-live="polite"><i aria-hidden="true"></i><span>Checking the analysis queue…</span></div>
+          <div id="model-checks" class="system-checks"><p>Checking local models…</p></div>
+          <section class="model-workshop" id="model-workshop" hidden>
+          <header><div><strong>Model workshop</strong><small>Choose which local mind handles quick manuscript intake.</small></div></header>
+          <div class="hardware-advice" id="hardware-advice"></div>
+          <div class="role-models" id="role-models"></div>
+          <details class="model-catalog"><summary>Recommended model catalog</summary><div id="model-catalog"></div></details>
+          <details class="model-catalog"><summary>Installed Ollama models</summary><div id="installed-models"></div></details>
+          <div id="model-message" class="model-install-status" role="status" aria-live="polite" hidden></div>
+          <section class="manual-model-install">
+            <header><strong>Install another Ollama model</strong><small>Use an exact name from the Ollama library. Recommended models install directly from the catalog above.</small></header>
+            <div class="model-pull"><input id="model-name" placeholder="For example, qwen2.5:7b" /><button id="pull-model" type="button">Install model</button></div>
+          </section>
+          </section>
+        </section>
+      </section>
+    </div>
+
+    <div class="backdrop" id="reader-model-dialog" hidden>
+      <section class="standard-dialog reader-model-dialog" role="dialog" aria-modal="true" aria-labelledby="reader-model-title">
+        <button class="dialog-close" data-close="reader-model-dialog" aria-label="Close">×</button>
+        <header class="dialog-heading"><div><p class="context">This book · Chapter summaries</p><h2 id="reader-model-title">Choose the chapter reader</h2><p id="reader-model-description">This choice applies only to this book’s chapter-summary task.</p></div></header>
+        <label class="reader-model-select">Chapter reader<select id="book-reader-model"></select></label>
+        <p class="reader-model-note" id="reader-model-note"></p>
+        <section class="reader-model-install">
+          <header><strong>Need another model?</strong><small>Install it locally with Ollama, then use it for this book.</small></header>
+          <div class="model-pull"><input id="book-reader-model-name" placeholder="For example, qwen3.5:35b"><button id="install-book-reader-model" type="button">Install &amp; use</button></div>
+        </section>
+        <p id="reader-model-message" aria-live="polite"></p>
+        <footer><button type="button" data-close="reader-model-dialog">Done</button></footer>
+      </section>
+    </div>
+
+    <div class="backdrop" id="reading-details-dialog" hidden>
+      <section class="standard-dialog reading-details-dialog" role="dialog" aria-modal="true" aria-labelledby="reading-details-title">
+        <button class="dialog-close" data-close="reading-details-dialog" aria-label="Close">×</button>
+        <header class="dialog-heading"><div><p class="context" id="reading-details-context">Saved model run</p><h2 id="reading-details-title">Reading details</h2><p id="reading-details-subtitle"></p></div></header>
+        <article id="reading-details-body"></article>
+        <footer><button type="button" data-close="reading-details-dialog">Done</button><button class="secondary-button" id="restart-pipeline-stage" type="button" hidden>Restart step</button><button class="primary-button" id="refresh-analysis-result" type="button" hidden>Refresh</button></footer>
+      </section>
+    </div>
+
+    <div class="backdrop emoji-backdrop" id="emoji-dialog" hidden>
+      <section class="standard-dialog emoji-dialog" role="dialog" aria-modal="true" aria-labelledby="emoji-title">
+        <button class="dialog-close" data-close="emoji-dialog" aria-label="Close">×</button>
+        <header class="dialog-heading"><div><p class="context">Book icon</p><h2 id="emoji-title">Choose an emoji</h2><p>Or type any emoji or Unicode graphic in the text field.</p></div></header>
+        <div class="emoji-grid" id="emoji-grid" aria-label="Suggested emoji"></div>
+      </section>
+    </div>
+
+    <div class="backdrop" id="confirmation-dialog" hidden>
+      <section class="standard-dialog confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
+        <button class="dialog-close" data-confirm-cancel aria-label="Close">×</button>
+        <header class="dialog-heading"><div><p class="context" id="confirmation-context">Confirm action</p><h2 id="confirmation-title">Are you sure?</h2></div></header>
+        <p id="confirmation-message"></p>
+        <footer><button type="button" data-confirm-cancel>Cancel</button><button class="primary-button" id="confirmation-accept" type="button">Continue</button></footer>
+      </section>
+    </div>
+
+    <div class="backdrop" id="chapter-source-dialog" hidden>
+      <section class="standard-dialog chapter-source-dialog" role="dialog" aria-modal="true" aria-labelledby="chapter-source-title">
+        <button class="dialog-close" data-close="chapter-source-dialog" aria-label="Close">×</button>
+        <header class="dialog-heading"><div><p class="context" id="chapter-source-context">Saved manuscript text</p><h1 id="chapter-source-title">Chapter</h1><p id="chapter-source-subtitle"></p></div><div class="chapter-reader-controls" aria-label="Reading controls"><button type="button" data-chapter-font="decrease" aria-label="Decrease chapter text size" title="Decrease text size"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18 8 6l4.5 12M5.2 13.5h5.6M15 12h6"/></svg></button><button type="button" data-chapter-font="increase" aria-label="Increase chapter text size" title="Increase text size"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18 8 6l4.5 12M5.2 13.5h5.6M18 9v6M15 12h6"/></svg></button></div></header>
+        <nav class="chapter-source-jumps" id="chapter-source-jumps" aria-label="Chapter sections" hidden></nav>
+        <article class="chapter-source-body" id="chapter-source-body"><p>Loading chapter…</p></article>
+        <footer><button type="button" data-close="chapter-source-dialog">Done</button></footer>
+      </section>
+    </div>
+
+    <script src="/app.js?v=workspace-map-64" type="module"></script>
+  </body>
+</html>

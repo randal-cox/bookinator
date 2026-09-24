@@ -1,0 +1,38 @@
+[
+  {
+    "id": "why-bookinator",
+    "title": "Why Bookinator",
+    "type": "Presentation",
+    "status": "Ready to present",
+    "description": "A 20-minute, 16-slide case for local, evidence-linked manuscript intelligence for authors and editors.",
+    "tags": ["authors", "editors", "continuity", "privacy", "free forever"],
+    "actions": [{"label":"Audience deck","url":"../pitch-authors-editors/","primary":true},{"label":"Presenter notes","url":"../pitch-authors-editors/presenter.html"}]
+  },
+  {
+    "id": "one-pager",
+    "title": "Bookinator overview",
+    "type": "Brief",
+    "status": "Ready to share",
+    "description": "A one-page explanation of the problem, product, author and editor use cases, privacy promise, and free-forever commitment.",
+    "tags": ["overview", "leave-behind", "authors", "editors"],
+    "actions": [{"label":"Read overview","url":"../briefs/one-pager.html","primary":true}]
+  },
+  {
+    "id": "elevator-pitches",
+    "title": "Elevator pitches",
+    "type": "Messaging brief",
+    "status": "Ready to use",
+    "description": "One-sentence, 20-second, one-minute, and audience-specific explanations with language guardrails.",
+    "tags": ["messaging", "authors", "editors", "privacy"],
+    "actions": [{"label":"Open pitches","url":"../briefs/elevator-pitches.html","primary":true}]
+  },
+  {
+    "id": "wish-list",
+    "title": "Things we should want",
+    "type": "Roadmap",
+    "status": "Working direction",
+    "description": "A prioritized product, evidence, community, and communications roadmap—with a list of ambitions to refuse.",
+    "tags": ["roadmap", "evaluation", "community", "stewardship"],
+    "actions": [{"label":"Open roadmap","url":"../briefs/wish-list.html","primary":true}]
+  }
+]

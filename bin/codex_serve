@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Codex must never share either the canonical port or the user's live data.
+# Override CODEX_BOOKINATOR_PORT/DATA_DIR only to choose another isolated pair.
+export PORT="${CODEX_BOOKINATOR_PORT:-4891}"
+export BOOKINATOR_DATA_DIR="${CODEX_BOOKINATOR_DATA_DIR:-$project_dir/.bookinator-codex}"
+export NO_OPEN="${NO_OPEN:-1}"
+
+exec "$project_dir/bin/serve" "$@"

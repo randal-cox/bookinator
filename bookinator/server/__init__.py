@@ -1,0 +1,2 @@
+"""Local Bookinator web server."""
+

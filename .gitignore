@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Local manuscripts, models, settings, and analysis state.
+.bookinator/
+.bookinator-codex/
+
+# Generated exports and visual-QA intermediates.
+output/
+tmp/

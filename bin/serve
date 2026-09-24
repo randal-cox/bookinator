@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd "$(dirname "$0")/.." && pwd)"
+project_name="$(basename "$project_dir")"
+highlander=0
+
+case "${1:-}" in
+  --highlander)
+    highlander=1
+    shift
+    ;;
+  --help|-h)
+    printf 'Usage: ./bin/serve [--highlander]\n\n'
+    printf '  --highlander  Stop the Bookinator server on the canonical port, then replace it.\n'
+    exit 0
+    ;;
+esac
+
+if [[ $# -gt 0 ]]; then
+  printf 'Unknown option: %s\nRun ./bin/serve --help for usage.\n' "$1" >&2
+  exit 2
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  printf 'Bookinator needs Python 3. Install it, then run ./bin/serve again.\n' >&2
+  exit 1
+fi
+
+if [[ -n "${PORT:-}" ]]; then
+  port="$PORT"
+else
+  port="$(python3 - "$project_name" <<'PY'
+import sys
+import zlib
+
+print(4800 + zlib.crc32(sys.argv[1].encode()) % 400)
+PY
+)"
+fi
+
+if [[ "$highlander" -eq 1 ]]; then
+  bookinator_pids="$(pgrep -f 'python.*-m bookinator\.server' 2>/dev/null || true)"
+  while IFS= read -r listener_pid; do
+    [[ -n "$listener_pid" ]] || continue
+    listener_command="$(ps -p "$listener_pid" -o command= 2>/dev/null || true)"
+    listener_cwd="$(/usr/sbin/lsof -a -p "$listener_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    if [[ "$listener_command" != *"bookinator.server"* || "$listener_cwd" != "$project_dir" ]]; then
+      continue
+    fi
+    printf 'Replacing Bookinator server PID %s…\n' "$listener_pid"
+    kill "$listener_pid"
+    for _ in {1..50}; do
+      kill -0 "$listener_pid" 2>/dev/null || break
+      sleep .1
+    done
+    if kill -0 "$listener_pid" 2>/dev/null; then
+      printf 'Bookinator PID %s did not stop after 5 seconds; refusing to force-kill it.\n' "$listener_pid" >&2
+      exit 1
+    fi
+  done <<< "$bookinator_pids"
+fi
+
+listener_pids="$(/usr/sbin/lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+if [[ -n "$listener_pids" ]]; then
+  printf 'Bookinator is already running at http://127.0.0.1:%s/\n' "$port" >&2
+  printf 'Run ./bin/serve --highlander to replace it, or set PORT explicitly to run a second copy.\n' >&2
+  exit 1
+fi
+
+cd "$project_dir"
+python3 -m bookinator.server --host 127.0.0.1 --port "$port" &
+server_pid=$!
+cleanup() { kill "$server_pid" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
+
+url="http://127.0.0.1:$port/"
+for _ in {1..80}; do
+  if curl --silent --fail --output /dev/null "$url/api/health"; then
+    printf '\n  Bookinator is awake at %s\n' "$url"
+    printf '  Your manuscripts stay on this computer. Press Ctrl-C to stop.\n\n'
+    if [[ "$(uname -s)" == "Darwin" && "${NO_OPEN:-0}" != "1" ]]; then
+      if ! /usr/bin/osascript - "$url" <<'APPLESCRIPT'
+on run argv
+  set targetURL to item 1 of argv
+  tell application "Safari"
+    activate
+    if (count of windows) is 0 then
+      make new document with properties {URL:targetURL}
+    else
+      tell front window
+        set current tab to (make new tab with properties {URL:targetURL})
+      end tell
+    end if
+  end tell
+end run
+APPLESCRIPT
+      then
+        /usr/bin/open -a Safari "$url" || printf 'Open %s in Safari.\n' "$url" >&2
+      fi
+    fi
+    if wait "$server_pid"; then
+      server_status=0
+    else
+      server_status=$?
+    fi
+    if [[ "$server_status" -eq 143 ]]; then
+      printf '\nBookinator was replaced by another local launcher (SIGTERM).\n' >&2
+      printf 'If you did not run ./bin/serve --highlander, check which terminal or tool restarted it.\n' >&2
+    elif [[ "$server_status" -ne 0 && "$server_status" -ne 130 ]]; then
+      printf '\nBookinator server exited unexpectedly with status %s.\n' "$server_status" >&2
+    fi
+    exit "$server_status"
+  fi
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    wait "$server_pid"
+    exit $?
+  fi
+  sleep .1
+done
+
+printf 'Bookinator did not become ready at %s\n' "$url" >&2
+exit 1

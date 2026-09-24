@@ -1,0 +1,113 @@
+{
+  "schema": "bookinator-demo-corpus-v1",
+  "jurisdiction": "United States",
+  "rightsNote": "Public-domain status is edition- and jurisdiction-specific. Verify the recorded source before redistribution.",
+  "books": [
+    {
+      "slug": "maltese-falcon",
+      "title": "The Maltese Falcon",
+      "author": "Dashiell Hammett",
+      "year": 1930,
+      "genre": "noir mystery",
+      "source": "https://www.gutenberg.org/ebooks/77600",
+      "sourceId": "gutenberg:77600",
+      "fixtureFormat": "epub",
+      "fixtureKind": "source",
+      "artifacts": [
+        {
+          "kind": "source",
+          "format": "epub",
+          "downloadUrl": "https://www.gutenberg.org/ebooks/77600.epub3.images",
+          "path": "sources/maltese-falcon/the-maltese-falcon.epub",
+          "acquired": "2026-09-23",
+          "bytes": 273497,
+          "sha256": "10f3e31d7515924b93d8a0d7fadc858b258f35dca1a2b5d1093587f612e7ea79"
+        }
+      ]
+    },
+    {"slug":"murder-at-the-vicarage","title":"Murder at the Vicarage","author":"Agatha Christie","year":1930,"genre":"village mystery","source":"https://www.gutenberg.org/ebooks/78220","sourceId":"gutenberg:78220","fixtureFormat":"txt","fixtureKind":"source"},
+    {"slug":"strong-poison","title":"Strong Poison","author":"Dorothy L. Sayers","year":1930,"genre":"detective courtroom","source":"https://www.gutenberg.org/ebooks/78157","sourceId":"gutenberg:78157","fixtureFormat":"epub","fixtureKind":"source"},
+    {"slug":"roman-hat-mystery","title":"The Roman Hat Mystery","author":"Ellery Queen","year":1929,"genre":"fair-play mystery","source":"https://www.gutenberg.org/ebooks/76339","sourceId":"gutenberg:76339","fixtureFormat":"pdf","fixtureKind":"source"},
+    {"slug":"seven-dials-mystery","title":"The Seven Dials Mystery","author":"Agatha Christie","year":1929,"genre":"conspiracy mystery","source":"https://www.gutenberg.org/ebooks/75288","sourceId":"gutenberg:75288","fixtureFormat":"epub","fixtureKind":"source"},
+    {
+      "slug": "sound-and-the-fury",
+      "title": "The Sound and the Fury",
+      "author": "William Faulkner",
+      "year": 1929,
+      "genre": "literary modernism",
+      "source": "https://www.gutenberg.org/ebooks/75170",
+      "sourceId": "gutenberg:75170",
+      "fixtureFormat": "epub",
+      "fixtureKind": "source",
+      "artifacts": [
+        {
+          "kind": "source",
+          "format": "epub",
+          "downloadUrl": "https://www.gutenberg.org/ebooks/75170.epub3.images",
+          "path": "sources/sound-and-the-fury/the-sound-and-the-fury.epub",
+          "acquired": "2026-09-23",
+          "bytes": 332888,
+          "sha256": "317d6f3631071a87ede87bbb71e0fa49325db9ef5cd2bbc57a19305ef3dd0ed7"
+        }
+      ]
+    },
+    {
+      "slug": "passing",
+      "title": "Passing",
+      "author": "Nella Larsen",
+      "year": 1929,
+      "genre": "psychological literary fiction",
+      "source": "https://commons.wikimedia.org/wiki/File:Passing_(1929).pdf",
+      "sourceId": "wikimedia:Passing_(1929).pdf",
+      "fixtureFormat": "pdf",
+      "fixtureKind": "source",
+      "artifacts": [
+        {
+          "kind": "source",
+          "format": "pdf",
+          "downloadUrl": "https://upload.wikimedia.org/wikipedia/commons/9/93/Passing_%281929%29.pdf",
+          "path": "sources/passing/passing-1929.pdf",
+          "acquired": "2026-09-23",
+          "bytes": 9147174,
+          "sha256": "f522675d6250dd885a99d667e4afdd1fc07909021dc2e4d0ec9f472e2e5c2999"
+        }
+      ]
+    },
+    {"slug":"well-of-loneliness","title":"The Well of Loneliness","author":"Radclyffe Hall","year":1928,"genre":"literary queer fiction","source":"https://www.gutenberg.org/ebooks/73042","sourceId":"gutenberg:73042","fixtureFormat":"txt","fixtureKind":"source"},
+    {"slug":"farewell-to-arms","title":"A Farewell to Arms","author":"Ernest Hemingway","year":1929,"genre":"war romance","source":"https://www.gutenberg.org/ebooks/75201","sourceId":"gutenberg:75201","fixtureFormat":"docx","fixtureKind":"derived-from-source-text"},
+    {
+      "slug": "dunwich-horror",
+      "title": "The Dunwich Horror",
+      "author": "H. P. Lovecraft",
+      "year": 1929,
+      "genre": "cosmic horror",
+      "source": "https://www.gutenberg.org/ebooks/50133",
+      "sourceId": "gutenberg:50133",
+      "fixtureFormat": "md",
+      "fixtureKind": "derived-from-source-text",
+      "artifacts": [
+        {
+          "kind": "source",
+          "format": "txt",
+          "downloadUrl": "https://www.gutenberg.org/cache/epub/50133/pg50133.txt",
+          "path": "sources/dunwich-horror/the-dunwich-horror.txt",
+          "acquired": "2026-09-23",
+          "bytes": 123217,
+          "sha256": "134246cc542e3355d06f5e4e7fe157726ab54de8b1b19dd8c4985cf27384cb02"
+        },
+        {
+          "kind": "derived",
+          "format": "md",
+          "path": "fixtures/the-dunwich-horror.md",
+          "derivedFrom": "sources/dunwich-horror/the-dunwich-horror.txt",
+          "derivation": "Removed the Project Gutenberg wrapper, added YAML provenance, and converted numbered sections to Markdown headings.",
+          "created": "2026-09-23",
+          "bytes": 103571,
+          "sha256": "7dcb5b7a07e470d27ea9c13731855c4704774c24cfc12b1f1e583d0e26fef2d1"
+        }
+      ]
+    },
+    {"slug":"gladiator","title":"Gladiator","author":"Philip Wylie","year":1930,"genre":"proto-superhero science fiction","source":"https://www.gutenberg.org/ebooks/42914","sourceId":"gutenberg:42914","fixtureFormat":"txt","fixtureKind":"source"},
+    {"slug":"last-and-first-men","title":"Last and First Men","author":"Olaf Stapledon","year":1930,"genre":"future history science fiction","source":"https://www.gutenberg.org/ebooks/79003","sourceId":"gutenberg:79003","fixtureFormat":"epub","fixtureKind":"source"}
+  ]
+}

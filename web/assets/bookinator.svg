@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Bookinator">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#071f4a" stroke="#28cce6" stroke-width="3"/>
+  <path d="M12 17c7-2 14-1 20 5v29c-6-6-13-7-20-5V17Zm40 0c-7-2-14-1-20 5v29c6-6 13-7 20-5V17Z" fill="none" stroke="#59ecf4" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M15 33c6 1 9-5 14-3 2 .7 3 2 5 3.2" fill="none" stroke="#59ecf4" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M43 34c2 .5 4 .1 6-1" fill="none" stroke="#59ecf4" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="39" cy="34" r="4" fill="#071f4a" stroke="#f2a31b" stroke-width="3"/>
+</svg>
+
