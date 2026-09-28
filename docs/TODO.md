@@ -1,27 +1,544 @@
 # Bookinator TODO
 
-## Next milestone: model-free one-book export
+## Current milestone: Reviewer Tools
 
-Build the static, interactive one-book publication described in
-[`MODEL-FREE-EXPORT-TODO.md`](MODEL-FREE-EXPORT-TODO.md) **before Reviewer
-annotations and the Author editing panel**. This is now a core distribution
-surface, not a secondary export option: it lets one capable Bookinator machine
-produce an analysis that any author, editor, writing group, or visitor to
-`book.inator.com` can inspect without models or expensive hardware.
+The 0.2.0 working release name is **Reviewer Tools**. Sharper questions,
+in-manuscript annotation, reviewer sign-off, portable human comments, and the
+evidence-anchored editorial first pass all serve the same center of gravity:
+giving a human reviewer useful proposals, durable judgment, and an attributable
+author-facing handoff.
 
-The private handoff and public-domain gallery must use the same generated
-artifact. Start with a locally openable directory/ZIP, a canonical versioned
-report manifest, explicit section/evidence selection, zero network requests,
-and honest completeness/provenance. The first public website collection should
-host unchanged exports for varied public-domain books so visitors can see real
-Bookinator results immediately. `book.inator.com` should wrap discovery in its
-normal navigation, catalog, and visual language so these read as ordinary site
-destinations; the linked one-book artifact must still work independently when
-downloaded. Private exports contain selected evidence snippets, never the whole
-book or enough overlapping text to reconstruct it.
+Make Bookinator ask specific, editorially useful questions in chapter summaries
+and dossiers, then give a human reviewer the smallest real workflow needed to
+answer the machine back. Questions should identify their editorial family,
+the manuscript evidence that triggered them, why they matter, and whether the
+text appears to promise an answer. Reject generic prompts that could apply to
+any novel.
+
+The proto-Reviewer is deliberately narrower than the eventual editing suite:
+read canonical chapter text, select an exact passage, attach a categorized and
+prioritized comment, reopen it later, resolve it, or permanently delete a
+debugging mistake. Keep human judgment visually and structurally distinct from model
+output. Use **Frankenstein** as the first clean-book stress test for both the
+new prompt contract and the annotation anchors.
+
+Close this milestone with deterministic whole-book rollups for **Tags** and
+**Smells**. Tags summarize frequency, strength, family, and chapter coverage;
+Smells summarize undismissed issue types, counts, severity, and chapter reach.
+These are immediate overviews of saved chapter work, not additional model jobs. Emotions, Tags, and Smells should each expose a compact, disclosure-based whole-book rollup as soon as any chapter results exist.
+
+### Immediate transition: two model roles
+
+Bookinator now has two global LLM assignments: **Primary reader** for
+substantive manuscript analysis and **Fast intake & utilities** for other cheap,
+structured work. Remove per-book and per-stage model controls from Analysis;
+the model recorded on each completed run remains visible as provenance. Keep
+specialist non-LLM dependencies, such as the emotion classifier, explicit in
+Machine without pretending they are interchangeable reader roles.
+
+The model-free one-book publication described in
+[`MODEL-FREE-EXPORT-TODO.md`](MODEL-FREE-EXPORT-TODO.md) remains the distribution
+follow-through. It should let one capable Bookinator machine produce an
+analysis that authors and editors can inspect and annotate later without local
+models or expensive hardware.
+
+### Carmilla release audit
+
+The September 27 full run completed every chapter-scoped pass and all three
+model rollups across the Prologue and sixteen numbered chapters. Its saved
+evidence anchors are healthy: every reported Smell and every rejected LLM
+Review candidate resolves to exact chapter text. The run also exposed the
+remaining release work rather than silently qualifying as a pass:
+
+- Questions & Payoffs was interrupted after it entered `running`; retry it and
+  verify that both the inference row and overall pipeline settle honestly.
+- Rebuild the EPUB structure with the trailing Gutenberg “Other books by”
+  catalogue excluded. The current parser also no longer repeats the next
+  chapter title at the previous chapter boundary; keep both cases covered by
+  extraction regression tests.
+- Validate the new deterministic narrative-person guard across a broader mix
+  of first-, second-, third-, and embedded-document narration. The taxonomy now
+  reserves `mystery` for genre affinity and uses `withheld_information` for the
+  distinct reader-dynamics concept.
+- Calibrate the skeptical LLM Review pass. It rejected all 30 source-anchored
+  candidates and promoted none. That may be defensible for a canonical work,
+  but the uniform outcome and repeatedly protective “intentional gothic style”
+  rationale need human inspection before becoming the expected threshold.
+- Normalize model-emitted Smell labels at storage or presentation time. This
+  run produced many spellings of the same clause-load family; detector rule
+  provenance must remain available underneath the canonical editor-facing name.
+- Complete the human portion of the release gate: add a real Carmilla
+  annotation, sign off as the reviewer, export and inspect HTML and PDF, then
+  test a `.bookinator` backup and collision-safe restore.
+
+### Near-term responsiveness and regression loop
+
+- Profile the roughly three-second frozen interval when opening a book. Keep
+  initial navigation and shell rendering immediate; hydrate large pipeline,
+  chapter, annotation, and report payloads asynchronously, and retain the
+  current page instead of presenting an apparently hung interface. Measure
+  server serialization, JSON transfer and parsing, pipeline-ledger migration,
+  artifact rehydration, and DOM rendering separately before choosing a fix.
+- Keep Carmilla as the serious end-to-end Reviewer Tools regression, but add a
+  much cheaper chaptered smoke-test book for ordinary development. Prefer a
+  short work with several real divisions so it still exercises chapter
+  interleaving, cumulative context, rollups, Questions & Payoffs, LLM Review,
+  exports, and restore—not a one-section essay that merely finishes quickly.
+- Record elapsed time and model-call count for both tiers. The smoke test should
+  catch workflow breakage quickly; Carmilla remains the slower quality and
+  ambiguity test before release.
+- Keep manuscript identity tiered. Trust complete EPUB/DOCX/YAML title and
+  author metadata immediately; do not wake a model to repeat authoritative
+  fields. For PDFs and incomplete sources, deterministically collect short
+  candidate blocks from document metadata, filenames, title-page typography,
+  opening pages, and copyright/byline patterns. The later Jev-compatible
+  attention router can cheaply rank those blocks with narrow questions such as
+  “is this likely to contain the work title?” and “is this likely to name the
+  author?” before the fast utility model extracts only from the shortlist.
+  Preserve the candidate and confidence trail so a quick answer remains
+  inspectable rather than magical.
+
+## Milestone capstone: evidence-anchored editorial first pass
+
+Use the Frankenstein stress test to close the better-questions and
+proto-Reviewer work, then add an explicitly machine-authored editorial pass as
+the final large piece of this milestone.
+This is the integrated final analysis step: Qwen reads each canonical chapter
+alongside its saved summary, dossier, emotions, Tags, and undismissed Smells,
+then proposes a small number of useful editorial annotations. It may correctly
+return no proposals. The goal is discernment, not coverage.
+
+Keep this feature safe for editors and genuinely useful for authors:
+
+- Store proposals separately from human annotations. Label them visibly as
+  **Proposed by Qwen** with model, prompt version, input versions, and run time.
+  They must never inherit a reviewer name, satisfy reviewer sign-off, or appear
+  in an author handoff merely because the model emitted them.
+- Require an exact quotation that exists in the canonical chapter. Resolve it
+  to chapter identity, character offsets, original pages when available, and a
+  surrounding-text fingerprint. Reject invented, ambiguous, or unanchorable
+  quotations before saving the proposal.
+- Ask for a bounded editorial record: category, priority, concise comment,
+  actionable revision question or suggestion, why it matters, and which saved
+  signals informed it. Do not dump emotions, Tags, or Smells back at the user;
+  synthesize them only when they support a real observation.
+- Default to roughly three to five strong proposals per chapter and permit
+  fewer. Repetition, generic praise, plot summary, style policing without
+  consequence, and paraphrases of deterministic Smells are failures.
+- Put proposals in a review queue where a human can accept, edit, reject,
+  challenge, or leave them undecided. Acceptance creates a normal editorial
+  annotation that preserves its machine origin and the reviewer’s later edits;
+  rejection remains durable calibration evidence rather than disappearing.
+- Make reruns versioned and non-destructive. Changed source text or changed
+  upstream analysis marks proposals stale; it does not rewrite accepted human
+  comments or resurrect rejected advice.
+- Treat this as an inspectable per-chapter Analysis pass with ordinary queue,
+  progress, retry, failure, and timing behavior. It is not an Inference job and
+  it must not block the existing evidence-producing passes.
+- Evaluate the first pass on Frankenstein with a short human-written rubric:
+  anchor correctness, specificity, actionability, novelty beyond existing
+  Smells, false-positive burden, and whether an editor would keep the note.
+
+Product language should frame this as a **first reader, not a final editor**.
+For authors it can provide a serious editorial starting point; for editors it
+can triage passages and assemble candidates without claiming their judgment.
+The distinction is structural, not merely a disclaimer: machine proposals,
+human decisions, and exported advice remain separately attributable.
 
 - Extend the new full-library progress view with per-pass ETA learning and a more detailed inspectable ordering forecast. High, Normal, and Low books auto-run; Shelved books remain browseable but stay out of the automatic queue.
 - Instrument manuscript preparation and chapter-map construction with high-resolution elapsed timing. Preserve sub-second precision (for example, 1.2 ms) in the saved pipeline ledger and timing charts rather than rounding fast structural work to zero.
+
+## Almost urgent: GLiNER Entity Signals
+
+Do not bury GLiNER inside the later attention-router experiment. Prototype it
+as a useful pipeline in its own right as soon as the Reviewer Tools release gate
+is clean. A fast, source-anchored entity inventory has immediate value even
+before Qwen consumes it, and it can become common evidence for dossiers,
+Connections, continuity, character work, questions, and LLM Review.
+
+- Start with Apache-2.0 `urchade/gliner_small-v2.1` for English manuscripts and
+  bake it off against `gliner_medium-v2.1`. Prefer the small model if entity
+  recall is acceptably close; the point of this pass is cheap, early evidence.
+  Evaluate the supported ONNX CPU path on Apple Silicon as well as ordinary
+  PyTorch before choosing the runtime.
+- Make **Entity Signals** an inspectable per-chapter Analysis stage with a
+  deterministic whole-book rollup. Save every mention's canonical text span,
+  chapter, character offsets, original pages when available, requested label,
+  raw label, confidence, model revision, threshold, and run timing.
+- Begin with a versioned fiction vocabulary: person, named animal, group,
+  place, institution, creature, artifact, significant object, document or work,
+  event, supernatural force, technology, and fictional substance. Test labels
+  empirically; similar labels can compete, so do not expand the vocabulary
+  casually or silently.
+- Present useful results before identity resolution: grouped mention lists,
+  frequency, first and last appearance, chapter coverage, and links to every
+  source span. Clearly call these **mentions**, not canonical characters or
+  facts. Surface overlapping or competing labels rather than pretending the
+  model settled them.
+- Feed the evidence spans into chapter dossiers immediately, but ask Qwen to
+  perform the harder work: aliases, pronouns, identity, merge/split decisions,
+  relationships, chronology, narrative importance, and fact reconciliation.
+  Compare dossier completeness, hallucinated entities, prompt size, and elapsed
+  time with and without the Entity Signals packet.
+- Add a later whole-book reconciliation step that proposes canonical entities
+  from the mentions without destroying the underlying spans. Human merge,
+  split, rename, and ignore decisions must survive reruns and become
+  calibration evidence.
+- Keep installation optional, visible in Machine, and explicit. Never silently
+  download model weights. If GLiNER is unavailable, dossiers retain their
+  present Qwen-only path.
+- Validate first on Shadow, The Dunwich Horror, Carmilla, Frankenstein, and The
+  Maltese Falcon. Score span correctness, label usefulness, missed important
+  entities, duplicate surface forms, runtime, and downstream dossier value—not
+  generic NER benchmark accuracy.
+
+## Future-enabling refactor: replaceable compute workers
+
+This is the planned **0.3.0 — The Engine Room** milestone. Finish and release
+Reviewer Tools first, then separate the worker process, durable control plane,
+and web controller before extracting any pipeline implementation into Inator.
+Bookinator must prove the process boundary and reconnect behavior; Inator gets
+the resulting contract, not the current server-owned thread machinery.
+
+Bookinator is local-first today, but its useful audience is artificially limited
+by the cost and speed of local model inference. Preserve local processing as the
+default and add a clean compute-provider boundary so the same UI can eventually
+use one local worker, several machines on a LAN, rented GPU capacity, or a
+hosted Bookinator service. **This section does not commit Bookinator to AWS or
+make remote processing a near-term milestone.** The intermediate refactor is
+valuable on its own because it separates computation from presentation, makes
+crash recovery explicit, and permits safe parallelism.
+
+### Three useful Bookinators, not one oversized requirement
+
+- Treat deep analysis, light analysis, and review as distinct hardware tiers.
+  **Deep analysis** uses the primary reader for summaries, dossiers, editorial
+  review, and whole-book synthesis and may require a modern high-memory machine.
+  **Light analysis** runs deterministic detectors and specialist models for
+  chapter structure, statistics, emotions, Smells candidates, entity mentions,
+  taxonomy hypotheses, and other bounded signals on more ordinary hardware.
+  **Review and editing** opens an already-complete `.bookinator` package with
+  no model installation required. Product requirements and setup guidance must
+  say which tier each capability belongs to rather than claiming one
+  intimidating minimum for the whole application.
+- Give Light analysis its own honest completion contract and availability
+  disclosure. Missing Qwen artifacts are not failures: label the result as a
+  specialist-only analysis and state which deeper readings were not run. A
+  later Deep analysis machine must be able to add the remaining stages without
+  discarding the cheap work.
+- Keep the portable Bookinator object as the handoff between those tiers. It
+  must contain the source, analysis, assets, provenance, and reviewer state
+  needed for another installation to open, inspect, annotate, and export the
+  book without recreating expensive analysis.
+- Make the directory worker below the medium-term bridge: a headless Python
+  process uses the same durable library and job files as the local UI, keeps
+  processing after the browser closes, and exposes progress when the browser
+  reconnects. The browser is a controller and observer, not the owner of the
+  worker lifetime.
+- Give the UI a conspicuous global Pause control for that worker, with honest
+  active, pausing, paused, and draining states. Before enabling unattended use
+  for a broad audience, add explicit opt-in/autostart policy, workload profiles,
+  battery and thermal awareness, quiet hours, and clear explanations of CPU,
+  memory, and GPU use so background analysis never feels like malware.
+
+### Near-term shared Inator background runner
+
+- Build a small double-clickable companion that owns the background service
+  without pretending to be the full product UI. On macOS it should fit naturally
+  as a menu-bar application; equivalent Windows and Linux shells may use the
+  system tray. Its compact surface shows current work, queue depth, learned ETA,
+  recent history, Start/Pause, resource policy, diagnostics, and **Open
+  Bookinator**.
+- Make background capability declarative in the shared Inator shell. Products
+  without workers omit the controls; products with workers provide service
+  identity, queue/status endpoints, workload profiles, and launch action rather
+  than forking another bespoke launcher.
+- Install and manage the platform-native service mechanism (LaunchAgent on
+  macOS, an appropriate user service on Windows/Linux). Never equate “installed”
+  with “allowed to monopolize the machine”: default to conservative concurrency,
+  lower process priority, yield between safe pipeline units, and offer idle-only,
+  battery, thermal-pressure, quiet-hours, and manual-pause policies.
+- Treat model calls as bounded units that may not be safely preemptible. A Pause
+  request should stop before the next unit, describe whether the current call is
+  draining or being cancelled, and optionally unload idle models. Do not claim
+  instantaneous suspension when the provider cannot guarantee it.
+
+### Machine-learned completion estimates
+
+- Replace one flat average per stage with a local performance model built from
+  this machine's completed attempts. Estimate fixed overhead plus throughput per
+  input character/token for each stage, model, prompt/schema version, and
+  provider; use robust recent samples so one crash or pathological chapter does
+  not distort every book.
+- Calculate both whole-book and **work remaining** estimates from the actual
+  unfinished chapter/chunk input sizes. Include current elapsed work and serial
+  rollups, exclude human reviewer time, and label confidence honestly while the
+  machine is still learning.
+- Show the estimate immediately after structural intake so the library can help
+  choose demo-sized books before expensive work starts. Preserve the underlying
+  per-stage estimate and confidence interval for inspection instead of exposing
+  one falsely precise finish time.
+
+The product promise worth preserving is compelling: an author with an ordinary
+computer could optionally submit a book, watch durable results arrive within
+minutes, and pay a bounded amount on the order of a few dollars rather than own
+an expensive inference machine. A deliberately aggressive future offer might
+be “process a book in minutes for about $10,” using several large workers when
+the workload parallelizes cleanly. Treat that as a benchmark and product
+hypothesis—not a price claim—until real books establish tokens, elapsed time,
+startup overhead, failure rates, and cost.
+
+### Architectural seam
+
+- Refactor every model-backed pipeline step to depend on a small compute
+  provider protocol rather than call Ollama directly: submit an immutable job,
+  observe it, cancel it, and retrieve normalized results. Local Ollama becomes
+  the first provider and remains fully supported.
+- Keep the browser and local Bookinator server authoritative for the library,
+  user choices, review state, and presentation. Workers receive only the
+  bounded source and saved evidence required for one job; they do not need the
+  whole application or unrestricted access to the local workspace.
+- Define a filesystem-shaped transport that works in an ordinary directory
+  first and maps cleanly to an object store later. Organize immutable job
+  envelopes, leases/claims, heartbeats, attempts, incremental result objects,
+  terminal manifests, diagnostics, and cancellation requests by book, stage,
+  chapter, and stable job ID.
+- Do not use the presence of `.done` alone to claim a job. Local workers should
+  claim through atomic creation or rename; remote/object-store workers should
+  use conditional writes. Claims have an owner and an expiring lease so an
+  abandoned job becomes eligible for retry after a machine dies.
+- Make submission and result application idempotent. A stable job ID plus
+  prompt, schema, model, source, and dependency versions must make duplicate
+  delivery harmless. Publish results to temporary/versioned names, validate
+  them, then expose one terminal manifest atomically. Never let the UI consume
+  a partially written result.
+- Preserve every attempt rather than overwrite it. Record worker identity,
+  provider, model and quantization, prompt/schema versions, timestamps, token
+  counts, timings, estimated/actual cost, exit reason, and structured failure.
+  The local pipeline chooses the accepted result and retains rejected or stale
+  attempts as inspectable provenance.
+- Let the UI monitor the shared transport and merge completed results as they
+  appear. The UI must remain useful while workers are offline, reconnect after
+  restarts, distinguish queued/claimed/running/stale/failed/complete, and never
+  infer liveness merely from a persisted `running` label.
+- Express dependencies in job data rather than process order. Independent
+  chapter work may run concurrently; whole-book reconciliation waits for its
+  declared inputs. Cap concurrency per model/provider so parallelism improves
+  throughput without exhausting VRAM or multiplying expense invisibly.
+- Keep deterministic and cheap local stages local unless measurement proves a
+  reason to move them. Remote execution is primarily for heavyweight model
+  inference, not a reason to upload everything.
+
+### Backend progression
+
+1. **In-process local provider:** wrap the current Ollama calls behind the new
+   provider and normalized job/result contracts without changing behavior.
+2. **Directory worker:** run a separate worker process against a shared local
+   directory. Prove atomic claims, leases, heartbeats, retries, cancellation,
+   result validation, and recovery after killing either process.
+3. **Local multi-worker experiment:** use two processes or two trusted machines
+   on a LAN. Benchmark chapter-level parallelism and prove that duplicate work,
+   stale leases, and out-of-order results cannot corrupt pipeline state.
+4. **Object-store adapter:** map the same logical protocol to secure remote
+   storage and notifications without teaching the UI AWS concepts. The local
+   application should be able to watch results even after compute has vanished.
+5. **Disposable GPU proof:** benchmark one representative book on a modest
+   rented GPU and a credible 14B-capable machine (at least roughly 32 GB usable
+   VRAM; preferably a 48 GB L40S-class worker). Compare local M1, rented GPU,
+   and any faster option by model-load time, tokens per second, stage time,
+   total time, failures, and actual cost.
+6. **Optional managed provider:** only after the protocol is trustworthy,
+   consider AWS Batch/ECS, another GPU rental service, or a Bookinator-operated
+   service. Providers remain replaceable; no analysis schema or UI should
+   depend on one vendor.
+
+### Remote security and cost guardrails
+
+- Remote processing is explicit opt-in per book/run. Explain exactly what text
+  and derived evidence leave the computer, where they are stored, who operates
+  the account, retention duration, and how deletion is verified. Local-only
+  remains a first-class mode rather than a degraded fallback.
+- Encrypt transport and storage; use narrowly scoped per-job credentials,
+  private storage, auditable access, automatic expiration, and no inbound
+  public worker service. Prefer workers that pull bounded jobs and push results.
+- Keep durable inputs/results in inexpensive encrypted object storage; treat
+  GPU instances as disposable and untrusted to preserve state. Download or
+  ingest each completed result immediately, but do not require the local UI to
+  remain online for the remote job to finish safely.
+- Put several independent brakes between a bug and a large bill: allowed
+  instance-type list, maximum worker count, per-job wall-clock limit, idle
+  shutdown, absolute instance TTL, external watchdog/reaper, queue kill switch,
+  low budget alarms, and a conspicuous live estimate of accrued and maximum
+  remaining cost. A worker must not be solely responsible for terminating
+  itself.
+- Start with one modest on-demand worker. Do not introduce Spot interruption,
+  Kubernetes, multi-GPU instances, or automatic wide fan-out until ordinary
+  execution and cost accounting are proven. Parallelism must show the user its
+  multiplier before submission.
+- Benchmark before promising speed. A 14B model on a 48 GB L40S-class GPU may
+  plausibly beat an M1 by several times, and an H100 plus parallel chapter work
+  may approach an order-of-magnitude end-to-end gain, but prompt ingestion,
+  model loading, serial rollups, and retries make hardware ratios unreliable.
+
+### Product and ecosystem implications
+
+- Remote workers could expand Bookinator from owners of unusually capable
+  computers to nearly any author or editor willing to trust a selected provider
+  and pay a bounded per-book charge. Fast, inexpensive reruns also make revision
+  comparison and iterative editing substantially more useful.
+- Permit bring-your-own-compute: a publisher, writing group, or technically
+  capable friend could operate a worker while authors keep the Bookinator UI on
+  modest laptops. A future hosted provider is one implementation, not the
+  architecture.
+- Be candid about the historical constraint: Bookinator combines many long,
+  evidence-rich readings of a manuscript. This product is only becoming
+  practical as strong public models and affordable high-memory inference
+  converge. Hosted proprietary LLM APIs could have reduced the infrastructure
+  burden earlier, but would change privacy, reproducibility, model control, and
+  per-token economics. Keep an API-backed provider possible without making
+  OpenAI, Anthropic, AWS, or any other vendor the canonical engine.
+- Use saved timing and cost provenance to answer the business question with
+  data: actual cost per book, cost by pass, speed versus quality, useful
+  parallelism, rerun cost after revisions, and which analyses deserve premium
+  compute at all.
+
+## Planned 0.4.0 milestone: Look Here
+
+Finish **0.3.0 — The Engine Room** first. Its independent worker and durable
+control protocol are prerequisites for safely managing another local model.
+Then add an **editorial attention router**: a small, replaceable decision model
+that tells Qwen where to look. It produces ranked candidate evidence, never an
+editorial conclusion.
+
+### Decision contract and first engine
+
+- Define an internal Jev-compatible contract for typed **yes/no**, **choice**,
+  and **score** judgments. Save the exact state, question wording, options,
+  probabilities, confidence, model ID and revision, prompt-contract version,
+  threshold version, source ranges, elapsed time, and routing decision.
+- Begin with Apache-2.0 `simple-jev` as the integration baseline and benchmark
+  Qwen2.5-3B as the first small decoder. The public `us/jev-local` measurements
+  make that model a credible candidate, but the repository currently exposes
+  no software license, so use its results as research rather than importing its
+  code. Keep the adapter replaceable and evaluate dual MIT/Apache `jev-rs` if
+  the Engine Room adopts llama.cpp/GGUF strongly enough to make its
+  one-prefill path attractive.
+- Prefer several narrow yes/no judgments to one clever multiclass question.
+  For a candidate passage and narrative question, separately ask whether it
+  directly addresses the question, adds new information, reduces uncertainty,
+  contradicts or complicates the current understanding, and supplies an
+  answer. Reduce those results deterministically into **irrelevant**,
+  **reminder**, **advance**, **complicate**, **resolve**, or **uncertain**.
+- Treat confidence as routing evidence, not truth. Wording, option order, and
+  model priors can move probabilities; preserve an uncertainty band that always
+  falls through to Qwen.
+
+### One-model-at-a-time scheduling
+
+- Never keep the small router resident beside Qwen and never alternate models
+  passage by passage. Claim a coherent batch, load the router once, score the
+  entire book or stage, persist a resumable candidate ledger, unload the
+  router, then load Qwen once to consume the ranked work.
+- Make router batches ordinary Engine Room work with queue priority, pause,
+  cancellation, retries, timing, stale-input invalidation, and standard
+  input/output inspection. Record load and unload time separately so apparent
+  savings do not hide model-thrashing costs.
+- If the router is absent, failed, uncalibrated, or sees an unsupported input,
+  fall back to the existing full-Qwen path. Specialist installation remains
+  optional and never begins as a silent model download.
+
+### Staged experiments
+
+1. **Smells calibration laboratory and first optimization.** Score existing deterministic candidates
+   for likely editorial usefulness. Run in shadow mode first: do not suppress
+   any finding, and compare scores with dismissals, retained findings,
+   promotions, overlapping human annotations, and reviewer actions. Once the
+   held-out recall gate is met, let confidently irrelevant candidates skip
+   Qwen while every uncertain candidate falls through to the current path.
+   Measure model-load overhead and Qwen batches avoided, not merely router
+   accuracy.
+2. **Tags fast path.** Compare Jev-style hypothesis decisions with GLiClass or
+   ModernBERT over the fixed tag taxonomy. Ask Qwen for evidence and synthesis
+   only for plausible or uncertain tags; retain Qwen 32B as the deep path. A
+   router may suppress an implausible taxonomy hypothesis, but it must never
+   manufacture the evidence-bearing tag artifact itself.
+3. **Entity Signals and dossier feedstock.** Promote the near-term GLiNER pilot
+   into an Engine Room batch with durable model lifecycle, standard inspection,
+   and measured dossier improvements. Preserve its standalone entity report;
+   the output is useful even when Qwen never consumes it.
+4. **LLM Review attention routing.** Evaluate passage windows against narrow
+   lenses such as causality, continuity, motivation, emotional logic,
+   confusion, scene purpose, engagement, and payoff. Initially rank the packet
+   without removing any chapter from Qwen's review.
+5. **Questions and payoffs.** Use embeddings to retrieve likely passages, then
+   apply the decomposed yes/no judgments above. Qwen reconciles the surviving
+   evidence across chapters and remains responsible for the explanation.
+
+### Calibration and release gate
+
+- Build versioned gold cases from multiple genres and structures, with separate
+  train/tuning and held-out books. Include Shadow, The Dunwich Horror,
+  Frankenstein, Carmilla, and at least one book where the present detector or
+  reviewer produced substantial false positives.
+- Measure candidate recall, precision at each threshold, false-negative type,
+  Qwen input tokens, passages sent to Qwen, model-load overhead, wall-clock
+  time, and reviewer keep/dismiss outcomes. Report focus improvement even when
+  elapsed time does not improve.
+- Keep every experiment in shadow mode until it has at least 200 diverse,
+  human-adjudicated positive examples and held-out recall of at least 98% for
+  human-promoted or annotation-overlapping candidates, with no major editorial
+  family below 95%. These are graduation gates, not claims of general literary
+  accuracy.
+- Graduate one expensive stage only after it cuts Qwen-reviewed passage volume
+  by at least 30% without crossing those recall gates. Display how many
+  candidates were routed, passed through, held as uncertain, or skipped, and
+  let developers inspect every skipped item.
+- Treat **10–30% less primary-reader work across a complete book** as the
+  initial performance hypothesis, not a promised speedup. Measure Qwen calls
+  and input tokens alongside wall-clock time because model loading and swapping
+  can erase an apparent routing win.
+- Routers never inherit a reviewer name, satisfy sign-off, or enter an
+  author-facing report as findings. They are scouts. Qwen and the human remain
+  separately attributable readers.
+
+### Non-magical primary-reader optimization research
+
+Routing is the first practical saving, but retain five additional experiments
+for the expensive Summary, Dossier, Context, and LLM Review paths. None may
+weaken the saved artifact contract merely to improve a timing chart.
+
+1. **Confidence-based model cascades.** Let a smaller reader attempt a narrow,
+   structured artifact and escalate malformed, unsupported, contradictory, or
+   low-confidence results to the primary reader. Compare total model-loading,
+   prefill, generation, retry, and validation cost—not only the fast model's
+   inference time. Do not use self-reported confidence as the only escalation
+   signal.
+2. **Reusable prefix and KV work.** Summary, Dossier, Context, and Review often
+   read overlapping canonical text. Evaluate runtimes that can safely reuse a
+   stable source prefix or saved prefill state across distinct prompts. Version
+   the tokenizer, model, prompt prefix, and source hash; silently reusing an
+   incompatible cache is worse than recomputing it.
+3. **Better evidence packets.** Use GLiNER mentions, Jev decisions, retrieval,
+   deterministic measurements, prior Context, and exact source spans to reduce
+   rediscovery. Measure both input reduction and omissions. Comprehensive jobs
+   such as Summary and Dossier retain a full-reading fallback when a packet is
+   not demonstrably sufficient.
+4. **Bookinator-specific distillation.** Treat versioned Qwen artifacts plus
+   human promotions, dismissals, edits, and annotations as a possible future
+   training corpus for narrow local readers. Separate training, threshold
+   tuning, and held-out books; preserve licenses and manuscript privacy; never
+   train on private user text without explicit consent.
+5. **Interchangeable faster compute.** The Engine Room provider contract should
+   permit a stronger local machine, a LAN worker, or an explicitly chosen
+   rented GPU to execute the same immutable job. Compare normalized outputs,
+   provenance, startup overhead, privacy, and total cost. Faster hardware is an
+   execution option, not permission to fork pipeline semantics.
+
+For every experiment, preserve the current Qwen path as the quality baseline.
+Track input and output tokens, time to first token, generation time, retries,
+model load/unload cost, artifact validity, anchor correctness, and human-rated
+editorial value. A cheaper answer that omits essential book evidence is not an
+optimization.
 
 ## Desktop launcher and installers
 
@@ -73,11 +590,22 @@ book or enough overlapping text to reconstruct it.
   models or disguise a failed dependency as a healthy system.
 - Organize setup by the user's mental model rather than installation mechanism:
   **Machine** contains the server, document readers, storage, and platform
-  components; **Models** contains Ollama, Qwen-family LLMs, role assignments,
+  components; **Models** contains Ollama, Qwen-family LLMs, the two global role assignments,
   and specialist classifiers. The emotion classifier belongs under Models even
   though Bookinator installs it through Python/Hugging Face rather than Ollama.
 
 ## Near-term delivery order
+
+### Urgent: split the browser application into owned modules
+
+`web/app.js` has outgrown safe single-file maintenance. Prune it into cohesive
+modules without changing behavior: workspace navigation and routing; pipeline
+and queue presentation; chapter reader and annotations; Analysis renderers;
+Explore reports and exports; library/import; dialogs and shared controls. Keep
+one explicit state boundary, avoid circular imports, and move shared primitives
+before feature code so later work stops duplicating interactions inside the
+monolith. Require the existing full test suite plus direct browser smoke tests
+through the transition.
 
 The canonical book-workspace order puts **Reviewer at the far right of the
 Analysis shelf** and **Assessment at the far right of the Explore shelf**.
@@ -90,10 +618,21 @@ Revisit whether Plot arcs and Inferences should move only after their real data
 and interaction patterns make that distinction clearer; do not move them on
 speculation alone.
 
-After the model-free export milestone, build the Reviewer annotation core and
-then let Tags, Dossiers, Plot arcs, and Connections become additional
-inspectable inputs as they mature.
+Complete the better-questions and proto-Reviewer vertical slice first. Then use
+the Frankenstein run to expose prompt, provenance, and anchoring failures before
+expanding Reviewer to Tags, Dossiers, Plot arcs, and Connections. Plot arcs are
+a distinct later milestone; improved entity/location grouping can ship in a
+smaller intervening pass.
 
+- **Enforce the proposal boundary, with an explicit demo escape hatch:** Qwen
+  produces editorial **proposals**, never reviewer comments. A proposal must not
+  receive a reviewer's name, satisfy reviewer sign-off, or enter an
+  author-facing report until a human accepts it. For development, testing, and
+  deliberate demos, provide a disabled-by-default override that can promote
+  proposals into exportable demo annotations and complete a simulated review.
+  Stamp every promoted record and resulting report as **Demo/test acceptance**,
+  never attribute it to a real reviewer, keep the operation reversible, and
+  prevent the override from silently becoming the normal workflow.
 - **Chapter contract first:** finish the chapter-map proof sheet with stored
   statistics, pattern validation, promotion of legitimate special headings, and
   safe correction of false chapter boundaries. Analysis may run against a
@@ -134,6 +673,13 @@ inspectable inputs as they mature.
   imagery, symbolism, personification, and other devices with exact evidence
   ranges. Research and bake off specialist detectors before choosing its model;
   do not fold contradictions or integrity analysis into this stage.
+- **Lightweight annotation and guidance models:** keep a short, explicit bake-off
+  queue for specialist models that can cheaply annotate the manuscript or give
+  a larger reader better evidence. The first candidates are semantic Echoes,
+  metaphor-related language density, GLiNER open-label spans, and ModernBERT
+  hypothesis scoring. These models propose evidence; Qwen interprets it and a
+  human remains the editorial authority. See
+  [`research/chapter-signal-models.md`](research/chapter-signal-models.md).
 - **Model-free one-book export before human editing:** implement the canonical
   report manifest, offline static viewer, export selection/privacy boundary,
   ZIP packaging, and first public-domain hosted example in
@@ -347,6 +893,11 @@ the original string artifacts as prior run history during that migration.
   analysis, rejected, revised, and stale-anchor states must be recoverable.
   Preserve rejected machine findings behind **Show rejected** so Bookinator is
   helpful without becoming nagging or forgetful.
+- Keep permanent deletion narrow and explicit: it removes a human note from the
+  reader, reports, and exports and cannot stand in for disagreement. Model
+  claims and editorial comments instead need durable response threads where a
+  reviewer, author, or counter-critic can agree, disagree, qualify, and cite
+  another passage without erasing the claim being contested.
 - Build the author handoff from the same annotation records, not a parallel
   report store. Provide a sortable/filterable chapter · original page · quoted
   passage · category · severity · editor comment · status table, then export it
@@ -363,11 +914,19 @@ the original string artifacts as prior run history during that migration.
   saved chapters feed Summaries and Source chunks, while Source chunks feed
   Dossiers. Future indices and whole-book synthesis must declare their inputs
   the same way rather than hand-coding scattered reset behavior.
-- Schedule the global queue in three nested orders: highest-priority book
-  first (normally finishing that book before advancing), authored chapter
-  order inside the book, then dependency-ordered chapter passes. The initial
-  chapter chain is Summary → Dossier; Tags and later chapter checks join this
-  same chain instead of creating independent book-wide sweeps.
+- Schedule the global queue in four nested orders: first perform deterministic
+  structural intake for every imported manuscript (including Shelved books),
+  then choose the highest-priority analyzable book, authored chapter order
+  inside that book, and dependency-ordered chapter passes. The initial chapter
+  chain is Summary → Dossier; Tags and later chapter checks join this same chain
+  instead of creating independent book-wide sweeps.
+- Show the resulting next-task order explicitly on the Pipeline page. A later
+  queue editor may select one or more tasks and move them to a durable human
+  head-of-queue lane. Persist those overrides as ordered queue records with
+  actor, timestamp, and completion scope instead of rewriting book priority.
+  The precedence is: structural intake, human-pinned tasks, ordinary book
+  priority, then FIFO ties. Pins survive restart and expire only when their
+  selected unit completes or the user removes them.
 - Run whole-book synthesis only after every chapter-scoped input it consumes is
   current. Treat that synthesis as a real dependency-graph node, and use the
   deterministic chapter/pass order to learn separate duration estimates for
@@ -395,7 +954,10 @@ the original string artifacts as prior run history during that migration.
   every terminal artifact a generic “summary”:
   - **Tags → story signal map:** recurring and changing tag families, chapter
     concentrations, outliers, and source-linked peaks. This describes the
-    manuscript; it does not invent a new taxonomy.
+    manuscript; it does not invent a new taxonomy. Start with a deterministic
+    whole-book frequency rollup: total uses and chapter coverage for each tag,
+    sortable by frequency and grouped by tag family, so the manuscript's most
+    common signals are visible at a glance.
   - **Prose → style map:** stable tendencies, deliberate variation, chapter
     outliers, passage coverage, and confidence. Separate supportive,
     descriptive, and cautionary observations.
@@ -403,7 +965,9 @@ the original string artifacts as prior run history during that migration.
     issue, severity, detector agreement, and chapter, with dismissed,
     informational, and user-promoted decisions preserved and filterable. Build
     this deterministically from reviewed candidates; an LLM may label clusters
-    but must not decide whether saved findings exist.
+    but must not decide whether saved findings exist. Lead with a whole-book
+    issue-frequency rollup showing each smell type and its unresolved count,
+    with chapter coverage and drill-through to the underlying findings.
   - **Inferences → inference index:** one status-and-results entry per
     independent algorithm (connections, questions/payoffs, later
     contradictions and non-sequiturs), plus cross-links. Inferences are not one
@@ -474,6 +1038,13 @@ the original string artifacts as prior run history during that migration.
   split, rename, reorder, or demote a false chapter without changing parser
   code. Persist accepted variants as book-specific structural rules and rerun
   the same consistency gate before approval.
+- Treat substantive back matter—especially appendices—as authored, analyzable
+  sections rather than automatically excluding it with boilerplate. Mark its
+  structural role separately from narrative chapters, retain it in the chapter
+  map, and design a role-aware analysis profile: ordinary summaries, dossiers,
+  tags, and relevant smells may still apply, while narrative-only passes should
+  be optional or interpreted differently. Distinguish this from indexes,
+  licenses, publisher ads, and other non-content back matter.
 
 ## Whole-book synthesis
 
@@ -575,6 +1146,17 @@ the original string artifacts as prior run history during that migration.
   stable, useful, redundant, or consistently vague before adding specialist
   zero-shot scoring. The first encoder comparison after Qwen should be GLiClass
   Edge or Modern Base over exactly the same fixed hypotheses.
+- **Medium priority — genre and thematic-setting coverage:** strengthen the
+  canonical vocabulary and tag prompt so Qwen explicitly considers overlapping
+  genre affinities such as fantasy, horror, mystery, science fiction, romance,
+  thriller, and historical fiction instead of naming only the most obvious
+  shelf. Add a distinct **setting character** family for descriptions such as
+  contemporary urban, isolated rural, Gothic domestic, institutional,
+  frontier, or secondary-world—not proper-place extraction such as Chicago.
+  These remain optional, evidence-backed signals rather than boxes the model
+  must fill. Calibrate the change against **Shadow** and **The Dunwich Horror**:
+  it should recover meaningful fantasy affinity in the former without
+  manufacturing every plausible genre or confusing locations with setting.
 - **Pressing performance TODO:** current Qwen 32B tagging is taking roughly
   five minutes per chapter on the development machine. Let the present run
   finish, then profile short, medium, and long chapters; record prompt tokens,
@@ -606,6 +1188,32 @@ the original string artifacts as prior run history during that migration.
 - Bake off a CoLA acceptability model, ModernBERT readability regression, and
   a token-level metaphor detector only after the deterministic foundation has
   a labeled fiction fixture. Do not make any of them silent dependencies.
+- Build a **figurative-language density** experiment in honest layers. Begin
+  with a token-level VUA/MIPVU-style detector and call its output
+  *metaphor-related language density*: it can catch indirect, conventional,
+  direct, implicit, and personifying metaphorical uses, but it is not a
+  universal detector for simile, symbolism, irony, hyperbole, metonymy, or
+  imagery. Preserve token spans and scores, then add separately evaluated
+  detectors or rules for those other families before presenting an aggregate
+  figurative-language measure.
+- Build a **semantic Echoes** experiment from sentence or paragraph embeddings.
+  Use similarity to retrieve candidate callbacks, recurring images, repeated
+  exposition, and near-duplicate phrasing across distant chapters. Similarity
+  alone must not label a motif, setup/payoff, or defect; Qwen or an editor must
+  explain what recurs and whether its meaning changes.
+- Evaluate **GLiNER** as a cheap open-label span generator for people, groups,
+  places, institutions, creatures, artifacts, events, and supernatural forces.
+  Feed its evidence spans into dossiers and Qwen prompts, but retain the
+  existing merge/split workflow because extraction is not identity resolution.
+- Evaluate **ModernBERT NLI/zero-shot scoring** against explicit, versioned
+  hypotheses for scene function, genre affinity, thematic setting, viewpoint
+  behavior, and narrative texture. Treat scores as candidate evidence and
+  routing hints, never as calibrated literary fact.
+- Every specialist artifact must retain model revision and license, prompt or
+  hypothesis version, exact source ranges, raw scores, aggregation rules, and
+  thresholds. Benchmark Shadow, The Dunwich Horror, and Frankenstein before
+  choosing defaults; keep installation optional and never download a model
+  silently.
 - Do **not** ship “AI likelihood” as an authorship verdict. If explored, call it
   statistical regularity or genericity, expose the contributing measurements,
   label it experimental, and never turn it into an accusation or quality score.
@@ -615,6 +1223,18 @@ the original string artifacts as prior run history during that migration.
   readings, and state what evidence would change its mind. Never overwrite or
   quietly downgrade the human note; show critic, counter-critic, and optional
   judge as separate provenance-bearing voices.
+- Add a **whole-book LLM Review synthesis pass** after every chapter review is
+  current. Collate recurring strengths, recurring risks, minority/outlier
+  concerns, audience and commercial patterns, and disagreements between the
+  first reader and counter-review. Preserve chapter and passage provenance;
+  this is a new timed, invalidatable pipeline artifact, not a concatenated
+  summary or a replacement for the chapter reviews.
+- Generate the documented **LLM Review rubric reference** directly from the
+  versioned server dimension definitions and prompt contract. The UI should
+  not advertise an implementation count such as “10 rubric dimensions”; Docs
+  should explain each dimension, applicability, scoring, confidence, first
+  reader, counter-review, and human-promotion semantics without duplicating a
+  hand-maintained list.
 - Add a deterministic prose-hygiene pass for misspellings, duplicated or
   missing words, mismatched quotation marks and brackets, inconsistent dashes
   and ellipses, stray typography/invisible characters, encoding damage,
@@ -623,6 +1243,11 @@ the original string artifacts as prior run history during that migration.
   repetition, clichés, vague antecedents, overused gestures/adverbs, accidental
   tense or viewpoint drift, and awkward rhythm. Present passage-level
   candidates—not universal rules—and allow editor dismissal or acceptance.
+- Give canonical Smell families stable icons and use them consistently in the
+  whole-book rollup, chapter findings, exported HTML, and PDF. Keep detector
+  rule names in provenance, while collapsing synonymous surface labels such as
+  clause-load, clause-count, clause-load-proxy, and clause complexity into one
+  editor-facing family.
 
 ## Text statistics and authorship signals
 
@@ -874,7 +1499,7 @@ the original string artifacts as prior run history during that migration.
 
 ## Sharing and portability
 
-- **Next milestone:** implement the model-free, self-contained HTML publication
+- **Distribution follow-through:** implement the model-free, self-contained HTML publication
   in [`MODEL-FREE-EXPORT-TODO.md`](MODEL-FREE-EXPORT-TODO.md). Keep this section
   as the larger portability context rather than a duplicate implementation
   checklist.

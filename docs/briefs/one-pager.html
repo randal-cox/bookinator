@@ -1,1 +1,49 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bookinator overview</title><link rel="icon" href="../../assets/bookinator.svg"><link rel="stylesheet" href="resource-document.css"></head><body><main class="document"><header class="document-header"><div class="brand"><img src="../../assets/bookinator.svg" alt=""><div><strong>Bookinator</strong><span>Project resources</span></div></div><p class="kicker">Product overview</p><h1>Finding the plot holes before your readers fall in.</h1><p class="summary">A free, local manuscript intelligence tool that remembers a book’s facts, promises, mysteries, and timelines—and links every useful finding back to the text.</p></header><article class="document-body"><div class="one-page-grid"><section><h2>The problem</h2><p>A book can be locally convincing and globally wrong. A detail on page 30 can contradict page 450; a cut scene can orphan a payoff; a character can know something they never learned. Search finds words, but not always these relationships.</p><h2>What Bookinator does</h2><p>Import a manuscript, inspect its chapter structure, and run local analysis. Bookinator builds durable dossiers of entities, facts, events, promises, questions, and timelines. It proposes continuity, thread, redundancy, and cruft findings with source passages attached.</p><h2>Why it is different</h2><p>Bookinator treats a manuscript as a system of obligations, not a pile of summaries. Findings retain evidence, model and prompt identity, generation history, and uncertainty so authors and editors can inspect the reasoning.</p></section><section><h2>For authors</h2><p>Check the second-order effects of revision, trace promises and character knowledge, and find contradictions before readers do—without giving up authorial judgment.</p><h2>For editors</h2><p>Orient faster, compare distant passages, and turn a hunch into a cited question. Bookinator supports developmental, continuity, and copy work; it does not automate the editor’s verdict.</p><h2>Private by design</h2><p>Manuscripts, extracted text, and model runs remain on the user’s computer. Local models run through Ollama. There is no required account or cloud upload.</p><h2>Free forever, inspectable in public</h2><p>No subscription, premium tier, or manuscript-data business model. Releases will live on GitHub so people can inspect the code and contribute. Bookinator 0.1.0 is source-available under the Business Source License 1.1 and converts to GPL-3.0-or-later on September 24, 2030.</p></section></div><section><p class="note"><strong>Boundary:</strong> Bookinator can be wrong. A finding is an evidence-linked editorial question, not proof of an error, a quality score, or a replacement for an author or editor.</p></section><p class="footer-note">Bookinator · September 2026 · Local by design · Free forever</p></article></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bookinator overview</title>
+  <link rel="icon" href="../../assets/bookinator.svg">
+  <link rel="stylesheet" href="resource-document.css">
+  <link rel="stylesheet" href="resource-refresh.css">
+</head>
+<body>
+<main class="document">
+  <header class="document-header">
+    <div class="brand"><img src="../../assets/bookinator.svg" alt=""><div><strong>Bookinator</strong><span>Project resources</span></div></div>
+    <p class="kicker">Product overview</p>
+    <h1>A memory for the whole manuscript</h1>
+    <p class="summary">Bookinator is a local editorial workbench that reads a manuscript chapter by chapter, preserves the evidence, connects observations across the book, and turns the result into reports another person can inspect.</p>
+  </header>
+  <article class="document-body">
+    <section class="release-summary">
+      <div><strong>0.1.0</strong><span>Holy Crap, that Worked</span></div>
+      <p>The first working milestone proved the complete loop on a real book: import, analyze, reconcile, explore, and share.</p>
+    </section>
+    <div class="one-page-grid">
+      <section>
+        <h2>The editorial problem</h2>
+        <p>A manuscript can make a promise in one chapter and return to it hundreds of pages later. Summaries smooth over small details, while ordinary search cannot reliably connect changed names, related events, missing appearances, or a question with its eventual answer.</p>
+        <h2>Analysis creates the evidence</h2>
+        <p>Bookinator imports PDF, DOCX, EPUB, TXT, and Markdown. It proposes the chapter map, then saves chapter summaries, evidence-rich dossiers, emotion scores, editorial tags, and Smells. Whole-book rollups reconcile the completed chapter work.</p>
+        <h2>Inferences cross the book</h2>
+        <p>Connections groups entities, locations, and time observations across chapters. Questions &amp; Payoffs follows narrative questions from where they arise to possible or resolved answers. These are inspectable algorithms, not hidden report magic.</p>
+      </section>
+      <section>
+        <h2>Explore makes the result useful</h2>
+        <p>Editors can sort indexes, inspect aliases and close names, see presence and absence by chapter, follow intersections, review an emotion map scaled by chapter length, and return to saved evidence and run details.</p>
+        <h2>Share without rerunning</h2>
+        <p>Bookinator exports a branded editorial PDF and a model-free interactive HTML report. Both use saved analysis. The interactive report opens offline on an ordinary computer and excludes the source manuscript.</p>
+        <h2>Private and inspectable</h2>
+        <p>The loopback server, book projects, model output, and ordinary analysis stay on the user’s computer. Local language models run through Ollama. Status, model identity, timing, failures, and retries remain visible.</p>
+        <h2>License</h2>
+        <p>Bookinator 0.1.0 is source-available under Business Source License 1.1. Personal, educational, research, and internal business production use is permitted. The release converts to GPL-3.0-or-later on September 24, 2030.</p>
+      </section>
+    </div>
+    <section><p class="note"><strong>Current boundary:</strong> Bookinator produces editorial leads, not proof. Grouping can be wrong, timeline observations remain rough, source precision varies by artifact, and long local model jobs can take substantial time. Reviewer annotations, revision comparison, and a deeper continuity engine remain future work.</p></section>
+    <p class="footer-note">Bookinator · Version 0.1.0 · September 2026 · Local by design</p>
+  </article>
+</main>
+</body>
+</html>

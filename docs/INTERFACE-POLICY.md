@@ -4,6 +4,16 @@ Bookinator inherits the compact, inspectable application language used by
 Wavinator and PD Doseinator. These are project-wide contracts rather than
 screen-specific suggestions.
 
+## Readable type
+
+- User-facing explanatory prose, evidence, verdicts, and action labels use at
+  least 12px type. Compact metadata and short captions may use 11px.
+- Text below 11px is reserved for nonessential graphical labeling where space
+  is intrinsic to the visualization; it may never carry the only explanation
+  of a state, score, finding, or action.
+- Dense interfaces earn compactness through hierarchy, disclosure, and layout,
+  not by shrinking substantive text until it becomes difficult to read.
+
 ## Dialogs
 
 - Application dialogs are movable and remain inside the viewport.

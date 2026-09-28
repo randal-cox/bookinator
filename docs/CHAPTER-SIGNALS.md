@@ -40,7 +40,7 @@ also expose a normalized distribution.
 | ¶ | Exposition | Background or explanation dominates |
 | ◔ | Introspection | Interior thought and self-examination dominate |
 | ⌕ | Investigation | Characters actively seek, test, or connect evidence |
-| ? | Mystery | The chapter withholds or complicates material answers |
+| ? | Withheld information | The chapter withholds or complicates material answers |
 | ✦ | Discovery | Important information is found rather than merely explained |
 | ⚔ | Conflict | Opposed goals collide directly |
 | ♡ | Relationship | A relationship changes materially |
@@ -95,6 +95,10 @@ does not flatten a sharp turn into one average.
 
 Genre is primarily a book-level classification, but chapter-level affinity is
 useful for seeing mode changes.
+
+`Mystery` here is a genre affinity. It is deliberately distinct from the
+reader-dynamics tag `Withheld information`; one canonical tag ID may belong to
+only one family.
 
 | Icon | Tags |
 |---|---|

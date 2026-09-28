@@ -4,8 +4,8 @@
     "title": "Why Bookinator",
     "type": "Presentation",
     "status": "Ready to present",
-    "description": "A 20-minute, 16-slide case for local, evidence-linked manuscript intelligence for authors and editors.",
-    "tags": ["authors", "editors", "continuity", "privacy", "free forever"],
+    "description": "A 20-minute, 16-slide tour of the working 0.1.0 product, its editorial value, its limits, and the next serious work.",
+    "tags": ["authors", "editors", "working product", "privacy", "0.1.0"],
     "actions": [{"label":"Audience deck","url":"../pitch-authors-editors/","primary":true},{"label":"Presenter notes","url":"../pitch-authors-editors/presenter.html"}]
   },
   {
@@ -13,8 +13,8 @@
     "title": "Bookinator overview",
     "type": "Brief",
     "status": "Ready to share",
-    "description": "A one-page explanation of the problem, product, author and editor use cases, privacy promise, and free-forever commitment.",
-    "tags": ["overview", "leave-behind", "authors", "editors"],
+    "description": "A one-page account of the working product, analysis and Explore tools, outputs, local privacy boundary, and license.",
+    "tags": ["overview", "leave-behind", "authors", "editors", "0.1.0"],
     "actions": [{"label":"Read overview","url":"../briefs/one-pager.html","primary":true}]
   },
   {
@@ -22,17 +22,17 @@
     "title": "Elevator pitches",
     "type": "Messaging brief",
     "status": "Ready to use",
-    "description": "One-sentence, 20-second, one-minute, and audience-specific explanations with language guardrails.",
-    "tags": ["messaging", "authors", "editors", "privacy"],
+    "description": "Current one-sentence, 20-second, one-minute, and audience-specific explanations with factual guardrails.",
+    "tags": ["messaging", "authors", "editors", "privacy", "license"],
     "actions": [{"label":"Open pitches","url":"../briefs/elevator-pitches.html","primary":true}]
   },
   {
     "id": "wish-list",
-    "title": "Things we should want",
+    "title": "Next bets and evaluation",
     "type": "Roadmap",
     "status": "Working direction",
-    "description": "A prioritized product, evidence, community, and communications roadmap—with a list of ambitions to refuse.",
-    "tags": ["roadmap", "evaluation", "community", "stewardship"],
+    "description": "A clear boundary between what 0.1.0 proved, what Bookinator needs next, and longer-term aspirations.",
+    "tags": ["roadmap", "evaluation", "reviewer", "provenance"],
     "actions": [{"label":"Open roadmap","url":"../briefs/wish-list.html","primary":true}]
   }
 ]

@@ -1,7 +1,9 @@
 const [list, search, type, status, count] = ["list","search","type","status","count"].map((id) => document.getElementById(id));
 const configured = document.querySelector('meta[name="bookinator-app-url"]')?.content.trim();
 document.getElementById("app-destination").href = configured ? new URL(configured, location.href) : new URL("../../", location.href);
-const response = await fetch("catalog.json");
+// Resource copy changes more often than the shell. Do not let an old browser
+// cache make retired claims linger in the catalog after the JSON is updated.
+const response = await fetch("catalog.json", { cache: "no-store" });
 if (!response.ok) throw new Error(`Could not load resource catalog: ${response.status}`);
 const resources = await response.json();
 const addOptions = (select, values) => select.append(...[...new Set(values)].sort().map((value) => Object.assign(document.createElement("option"), { value, textContent: value })));

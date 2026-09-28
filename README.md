@@ -65,6 +65,13 @@ cd bookinator
 ./bin/serve
 ```
 
+During the current paired-development phase, `bin/serve` delegates to
+Inator Commons. Keep the Commons checkout beside this repository as
+`../inator`, or set `INATOR_COMMONS_DIR` to its absolute path. This temporary
+development-source dependency will be replaced by the urgent, versioned
+`@inator/dev-tools` installer. It does not make the running product call back
+to Commons or to a remote service.
+
 On macOS the launcher opens Bookinator in Safari. On other systems, or if a
 browser does not open, visit the local URL printed in the terminal. The default
 port is deterministic for this checkout and is usually near `4890`.
@@ -98,7 +105,8 @@ mutate the ordinary Bookinator library.
 
 1. Open **Machine** and review the readiness checks.
 2. Install and start Ollama if it is not already available.
-3. Install a suitable local model and assign the model roles Bookinator shows.
+3. Choose a **Primary reader** for substantive analysis and **Fast intake &
+   utilities** for inexpensive work. One model may fill both roles.
 4. Return to **Books**, choose **Add Book**, and select a manuscript.
 5. Inspect and approve the detected chapter structure.
 6. Run the desired pipelines under **Analysis**.
@@ -115,12 +123,12 @@ behind a spinner.
 The served application contains substantially more documentation than this
 README. Start Bookinator, then use the footer links:
 
-- **Docs** explains the product and major concepts.
-- **Guide** walks through setup and use.
+- **About** explains the editorial premise, what Bookinator does, and its trust boundaries.
+- **Guide** walks through first-run setup, the book workspace, long-running jobs, and sharing.
+- **Docs** maps the local architecture, book artifacts, pipeline, models, and data boundaries.
 - **Roadmap** exposes the live product backlog and priorities.
+- **Releases** records what each milestone made possible and why it mattered.
 - **Resources** includes the one-pager, presentations, and project briefs.
-- **Legal** describes privacy and licensing.
-- **About** explains the project's premise and boundaries.
 
 Serve these pages through `./bin/serve`; do not open the HTML files directly.
 The server exposes only the public `web/` and `docs/` trees. Local manuscripts

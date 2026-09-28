@@ -16,6 +16,31 @@ The same artifact must support two distribution paths:
 This is not a hosted Bookinator, an editable workspace, or a cloud inference
 service. It is a frozen, inspectable editorial publication.
 
+## Current vertical slice
+
+The first high-payoff slice now ships from **Explore → Share** as **Download
+interactive HTML**:
+
+- deterministic `bookinator-report-v1` manifest built field by field;
+- one self-contained HTML file that opens locally and can be hosted unchanged;
+- book identity and generated icon;
+- whole-book orientation and completeness counts;
+- searchable chapter-summary disclosures with establishes/questions lists;
+- questions and payoffs;
+- aggregate entity and location connections from completed dossiers;
+- chapter emotional texture;
+- retained/reportable Smells with the specifically flagged sentence;
+- analysis status, model, duration, and freshness provenance;
+- responsive, keyboard-readable navigation and print treatment;
+- no remote assets, API calls, runtime, source manuscript, chapter prose,
+  unrelated dossier facts, raw prompts, or raw model responses.
+
+The remaining milestone work begins with export preview/section selection,
+evidence allowlisting and redaction controls, saved export history/checksums,
+ZIP/directory packaging if still useful after testing the single-file format,
+more exact report parity, hostile-input browser tests, and the public-domain
+gallery wrapper.
+
 ## Product promise
 
 - Open locally by double-clicking `index.html`; do not require a local web

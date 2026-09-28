@@ -89,6 +89,42 @@ question inspectable.
   locations, organizations, significant objects, and explicit time expressions.
   It belongs beside dossier extraction, not in the semantic tag score itself.
 
+### Upcoming annotation and guidance experiments
+
+- **Semantic Echoes:** start with
+  [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+  as a small local sentence/paragraph embedding baseline. Retrieve similar
+  passages across chapter distance and preserve both endpoints. Candidate uses
+  include callbacks, recurring sensory images, repeated exposition, parallel
+  scenes, and near-duplicate phrasing. Similarity is retrieval, not an editorial
+  conclusion: a Qwen reader or editor must distinguish motif development from
+  coincidence, boilerplate, or unwanted repetition.
+- **Metaphor-related language density:** evaluate
+  [`CreativeLang/metaphor_detection_roberta_seq`](https://huggingface.co/CreativeLang/metaphor_detection_roberta_seq)
+  as the first token-level baseline. Its VUA20/MIPVU lineage is broader than
+  obvious “X is Y” figures and includes indirect, conventional, direct,
+  implicit, and personifying metaphorical word use. The checkpoint nevertheless
+  emits a binary metaphor-related token judgment; it does not identify
+  conceptual metaphors or separately cover every figurative family. Display its
+  result as metaphor-related density until separately evaluated simile,
+  symbolism, irony, hyperbole, metonymy, imagery, and other device evidence can
+  support a broader aggregate.
+- **GLiNER guidance:** compare the small and multi checkpoints over a
+  Bookinator-specific open-label vocabulary: person, group, location,
+  institution, creature, artifact, event, and supernatural force. Give Qwen the
+  extracted spans as candidates with provenance; never let GLiNER silently
+  merge aliases or convert a location into a character/entity assertion.
+- **ModernBERT guidance:** evaluate an Apache-licensed ModernBERT NLI checkpoint
+  over explicit hypotheses for chapter function, genre affinity, thematic
+  setting, viewpoint behavior, and narrative texture. Use it to rank evidence
+  and decide where deeper Qwen attention may pay off, not to manufacture a
+  mandatory label for every hypothesis.
+
+These experiments share one artifact contract: model revision and license,
+input/source version, segment and overlap rules, exact evidence ranges, raw
+scores, thresholds, and aggregation method. Their outputs remain distinct from
+Qwen interpretations and human annotations so disagreement is inspectable.
+
 ## What should remain a generative reading task
 
 No specialist model found in this pass has a sufficiently relevant model card
