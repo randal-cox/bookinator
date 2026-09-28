@@ -21,3 +21,14 @@ Before adding a source file:
 - `fixtures/the-dunwich-horror.md` — locally derived Markdown control
 
 The `artifacts` records in `catalog.json` contain exact download URLs, byte sizes, acquisition dates, derivation notes, and SHA-256 checksums. “Public domain” here means the recorded source represents the item as public domain in the United States; it is not a claim about every edition or jurisdiction.
+
+## Chapter-map benchmark
+
+Run the production structure detector over the locally available corpus without adding books to the library or starting model work:
+
+```sh
+./bin/chapter-map-lab demo-corpus/public-domain \
+  --output .bookinator/benchmarks/chapter-maps
+```
+
+The generated review surface keeps source-navigation evidence, detector output, and human judgments separate. See [`../docs/research/chapter-map-benchmark.md`](../docs/research/chapter-map-benchmark.md) for the 300-work confidence gate and corpus policy.
