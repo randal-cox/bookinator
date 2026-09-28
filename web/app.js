@@ -3901,13 +3901,15 @@ function smellResultMarkup(artifact, chapter) {
     : Number(left.characterStart || 0) - Number(right.characterStart || 0) || smellRollupIssue(left).localeCompare(smellRollupIssue(right)));
   const visible = orderedCandidates.filter(isReported);
   const cards = visible.map((item) => candidateCard(item)).join("");
-  const hidden = candidates.length - visible.length;
-  const rejectedItems = orderedCandidates.filter((item) => !isReported(item));
+  const styleSignals = Array.isArray(artifact.styleSignals) ? artifact.styleSignals : [];
+  const styleMeasurements = styleSignals.length ? `<section class="smell-style-summary"><header><div><strong>Chapter-level style measurements</strong><span>Patterns worth understanding, not sentence-level complaints.</span></div><b>${styleSignals.reduce((total, item) => total + Number(item.candidateCount || 0), 0).toLocaleString()}</b></header><div>${styleSignals.map((item) => `<span><strong>${escapeHtml(item.issue || "Style signal")}</strong><small>${Number(item.candidateCount || 0).toLocaleString()} ${Number(item.candidateCount || 0) === 1 ? "sentence" : "sentences"}</small></span>`).join("")}</div></section>` : "";
+  const rejectedItems = orderedCandidates.filter((item) => !isReported(item) && item.routing?.route !== "style_metric");
+  const hidden = rejectedItems.length;
   const unreviewed = candidates.filter((item) => displayJudgment(item).unreviewed).length;
   const rejected = hidden ? `<details class="editorial-glossary smell-rejected"><summary>Show ${hidden} dismissed, informational, or unreviewed candidates</summary><div class="editorial-findings">${rejectedItems.map((item) => candidateCard(item, true)).join("")}</div></details>` : "";
   const progress = artifact.reviewProgress || {};
   const progressNote = progress.complete === false ? `<p class="pipeline-progress-note">Editorial review: ${Number(progress.completedBatches || 0)} of ${Number(progress.totalBatches || 0)} batches saved.</p>` : "";
-  return `${progressNote}<p class="editorial-method-note"><strong>${visible.length} smells kept.</strong> ${Number(artifact.dismissed || 0)} dismissed, ${Math.max(0, Number(artifact.informational || 0) - unreviewed)} informational, and ${unreviewed} awaiting editorial review. Every judgment preserves its local detector evidence.</p>${cards ? `<div class="editorial-findings">${cards}</div>` : progress.complete === false || unreviewed ? "<p>Local findings are ready; editorial judgments are incomplete.</p>" : "<p>No reportable smells survived editorial review.</p>"}${rejected}`;
+  return `${progressNote}${styleMeasurements}<p class="editorial-method-note"><strong>${visible.length} smells kept.</strong> ${Number(artifact.routedForDeepReview ?? candidates.length).toLocaleString()} candidates required deep review; ${Number(artifact.dismissed || 0)} were dismissed and ${unreviewed} still await review. Every judgment preserves its local detector evidence.</p>${cards ? `<div class="editorial-findings">${cards}</div>` : progress.complete === false || unreviewed ? "<p>Local findings are ready; editorial judgments are incomplete.</p>" : "<p>No reportable smells survived editorial review.</p>"}${rejected}`;
 }
 
 function smellSortControlMarkup() {
@@ -3934,7 +3936,7 @@ function chapterSignalMarkup(chapter, kind, openRows = new Set(), book = {}) {
   const detailRows = kind === "emotion"
     ? [{label: "Schema", value: artifact.schema || "bookinator-emotion-v1", code: true}, {label: "Segments", value: String(artifact.segments?.length || 0)}]
     : kind === "smell"
-        ? [{label: "Schema", value: artifact.schema || "bookinator-smells-v1", code: true}, {label: "Candidates", value: String(artifact.candidates?.length || 0)}, {label: "Kept", value: String(artifact.kept || 0)}]
+        ? [{label: "Schema", value: artifact.schema || "bookinator-smells-v2", code: true}, {label: "Candidates", value: String(artifact.candidates?.length || 0)}, {label: "Deep review", value: String(artifact.routedForDeepReview ?? artifact.candidates?.length ?? 0)}, {label: "Kept", value: String(artifact.kept || 0)}]
       : [{label: "Schema", value: artifact.schema || "bookinator-chapter-tags-v1", code: true}, {label: "Taxonomy", value: artifact.taxonomyVersion || "bookinator-chapter-signals-v1", code: true}];
   const details = analysisRunDetails({title: config.title, model: chapter[config.model], startedAt: chapter[config.started], completedAt: chapter[config.completed], duration: chapter[config.duration], status, inputCharacters: chapter[config.input], rows: detailRows});
   const statusBody = `${chapter[config.error] ? `<p class="pipeline-error">${escapeHtml(chapter[config.error])}</p>` : ""}${details}`;

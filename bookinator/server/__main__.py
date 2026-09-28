@@ -122,6 +122,9 @@ EMOTION_LABELS = ("anger", "disgust", "fear", "joy", "neutral", "sadness", "surp
 TAG_SCHEMA_VERSION = "bookinator-chapter-tags-v2"
 TAG_TAXONOMY_VERSION = "bookinator-chapter-signals-v2"
 TAG_PROMPT_VERSION = "chapter-tags-v3"
+SMELL_SCHEMA_VERSION = "bookinator-smells-v2"
+SMELL_POLICY_VERSION = "smell-routing-v1"
+SMELL_PROMPT_VERSION = "smell-review-v2"
 SUMMARY_PROMPT_VERSION = "chapter-summary-v2"
 DOSSIER_PROMPT_VERSION = "chapter-dossier-v3"
 ANNOTATION_SCHEMA_VERSION = "bookinator-annotation-v2"
@@ -131,9 +134,9 @@ QUESTION_FAMILIES = (
     "motivation", "causality", "character_knowledge", "relationship_change",
     "thematic_consequence", "reader_expectation", "setup_payoff", "factual_continuity",
 )
-LLM_REVIEW_PROMPT_VERSION = "llm-review-v7"
+LLM_REVIEW_PROMPT_VERSION = "llm-review-v8"
 WHOLE_BOOK_LLM_REVIEW_PROMPT_VERSION = "whole-book-llm-review-v1"
-CUMULATIVE_CONTEXT_PROMPT_VERSION = "cumulative-context-v3"
+CUMULATIVE_CONTEXT_PROMPT_VERSION = "cumulative-context-v4"
 CUMULATIVE_CONTEXT_REBASE_INTERVAL = 5
 LLM_REVIEW_DIMENSIONS = (
     "narrative_engagement", "character_likability", "character_relatability",
@@ -362,6 +365,46 @@ def ensure_llm_review_stages(book: dict[str, object], pipeline: dict[str, object
         stages[:] = retained
         return changed
     changed = False
+    checkpoint_locked = bool(pipeline.get("developmentCheckpointLocked")) or pipeline.get("phase") == "development-checkpoint"
+    if checkpoint_locked and not pipeline.get("developmentCheckpointLocked"):
+        pipeline["developmentCheckpointLocked"] = True
+        changed = True
+    if checkpoint_locked:
+        try:
+            checkpoint_limit = int(pipeline.get("developmentAnalysisLimit") or 0)
+        except (TypeError, ValueError):
+            checkpoint_limit = 0
+        for chapter in pipeline.get("chapters", []):
+            sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
+            if not sequence or sequence > checkpoint_limit or strip_markdown_heading(chapter.get("title")).casefold() == "front matter":
+                continue
+            context_artifact = read_json_artifact(cumulative_context_path(book, sequence))
+            if context_artifact.get("status") == "complete" and isinstance(context_artifact.get("context"), dict):
+                context_needs_restore = chapter.get("contextStatus") != "complete" or not isinstance(chapter.get("context"), dict)
+                context = context_artifact["context"]
+                chapter.update({
+                    "contextStatus": "complete", "context": context,
+                    "contextSummary": str(context.get("storySoFar") or ""),
+                    "contextModel": context_artifact.get("model"),
+                    "contextStartedAt": context_artifact.get("startedAt"),
+                    "contextCompletedAt": context_artifact.get("completedAt"),
+                    "contextDurationSeconds": context_artifact.get("durationSeconds"),
+                    "contextInputSignature": context_artifact.get("inputSignature"),
+                    "contextRebased": context_artifact.get("rebased"),
+                })
+                changed = context_needs_restore or changed
+            review_artifact = read_json_artifact(llm_review_result_path(book, sequence))
+            if review_artifact.get("status") == "complete" and isinstance(review_artifact.get("result"), dict):
+                review_needs_restore = chapter.get("llmReviewStatus") != "complete" or not isinstance(chapter.get("llmReview"), dict)
+                chapter.update({
+                    "llmReviewStatus": "complete", "llmReview": review_artifact["result"],
+                    "llmReviewModel": review_artifact.get("model"),
+                    "llmReviewStartedAt": review_artifact.get("startedAt"),
+                    "llmReviewCompletedAt": review_artifact.get("completedAt"),
+                    "llmReviewDurationSeconds": review_artifact.get("durationSeconds"),
+                    "llmReviewInputSignature": review_artifact.get("inputSignature"),
+                })
+                changed = review_needs_restore or changed
     for stage_id in ("cumulative-context", "llm-review", "whole-book-llm-review"):
         if any(item.get("id") == stage_id for item in stages):
             continue
@@ -384,7 +427,7 @@ def ensure_llm_review_stages(book: dict[str, object], pipeline: dict[str, object
             continue
         stale_context = True
         break
-    if stale_context:
+    if stale_context and not checkpoint_locked:
         for chapter in pipeline.get("chapters", []):
             if strip_markdown_heading(chapter.get("title")).casefold() == "front matter":
                 continue
@@ -409,6 +452,8 @@ def ensure_llm_review_stages(book: dict[str, object], pipeline: dict[str, object
         sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
         artifact = read_json_artifact(llm_review_result_path(book, sequence)) if sequence else {}
         if artifact.get("schema") == LLM_REVIEW_PROMPT_VERSION:
+            continue
+        if checkpoint_locked:
             continue
         chapter["llmReviewStatus"] = "pending"
         for key in (
@@ -810,6 +855,11 @@ def next_pipeline_action(book: dict[str, object], pipeline: dict[str, object]) -
     if not chapters or stages.get("extraction") in {"pending", "blocked", "failed"} or stages.get("chapter-archive") in {"pending", "blocked", "failed"}:
         return "prepare"
     if normalize_book_priority(book.get("priority")) == "shelved":
+        return ""
+    # A bounded regression checkpoint is an explicit human inspection gate.
+    # Prompt-version migration may mark saved work stale, but it must not
+    # silently spend hours or destroy the before/after boundary on startup.
+    if pipeline.get("developmentCheckpointLocked") or pipeline.get("phase") == "development-checkpoint":
         return ""
     # Finish the cheap preservation work, then stop before an anomalous map
     # becomes the input to hours of derived analysis. A clean map may still
@@ -2553,6 +2603,7 @@ def reconcile_development_checkpoint(book: dict[str, object], pipeline: dict[str
     pipeline.update({
         "status": "paused",
         "phase": "development-checkpoint",
+        "developmentCheckpointLocked": True,
         "message": detail,
         "stopRequested": False,
         "updatedAt": utc_now(),
@@ -5103,6 +5154,8 @@ Return only signals that score at least .25. Every returned signal requires at l
 
 Narration measured outside quoted dialogue: {json.dumps(person_metrics, ensure_ascii=False)}. Treat a decisive measured person as a constraint. Do not label first-person narration as third-person merely because the narrator describes other characters.
 
+Chapter-function discipline: use setup only when this chapter plants a specific later-facing obligation, condition, object, relationship, or expectation that is not already active. Mere orientation, exposition, atmosphere, or continuation of an existing thread is not setup. Prefer the more concrete function when the evidence supports one.
+
 Taxonomy:
 {vocabulary}
 
@@ -5213,6 +5266,76 @@ def analyze_chapter_tags_resilient(
     raise RuntimeError("The chapter tagger did not return a result.")
 
 
+SMELL_DENSITY_RULES = {
+    "clause count", "clause load proxy", "finite verb load", "sentence length",
+}
+
+
+def smell_evidence_family(evidence: dict[str, object]) -> str:
+    """Give detector rules a stable editorial family before any model sees them."""
+    rule = normalize_lexical_key(evidence.get("rule"))
+    if rule in {"clause count", "clause load proxy"}:
+        return "Complex sentence"
+    if rule == "finite verb load":
+        return "Overloaded sentence"
+    if rule == "sentence length":
+        return "Long sentence"
+    if rule == "repeated word":
+        return "Repeated word"
+    if rule.startswith("weasel words"):
+        return "Weasel words"
+    if rule == "misc but":
+        return "Paragraph-opening conjunction"
+    message = str(evidence.get("message") or "")
+    return canonical_smell_label(rule or message)
+
+
+def route_smell_candidate(candidate: dict[str, object]) -> dict[str, object]:
+    """Apply cheap, inspectable policy before spending a primary-model read.
+
+    Sentence length and clause density are measurements, not defects. A single
+    density detector therefore becomes a chapter-level style observation. We
+    ask the deep reader only when independent measurements overlap strongly
+    enough that there may be a concrete local reading cost.
+    """
+    evidence = [item for item in candidate.get("evidence", []) if isinstance(item, dict)]
+    rules = {normalize_lexical_key(item.get("rule")) for item in evidence}
+    families = list(dict.fromkeys(smell_evidence_family(item) for item in evidence))
+    candidate["issueFamilies"] = families
+    policy_measurement = bool(rules) and all(rule in SMELL_DENSITY_RULES or rule.startswith("weasel words") or rule == "misc but" for rule in rules)
+    word_count = max((int(item.get("wordCount") or 0) for item in evidence), default=0)
+    clause_count = max((int(item.get("clauseCount") or 0) for item in evidence), default=0)
+    finite_verbs = max((int(item.get("finiteVerbCount") or 0) for item in evidence), default=0)
+    connectors = max((int(item.get("connectorCount") or 0) for item in evidence), default=0)
+    density_signals = len(rules & SMELL_DENSITY_RULES)
+    unusually_dense = word_count >= 65 or density_signals >= 3 or (density_signals >= 2 and word_count >= 40)
+    if policy_measurement and not unusually_dense:
+        issue = families[0] if families else "Sentence complexity"
+        return {
+            "route": "style_metric", "review": False, "issue": issue,
+            "reason": "Recorded as a chapter-level style measurement; the available evidence does not establish a sentence-level reading problem.",
+        }
+    return {
+        "route": "deep_review", "review": True,
+        "issue": families[0] if len(families) == 1 else "Overlapping prose signals",
+        "reason": "Independent evidence or a non-density detector warrants a selective editorial read.",
+    }
+
+
+def smell_style_signals(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[str, dict[str, object]] = {}
+    for candidate in candidates:
+        routing = candidate.get("routing") if isinstance(candidate.get("routing"), dict) else {}
+        if routing.get("route") != "style_metric":
+            continue
+        for family in candidate.get("issueFamilies", []) or [routing.get("issue")]:
+            label = str(family or "Sentence complexity")
+            item = grouped.setdefault(label, {"issue": label, "candidateCount": 0, "characterStarts": []})
+            item["candidateCount"] = int(item["candidateCount"]) + 1
+            item["characterStarts"].append(int(candidate.get("characterStart") or 0))
+    return sorted(grouped.values(), key=lambda item: (-int(item["candidateCount"]), str(item["issue"])))
+
+
 def analyze_chapter_smells(
     chapter: dict[str, object],
     model: str,
@@ -5234,15 +5357,27 @@ def analyze_chapter_smells(
         paragraph_start, paragraph_end = text.rfind("\n\n", 0, start), text.find("\n\n", end)
         context_start = 0 if paragraph_start < 0 else paragraph_start + 2
         context_end = len(text) if paragraph_end < 0 else paragraph_end
-        candidates.append({"id": candidate_id, "characterStart": start, "characterEnd": end, "sentence": sentence, "context": text[context_start:context_end].strip(), "evidence": evidence, "detectors": sorted({str(item.get("detector") or "") for item in evidence})})
+        candidate = {"id": candidate_id, "characterStart": start, "characterEnd": end, "sentence": sentence, "context": text[context_start:context_end].strip(), "evidence": evidence, "detectors": sorted({str(item.get("detector") or "") for item in evidence})}
+        candidate["routing"] = route_smell_candidate(candidate)
+        candidates.append(candidate)
     if candidate_limit is not None:
         candidates = candidates[:max(0, candidate_limit)]
     item_schema = {"type": "object", "properties": {"id": {"type": "string"}, "verdict": {"type": "string", "enum": ["report", "dismiss", "informational"]}, "severity": {"type": "string", "enum": ["low", "medium", "high"]}, "issue": {"type": "string"}, "reason": {"type": "string"}}, "required": ["id", "verdict", "severity", "issue", "reason"]}
     schema = {"type": "object", "properties": {"judgments": {"type": "array", "items": item_schema}}, "required": ["judgments"]}
     judgments: dict[str, dict[str, object]] = {}
+    for candidate in candidates:
+        routing = candidate.get("routing") if isinstance(candidate.get("routing"), dict) else {}
+        if not routing.get("review", True):
+            judgments[str(candidate["id"])] = {
+                "id": candidate["id"], "verdict": "informational", "severity": "low",
+                "issue": str(routing.get("issue") or "Style measurement"),
+                "reason": str(routing.get("reason") or "Recorded as a chapter-level style measurement."),
+                "policyDecision": True,
+            }
+    review_candidates = [candidate for candidate in candidates if (candidate.get("routing") or {}).get("review", True)]
     review_errors: list[dict[str, object]] = []
     batch_size = 8
-    total_batches = (len(candidates) + batch_size - 1) // batch_size
+    total_batches = (len(review_candidates) + batch_size - 1) // batch_size
 
     def artifact_snapshot(completed_batches: int, complete: bool = False) -> dict[str, object]:
         visible_candidates = copy.deepcopy(candidates)
@@ -5258,27 +5393,31 @@ def analyze_chapter_smells(
                 }
         decided = [item for item in visible_candidates if isinstance(item.get("judgment"), dict)]
         return {
-            "schema": "bookinator-smells-v1", "model": model, "inputCharacters": len(text),
+            "schema": SMELL_SCHEMA_VERSION, "policyVersion": SMELL_POLICY_VERSION,
+            "promptVersion": SMELL_PROMPT_VERSION, "model": model, "inputCharacters": len(text),
             "candidates": visible_candidates,
             "kept": sum(item["judgment"].get("verdict") in {"report", "keep"} for item in decided),
             "dismissed": sum(item["judgment"].get("verdict") == "dismiss" for item in decided),
             "informational": sum(item["judgment"].get("verdict") == "informational" for item in decided),
+            "styleSignals": smell_style_signals(visible_candidates),
+            "routedForDeepReview": len(review_candidates),
             "detectorErrors": local.get("errors", {}), "reviewErrors": copy.deepcopy(review_errors),
             "reviewProgress": {"completedBatches": completed_batches, "totalBatches": total_batches, "complete": complete},
         }
 
     if on_batch:
         on_batch(artifact_snapshot(0))
-    for offset in range(0, len(candidates), batch_size):
-        batch = candidates[offset:offset + batch_size]
+    for offset in range(0, len(review_candidates), batch_size):
+        batch = review_candidates[offset:offset + batch_size]
         payload = [{"id": item["id"], "sentence": item["sentence"], "context": item["context"], "evidence": [{"detector": evidence.get("detector"), "rule": evidence.get("rule"), "message": evidence.get("message")} for evidence in item["evidence"]]} for item in batch]
-        prompt = f"""You are Bookinator's skeptical fiction editor. Judge only these concrete prose-smell candidates; do not invent new complaints.
+        prompt = f"""You are Bookinator's selective fiction editor. A deterministic policy has already removed ordinary sentence-length and clause-density measurements from this deep-review batch. Judge only these routed candidates; do not invent new complaints.
 Preserve voice, rhythm, dialect, fragments, deliberate repetition, unusual vocabulary, genre conventions, and character speech. Do not reward blandness or mechanically simplified prose. A measurement can be true without being a problem. But you are still an editor: preservation of voice is not a reason to excuse a comma splice, garden path, ambiguous reference, accidental repetition, or a sentence whose nested structure makes its main action unnecessarily hard to recover.
-Return exactly one judgment per id. "report" means "show this detector complaint to the author for a quick human decision"; it does not mean preserve the sentence and it does not mean the sentence is objectively bad. Report a candidate when a competent author might reasonably reconsider it because you can name a concrete reading cost, ambiguity, grammatical fault, or avoidable burden—even if the sentence remains understandable. Dismiss wrong, doctrinaire, or clearly purposeful complaints. Mark a true observation informational when it is useful but not a defect. Consolidate overlapping evidence. Do not rewrite. Make issue a specific 2–6 word label. Make reason one concrete sentence about this text; never merely say that complexity adds richness or does not impede comprehension.
+Return exactly one judgment per id. "report" means a professional editor would probably interrupt the author at this exact passage because the source demonstrates a concrete reading cost, ambiguity, grammatical fault, or avoidable burden. It does not mean the sentence is objectively bad. Dismiss wrong, doctrinaire, or clearly purposeful complaints. Mark a true observation informational when it is useful but not a local defect. Consolidate overlapping evidence. Do not rewrite. Make issue a specific 2–6 word label. Make reason one concrete sentence about this text; never merely say that complexity adds richness or does not impede comprehension.
 
 Consistency rules:
 - If your reason says the sentence is clear, understandable, effective, flows well, or does not impede comprehension, verdict must be dismiss or informational—not report.
 - Length or clause count alone is not a reading cost. For report, identify what the reader may misattach, lose, reread, or mistake.
+- If you cannot name the exact words or relationship that creates that cost, use informational or dismiss—not report.
 - A real comma splice between independent clauses is report. A deliberate fragment, paragraph-opening "But," dialect, or harmless repeated function word is normally dismiss.
 - An Oxford-comma candidate is report only when it is a real series of three or more coordinate items; dismiss false positives on paired adjectives or trailing descriptors.
 
@@ -6188,6 +6327,7 @@ def reset_analysis_after_sequence(
     pipeline.update({
         "developmentAnalysisLimit": sequence,
         "developmentAnalysisLimitLabel": label,
+        "developmentCheckpointLocked": False,
         "status": "ready", "phase": "ready",
         "message": f"Development run is capped at {label}. Later analysis is cleared and held.",
         "updatedAt": utc_now(),
@@ -7274,6 +7414,15 @@ def chapter_dossier_payloads(pipeline: dict[str, object], sequence: int) -> list
 
 def cumulative_context_schema() -> dict[str, object]:
     strings = {"type": "array", "items": {"type": "string"}}
+    thread_update = {
+        "type": "object",
+        "properties": {
+            "previous_thread": {"type": "string", "minLength": 1},
+            "status": {"type": "string", "enum": ["open", "resolved"]},
+            "current_wording": {"type": "string", "minLength": 1},
+        },
+        "required": ["previous_thread", "status", "current_wording"],
+    }
     return {
         "type": "object",
         "properties": {
@@ -7287,11 +7436,12 @@ def cumulative_context_schema() -> dict[str, object]:
             "locations_and_timeline": strings,
             "open_threads": strings,
             "resolved_threads": strings,
+            "thread_updates": {"type": "array", "items": thread_update},
             "reader_promises": strings,
             "themes_and_motifs": strings,
             "voice_and_form": strings,
         },
-        "required": ["story_so_far", "key_events", "established_facts", "entities_and_significance", "character_states", "relationship_states", "knowledge_states", "locations_and_timeline", "open_threads", "resolved_threads", "reader_promises", "themes_and_motifs", "voice_and_form"],
+        "required": ["story_so_far", "key_events", "established_facts", "entities_and_significance", "character_states", "relationship_states", "knowledge_states", "locations_and_timeline", "open_threads", "resolved_threads", "thread_updates", "reader_promises", "themes_and_motifs", "voice_and_form"],
     }
 
 
@@ -7303,7 +7453,7 @@ def build_cumulative_context(
     prompt = f"""Maintain a compact but comprehensive, evidence-respecting memory of a manuscript through {through_label}.
 This is {'a five-chapter rebase' if rebased else 'an incremental update'}. Preserve facts from the prior checkpoint unless the supplied chapter evidence corrects or resolves them. Distinguish character knowledge from objective fact. Retain uncertainty. Do not predict later events or invent connective tissue.
 
-Return a concise story_so_far plus comprehensive arrays for key_events, established_facts, entities_and_significance, character_states, relationship_states, knowledge_states, locations_and_timeline, open_threads, resolved_threads, reader_promises, themes_and_motifs, and voice_and_form.
+Return a concise story_so_far plus comprehensive arrays for key_events, established_facts, entities_and_significance, character_states, relationship_states, knowledge_states, locations_and_timeline, open_threads, resolved_threads, reader_promises, themes_and_motifs, and voice_and_form. Also return thread_updates with exactly one disposition for every open thread in the prior checkpoint: copy the previous wording, mark it open or resolved, and give its current wording. Never silently drop an earlier open thread.
 
 This memory will be the only prior-book context available to a later editorial reader. Compress wording, not distinct durable information. Preserve every named character, group, institution, location, object, event, causal link, revelation, promise, uncertainty, and state change that could matter to continuity, motivation, comprehension, payoff, or later interpretation. Do not impose an arbitrary item limit. Omit only scene texture that has no plausible future consequence. Use the authored chapter numbers in the supplied evidence, never source sequence numbers.
 
@@ -7311,6 +7461,7 @@ Apply these editorial distinctions carefully:
 - open_threads are live narrative uncertainties with plausible later consequence, not every unanswered curiosity, historical aside, or detail the prose simply has not elaborated.
 - reader_promises are expectations the manuscript creates for a later development, explanation, confrontation, or payoff. Do not record ordinary promises made between characters merely because the word "promise" applies.
 - resolved_threads should retire earlier uncertainty explicitly; do not keep a resolved item active in open_threads.
+- Every character_states, knowledge_states, and relationship_states item must begin with the explicit subject's name. Verify who actually knows, refuses, suspects, or acts. Never turn the narrator's lack of knowledge into another character's refusal unless the evidence explicitly shows that refusal.
 - Paratext, framing apparatus, and editorial provenance belong in story memory only when they materially govern how the reader interprets the continuing narrative.
 - Prefer durable, specific state over speculative significance. Preserve uncertainty instead of upgrading a possibility into fact.
 
@@ -7321,7 +7472,7 @@ Saved chapter evidence:
 {json.dumps(evidence, ensure_ascii=False)[:65_000]}
 """
     result, _ = run_structured_model(prompt, model, cumulative_context_schema(), cancel_event, run_key)
-    return {
+    normalized = {
         "storySoFar": str(result.get("story_so_far") or "").strip(),
         **{
             destination: [str(item).strip() for item in result.get(source, []) if str(item).strip()]
@@ -7336,6 +7487,31 @@ Saved chapter evidence:
             )
         },
     }
+    previous_open = [str(item).strip() for item in (previous.get("openThreads") or previous.get("open_threads") or []) if str(item).strip()]
+    updates = result.get("thread_updates") if isinstance(result.get("thread_updates"), list) else []
+    disposition_by_key = {
+        normalize_lexical_key(item.get("previous_thread")): item
+        for item in updates if isinstance(item, dict) and normalize_lexical_key(item.get("previous_thread"))
+    }
+    open_threads = list(normalized["openThreads"])
+    resolved_threads = list(normalized["resolvedThreads"])
+    for previous_thread in previous_open:
+        update = disposition_by_key.get(normalize_lexical_key(previous_thread))
+        # A missing disposition is model uncertainty, not evidence that the
+        # narrative thread vanished. Preserve it until a later pass resolves it.
+        if not update:
+            if previous_thread not in open_threads:
+                open_threads.append(previous_thread)
+            continue
+        wording = str(update.get("current_wording") or previous_thread).strip()
+        target = resolved_threads if update.get("status") == "resolved" else open_threads
+        if wording and wording not in target:
+            target.append(wording)
+    resolved_keys = {normalize_lexical_key(item) for item in resolved_threads}
+    normalized["openThreads"] = [item for item in open_threads if normalize_lexical_key(item) not in resolved_keys]
+    normalized["resolvedThreads"] = resolved_threads
+    normalized["threadUpdates"] = [dict(item) for item in updates if isinstance(item, dict)]
+    return normalized
 
 
 def authored_chapter_label(chapter: dict[str, object], authored_index: int) -> str:
@@ -7527,9 +7703,11 @@ def llm_editorial_adjudication_schema() -> dict[str, object]:
                     "properties": {
                         "candidate_number": {"type": "integer", "minimum": 1, "maximum": 3},
                         "verdict": {"type": "string", "enum": ["significant", "soft", "reject"]},
+                        "already_answered_nearby": {"type": "boolean"},
+                        "proposal_defect": {"type": "string", "enum": ["none", "unsupported", "factually_mistaken", "duplicative", "resolved_by_prior_context", "resolved_in_local_continuation", "generic", "deterministic_smell_only", "misreads_deliberate_technique"]},
                         "reason": {"type": "string", "minLength": 1},
                     },
-                    "required": ["candidate_number", "verdict", "reason"],
+                    "required": ["candidate_number", "verdict", "already_answered_nearby", "proposal_defect", "reason"],
                 },
                 "maxItems": 3,
             },
@@ -7732,7 +7910,9 @@ For saleability, discuss audience clarity, genre promise, positioning, accessibi
             end = int(candidate["character_end"])
             skeptical_candidates.append({
                 **candidate,
-                "surrounding_text": chapter_text[max(0, start - 500):min(len(chapter_text), end + 500)],
+                "local_before": chapter_text[max(0, start - 700):start],
+                "anchored_passage": chapter_text[start:end],
+                "local_continuation": chapter_text[end:min(len(chapter_text), end + 1200)],
             })
         adjudication_prompt = f"""Be a fair senior editor calibrating another model's proposed annotations. Preserve useful uncertainty instead of forcing every candidate into a yes/no decision.
 
@@ -7740,6 +7920,10 @@ Decide each supplied candidate independently:
 - significant: the source supports a concrete material reader effect and a professional editor would probably interrupt the author about it.
 - soft: the concern is plausible and worth showing a human, but intent, context, severity, or the best revision remains uncertain.
 - reject: identify a concrete defect in the proposal itself—it is unsupported by the source, factually mistaken, duplicative, already resolved by prior context, purely generic, or merely restates a deterministic Smell without narrative consequence.
+
+Before assigning a verdict, read local_continuation through the end. Set already_answered_nearby=true when that continuation supplies the clarification, recognition, causal bridge, or explanation the proposal requests. In that case verdict must be reject and proposal_defect must be resolved_in_local_continuation. A proposal cannot be significant merely because its anchored sentence creates a momentary question that the next sentence or paragraph deliberately answers.
+
+For every decision choose one proposal_defect. Use none only for significant or genuinely soft concerns. A reject requires a concrete non-none defect; if no concrete defect applies, use soft rather than reject.
 
 Subjectivity or uncertainty alone is not grounds for rejection; use soft. Deliberate technique is grounds for rejection only when the candidate has misunderstood that technique rather than identified a real tradeoff. Do not improve or replace weak candidates. It is acceptable for every candidate to be significant, soft, or rejected, but explain the actual evidence for each decision.
 
@@ -7791,6 +7975,8 @@ Candidates with local source context:
                 "priority": str(item.get("priority") or "low"),
                 "confidence": float(item.get("confidence") or 0),
                 "reason": str(decision.get("reason") or "The skeptical pass did not affirm this candidate."),
+                "adjudicationDefect": str(decision.get("proposal_defect") or "none"),
+                "alreadyAnsweredNearby": bool(decision.get("already_answered_nearby", False)),
                 "characterStart": int(item.get("character_start") or 0),
                 "characterEnd": int(item.get("character_end") or 0),
                 "readerEffect": str(item.get("reader_effect") or "").strip(),
@@ -7813,6 +7999,9 @@ Candidates with local source context:
             "quote": quote,
             "characterStart": start,
             "characterEnd": end,
+            "passageId": str(item.get("passage_id") or ""),
+            "anchorMatchMethod": str(item.get("anchor_match_method") or ""),
+            "anchorMatchScore": float(item.get("anchor_match_score") or 0),
             "anchorFingerprint": hashlib.sha256(chapter_text[max(0, start - 96):min(len(chapter_text), end + 96)].encode("utf-8")).hexdigest(),
             "category": category if category in ANNOTATION_CATEGORIES else "editorial",
             "priority": str(item.get("priority") or "normal") if str(item.get("priority") or "normal") in {"low", "normal", "high"} else "normal",
@@ -7823,6 +8012,8 @@ Candidates with local source context:
             "revisionGoal": str(item.get("revision_goal") or "").strip(),
             "confidence": float(item.get("confidence") or 0),
             "adjudicationReason": str(decision.get("reason") or "").strip(),
+            "adjudicationDefect": str(decision.get("proposal_defect") or "none"),
+            "alreadyAnsweredNearby": bool(decision.get("already_answered_nearby", False)),
             "status": "proposed",
         })
     concern_count = len(proposals)

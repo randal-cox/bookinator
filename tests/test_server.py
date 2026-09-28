@@ -1375,6 +1375,41 @@ def test_development_boundary_limits_automatic_work_without_falsifying_later_sta
     assert pipeline["chapters"][1]["status"] == "pending"
 
 
+def test_development_checkpoint_blocks_version_migration_until_human_advances_it(tmp_path: Path) -> None:
+    book = {"id": "book", "manuscriptId": "manuscript", "priority": "high", "llmReviewEnabled": True}
+    pipeline = {
+        "status": "paused", "phase": "development-checkpoint",
+        "developmentAnalysisLimit": 2,
+        "stages": [{"id": "extraction", "status": "complete"}, {"id": "chapter-archive", "status": "complete"}],
+        "chapters": [{"sequence": 2, "title": "PROLOGUE", "status": "complete", "contextStatus": "pending", "llmReviewStatus": "pending"}],
+        "chunks": [],
+    }
+    context_path = tmp_path / "manuscript" / "llm-review" / "contexts" / "0002.json"
+    review_path = tmp_path / "manuscript" / "llm-review" / "results" / "0002.json"
+    context_path.parent.mkdir(parents=True)
+    review_path.parent.mkdir(parents=True)
+    context_path.write_text(json.dumps({
+        "schema": "cumulative-context-v3", "status": "complete", "model": "qwen",
+        "completedAt": "earlier", "inputSignature": "old-context", "context": {"storySoFar": "Preserve me."},
+    }), encoding="utf-8")
+    review_path.write_text(json.dumps({
+        "schema": "llm-review-v7", "status": "complete", "model": "qwen",
+        "completedAt": "earlier", "inputSignature": "old-review", "result": {"editorialSummary": "Preserve me too."},
+    }), encoding="utf-8")
+
+    with patch.object(server, "BOOKS_ROOT", tmp_path):
+        assert server.ensure_llm_review_stages(book, pipeline) is True
+        with patch.object(server, "paused_pipeline_actions", return_value=set()):
+            assert next_pipeline_action(book, pipeline) == ""
+
+    chapter = pipeline["chapters"][0]
+    assert pipeline["developmentCheckpointLocked"] is True
+    assert chapter["contextStatus"] == "complete"
+    assert chapter["context"]["storySoFar"] == "Preserve me."
+    assert chapter["llmReviewStatus"] == "complete"
+    assert chapter["llmReview"]["editorialSummary"] == "Preserve me too."
+
+
 def test_reset_after_development_boundary_preserves_earlier_results_and_clears_later_work(tmp_path: Path) -> None:
     book = {"id": "book", "manuscriptId": "manuscript"}
     kept = {"sequence": 4, "title": "II. Kept", "status": "complete", "summary": "Keep", "tagStatus": "complete", "tag": {"tags": ["keep"]}, "contextStatus": "pending", "llmReviewStatus": "pending"}
@@ -4588,9 +4623,38 @@ def test_cumulative_context_uses_authored_number_and_preserves_comprehensive_fie
 
     assert "authored chapter 1" in captured["prompt"]
     assert '"sourceSequence": 2' in captured["prompt"]
+    assert "Never silently drop an earlier open thread" in captured["prompt"]
+    assert "explicit subject's name" in captured["prompt"]
     assert context["keyEvents"] == ["The narrator surveys Dunwich."]
     assert context["entitiesAndSignificance"] == ["Dunwich — the principal setting."]
     assert context["readerPromises"] == ["The source of the sounds will matter."]
+
+
+def test_cumulative_context_disposes_every_prior_open_thread_without_silent_loss() -> None:
+    def structured(_prompt, _model, _schema, _cancel_event, _run_key):
+        return ({
+            "story_so_far": "The visitor arrived.", "key_events": [], "established_facts": [],
+            "entities_and_significance": [], "character_states": [], "relationship_states": [],
+            "knowledge_states": [], "locations_and_timeline": [],
+            "open_threads": ["The locked room remains unexplained."],
+            "resolved_threads": ["The caller was revealed as Carmilla."],
+            "thread_updates": [
+                {"previous_thread": "Who called at midnight?", "status": "resolved", "current_wording": "The caller was revealed as Carmilla."},
+            ],
+            "reader_promises": [], "themes_and_motifs": [], "voice_and_form": [],
+        }, "raw")
+
+    previous = {"openThreads": ["Who called at midnight?", "Why is the portrait familiar?"]}
+    with patch.object(server, "run_structured_model", side_effect=structured):
+        context = server.build_cumulative_context(
+            previous=previous, evidence=[], through_chapter=2, model="qwen",
+            rebased=False, cancel_event=threading.Event(), run_key="book-1234",
+        )
+
+    assert "The caller was revealed as Carmilla." in context["resolvedThreads"]
+    assert "Who called at midnight?" not in context["openThreads"]
+    assert "Why is the portrait familiar?" in context["openThreads"]
+    assert context["threadUpdates"][0]["status"] == "resolved"
 
 
 def test_authored_chapter_labels_do_not_count_prologue_as_chapter_one() -> None:
@@ -4787,6 +4851,11 @@ def test_llm_review_rejects_proposed_annotations_without_an_exact_source_quote()
     assert [proposal["quote"] for proposal in result["editorialProposals"]] == ["Exact sentence."]
     assert result["editorialProposals"][0]["characterStart"] == 0
     assert result["editorialProposals"][0]["confidence"] == 0.91
+    assert result["editorialProposals"][0]["passageId"] == "P0001"
+    assert result["editorialProposals"][0]["anchorMatchMethod"] == "exact"
+    adjudication_prompt = run_model.call_args_list[1].args[0]
+    assert "local_continuation" in adjudication_prompt
+    assert "already_answered_nearby=true" in adjudication_prompt
     assert result["dimensions"]["saleability"]["score"] == 4
     assert result["editorialVerdict"] == "material_concerns_found"
     assert result["editorialSummary"] == "1 material editorial concern found."
@@ -5270,12 +5339,43 @@ def test_smells_preserve_all_evidence_and_checkpoint_editorial_batches() -> None
     with patch.object(server, "analyze_prose_smells", return_value={"findings": findings, "errors": {}}), patch.object(server, "run_structured_model", side_effect=judge):
         artifact = server.analyze_chapter_smells({"text": "This sentence winds around."}, "editor-model", on_batch=lambda item: checkpoints.append(item))
 
-    assert artifact["schema"] == "bookinator-smells-v1"
+    assert artifact["schema"] == server.SMELL_SCHEMA_VERSION
+    assert artifact["policyVersion"] == server.SMELL_POLICY_VERSION
     assert artifact["kept"] == 1
     assert artifact["candidates"][0]["detectors"] == ["bookinator", "spacy"]
     assert len(artifact["candidates"][0]["evidence"]) == 2
     assert checkpoints[0]["reviewProgress"] == {"completedBatches": 0, "totalBatches": 1, "complete": False}
     assert checkpoints[-1]["reviewProgress"] == {"completedBatches": 1, "totalBatches": 1, "complete": True}
+
+
+def test_smells_keep_single_density_measurements_out_of_deep_review() -> None:
+    findings = [{
+        "detector": "Bookinator", "rule": "sentence-length", "message": "Long sentence: 34 words.",
+        "sentenceStart": 0, "sentenceEnd": 32, "sentence": "A long but intelligible sentence.", "wordCount": 34,
+    }]
+    with patch.object(server, "analyze_prose_smells", return_value={"findings": findings, "errors": {}}), \
+         patch.object(server, "run_structured_model") as run_model:
+        artifact = server.analyze_chapter_smells({"text": "A long but intelligible sentence."}, "editor-model")
+
+    run_model.assert_not_called()
+    assert artifact["routedForDeepReview"] == 0
+    assert artifact["informational"] == 1
+    assert artifact["kept"] == 0
+    assert artifact["styleSignals"][0]["issue"] == "Long sentence"
+    assert artifact["candidates"][0]["routing"]["route"] == "style_metric"
+    assert artifact["reviewProgress"] == {"completedBatches": 0, "totalBatches": 0, "complete": True}
+
+
+def test_smell_policy_canonicalizes_doctrinaire_proselint_advice_without_deep_review() -> None:
+    candidate = {"evidence": [{
+        "detector": "Proselint", "rule": "weasel_words.very",
+        "message": "Substitute ‘damn’ every time you’re inclined to write ‘very’.",
+    }]}
+    route = server.route_smell_candidate(candidate)
+
+    assert candidate["issueFamilies"] == ["Weasel words"]
+    assert route["route"] == "style_metric"
+    assert route["review"] is False
 
 
 def test_smells_keep_local_candidates_but_do_not_claim_complete_when_editor_review_fails() -> None:
