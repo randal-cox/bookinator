@@ -1418,7 +1418,8 @@ def test_pipeline_exposes_one_book_level_failed_work_recovery_control() -> None:
 def test_development_launcher_delegates_to_the_shared_inator_launcher() -> None:
     launcher = (Path(__file__).parents[1] / "bin" / "serve").read_text(encoding="utf-8")
     assert 'commons_dir="${INATOR_COMMONS_DIR:-$project_dir/../inator}"' in launcher
-    assert 'launcher="$commons_dir/bin/serve"' in launcher
+    assert '"$project_dir/../../inator/node_modules/.bin/inator-serve"' in launcher
+    assert 'launcher="$commons_dir/node_modules/.bin/inator-serve"' in launcher
     assert 'INATOR_PROJECT_DIR="$project_dir"' in launcher
     assert 'PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}"' in launcher
     assert '"$launcher" "$@" -- python3 -m bookinator.server' in launcher
