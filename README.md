@@ -66,11 +66,13 @@ cd bookinator
 ```
 
 During the current paired-development phase, `bin/serve` delegates to
-Inator Commons. Keep the Commons checkout beside this repository as
-`../inator`, or set `INATOR_COMMONS_DIR` to its absolute path. This temporary
-development-source dependency will be replaced by the urgent, versioned
-`@inator/dev-tools` installer. It does not make the running product call back
-to Commons or to a remote service.
+Inator Commons. The launcher prefers the eventual project-home layout with the
+Commons checkout beside this repository as `../inator`; during the folder
+migration it also recognizes the current `../../inator` location. Set
+`INATOR_COMMONS_DIR` to an absolute path to override either lookup. This
+temporary development-source dependency will be replaced by the urgent,
+versioned `@inator/dev-tools` installer. It does not make the running product
+call back to Commons or to a remote service.
 
 On macOS the launcher opens Bookinator in Safari. On other systems, or if a
 browser does not open, visit the local URL printed in the terminal. The default

@@ -3,7 +3,10 @@ set -euo pipefail
 
 project_dir="$(cd "$(dirname "$0")/.." && pwd -P)"
 commons_dir="${INATOR_COMMONS_DIR:-$project_dir/../inator}"
-launcher="$commons_dir/bin/serve"
+if [[ ! -x "$commons_dir/node_modules/.bin/inator-serve" && -x "$project_dir/../../inator/node_modules/.bin/inator-serve" ]]; then
+  commons_dir="$(cd "$project_dir/../../inator" && pwd -P)"
+fi
+launcher="$commons_dir/node_modules/.bin/inator-serve"
 
 if [[ ! -x "$launcher" ]]; then
   printf 'Inator Commons launcher is unavailable: %s\n' "$launcher" >&2
