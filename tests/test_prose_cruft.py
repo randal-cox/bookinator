@@ -24,3 +24,14 @@ def test_prose_projection_masks_markdown_headings_without_moving_offsets():
     assert projected.index("Timmy") == text.index("Timmy")
     assert "CHAPTER" not in projected
     assert "SHADOW" not in projected
+
+
+def test_spacy_clause_counts_cannot_leak_across_canonical_sentence_boundaries():
+    text = "She answered “No.”\n\nHe then asked whether she knew where a letter would reach her at present."
+    result = analyze(text, detectors=("spacy",))
+
+    assert result["errors"] == {}
+    assert not any(
+        item["rule"] == "clause-count" and item["sentence"] == "She answered “No.”"
+        for item in result["findings"]
+    )

@@ -27,6 +27,29 @@ def test_question_details_preserve_specific_editorial_metadata() -> None:
     assert result["promptVersion"] == server.SUMMARY_PROMPT_VERSION
 
 
+def test_summary_question_evidence_is_reanchored_to_exact_canonical_source() -> None:
+    source = "She said, I was all but assassinated in my bed, and never was the same since."
+    supplied = "“I was all but assassinated in my bed, and never was the same since.”"
+    result = server.normalize_chapter_summary({
+        "summary": "She describes an earlier attack.",
+        "key_points": [],
+        "new_questions": ["Who attacked her?"],
+        "question_details": [{
+            "question": "Who attacked her?",
+            "family": "character_knowledge",
+            "evidence": supplied,
+            "evidence_ref": {"passage_id": "P0001", "quote": supplied, "character_start": 10, "character_end": 76},
+            "why_it_matters": "The attack may explain her condition.",
+            "promises_answer": True,
+        }],
+    }, source)
+
+    detail = result["questionDetails"][0]
+    assert detail["evidence"] == "I was all but assassinated in my bed, and never was the same since"
+    assert source[detail["evidenceAnchor"]["characterStart"]:detail["evidenceAnchor"]["characterEnd"]] == detail["evidence"]
+    assert detail["evidenceAnchor"]["matchMethod"] == "normalized"
+
+
 def test_annotation_round_trip_preserves_anchor_and_human_judgment(tmp_path: Path) -> None:
     manuscript = "# CHAPTER 1\n\nMara folded the letter twice. She hid it beneath the flour bin."
     book = {"id": "book-12345678", "manuscriptId": "manuscript-1"}
@@ -179,8 +202,8 @@ def test_prompts_demand_specific_questions_with_evidence() -> None:
     assert "Reject generic discussion prompts" in source
     assert "question_details" in source
     assert "promises_answer" in source
-    assert 'SUMMARY_PROMPT_VERSION = "chapter-summary-v2"' in source
-    assert 'DOSSIER_PROMPT_VERSION = "chapter-dossier-v3"' in source
+    assert 'SUMMARY_PROMPT_VERSION = "chapter-summary-v3"' in source
+    assert 'DOSSIER_PROMPT_VERSION = "chapter-dossier-v4"' in source
 
 
 def test_front_matter_never_promotes_editorial_questions() -> None:

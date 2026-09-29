@@ -114,12 +114,17 @@ def spacy_findings(text: str, spans: list[tuple[int, int, str]]) -> list[dict[st
     nlp.max_length = max(nlp.max_length, len(text) + 100)
     results: list[dict[str, object]] = []
     clausal_dependencies = {"advcl", "ccomp", "xcomp", "relcl", "acl"}
-    for doc_sentence in nlp(prose_projection(text)).sents:
-        sentence = doc_sentence.text.strip()
-        if not sentence or re.match(r"^#{1,6}\s+", sentence):
-            continue
-        start = doc_sentence.start_char + len(doc_sentence.text) - len(doc_sentence.text.lstrip())
-        end = start + len(sentence)
+    # Bookinator's source-preserving sentence spans are authoritative.  Asking
+    # spaCy to segment the complete chapter independently can make it parse a
+    # short quoted sentence together with the following paragraph, then attach
+    # that combined clause count to only the first source sentence.  Parse each
+    # canonical span instead so the metric and the displayed evidence can never
+    # describe different text.
+    source_sentences = [(start, end, sentence) for start, end, sentence in spans if sentence]
+    for (start, end, sentence), doc_sentence in zip(
+        source_sentences,
+        nlp.pipe(sentence for _, _, sentence in source_sentences),
+    ):
         words = [token for token in doc_sentence if not token.is_punct and not token.is_space]
         clauses = [token for token in doc_sentence if token.dep_ in clausal_dependencies]
         finite_verbs = [token for token in doc_sentence if token.pos_ in {"VERB", "AUX"} and "Fin" in token.morph.get("VerbForm")]

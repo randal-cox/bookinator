@@ -3598,6 +3598,28 @@ def test_dossier_analysis_preserves_structured_evidence() -> None:
     assert result["facts"] == response["facts"]
 
 
+def test_dossier_evidence_offsets_are_relocated_into_canonical_chapter_text() -> None:
+    import bookinator.server.__main__ as server
+
+    canonical = "# Chapter\n\nFirst fact.\n\nSecond exact supporting sentence."
+    chunk = "## Chapter\n\nFirst fact.\n\n--- PAGE BREAK ---\n\nSecond exact supporting sentence."
+    quote = "Second exact supporting sentence."
+    chunk_start = chunk.index(quote)
+    response = {
+        "synopsis": "A concise account.", "facts": [], "events": [], "entities": [], "locations": [],
+        "current_times": [], "questions": [], "question_details": [], "promises": [], "timeline_observations": [],
+        "evidence": [{"passage_id": "P0003", "quote": quote, "character_start": chunk_start, "character_end": chunk_start + len(quote)}],
+    }
+    with patch.object(server, "run_structured_model", return_value=(response, "raw")):
+        result = server.analyze_chunk_dossier({"chapterLabel": "Chapter", "text": chunk}, "model", canonical_chapter_text=canonical)
+
+    anchor = result["evidenceAnchors"][0]
+    assert anchor["characterStart"] == canonical.index(quote)
+    assert canonical[anchor["characterStart"]:anchor["characterEnd"]] == quote
+    assert anchor["chunkCharacterStart"] == chunk_start
+    assert anchor["anchorSource"] == "canonical-chapter"
+
+
 def test_dossier_analysis_retries_one_malformed_structured_response() -> None:
     import bookinator.server.__main__ as server
 
@@ -4940,6 +4962,33 @@ def test_llm_review_calibration_preserves_significant_soft_and_discarded_outcome
     assert len(result["editorialProposals"]) == 1
     assert result["rejectedCandidates"][0]["status"] == "soft_lead"
     assert result["discardedCandidates"][0]["status"] == "rejected_by_model"
+
+
+def test_llm_review_discards_a_soft_candidate_without_a_concrete_source_problem() -> None:
+    text = "The dream opened into waking without a pause."
+    editorial = {
+        "editorial_verdict": "material_concerns_found", "editorial_summary": "One candidate.",
+        "verdict_basis": "A transition may merit attention.", "strengths": [],
+        "editorial_proposals": [{
+            "passage_id": "P0001", "quote": text, "character_start": 0, "character_end": len(text),
+            "category": "continuity", "priority": "normal", "comment": "The transition could be smoother.",
+            "reader_effect": "A reader may pause.", "prior_context": "", "intentionality_check": "Intent is uncertain.",
+            "revision_goal": "Smooth the transition.", "confidence": .9,
+        }],
+    }
+    decisions = {"decisions": [{
+        "candidate_number": 1, "verdict": "soft", "already_answered_nearby": False,
+        "concrete_source_problem": False, "source_observation": "",
+        "proposal_defect": "none", "reason": "The proposal names only a possible effect.",
+    }]}
+    dimensions = {key: {"applicable": True, "score": 3, "confidence": "medium", "rationale": "Supported.", "evidence": []} for key in server.LLM_REVIEW_DIMENSIONS}
+    assessment = {"dimensions": dimensions, "likely_readers": [], "commercial_strengths": [], "commercial_risks": []}
+    with patch.object(server, "run_structured_model", side_effect=[(editorial, ""), (decisions, ""), (assessment, "")]):
+        result = server.review_context_packet({"chapter": {"sequence": 1, "text": text}, "priorContext": {}}, "reader", threading.Event(), "book-1234")
+
+    assert result["rejectedCandidates"] == []
+    assert result["discardedCandidates"][0]["status"] == "rejected_by_model"
+    assert result["discardedCandidates"][0]["adjudicationDefect"] == "generic"
 
 
 def test_llm_review_normalizes_an_empty_proposal_set_to_a_direct_clear_verdict() -> None:

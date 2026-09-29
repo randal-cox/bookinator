@@ -125,8 +125,8 @@ TAG_PROMPT_VERSION = "chapter-tags-v4"
 SMELL_SCHEMA_VERSION = "bookinator-smells-v2"
 SMELL_POLICY_VERSION = "smell-routing-v1"
 SMELL_PROMPT_VERSION = "smell-review-v2"
-SUMMARY_PROMPT_VERSION = "chapter-summary-v2"
-DOSSIER_PROMPT_VERSION = "chapter-dossier-v3"
+SUMMARY_PROMPT_VERSION = "chapter-summary-v3"
+DOSSIER_PROMPT_VERSION = "chapter-dossier-v4"
 ANNOTATION_SCHEMA_VERSION = "bookinator-annotation-v2"
 REVIEWER_SIGNOFF_SCHEMA_VERSION = "bookinator-reviewer-signoff-v1"
 ANNOTATION_CATEGORIES = ("editorial", "clarity", "character", "continuity", "plot", "prose", "question", "praise")
@@ -134,7 +134,7 @@ QUESTION_FAMILIES = (
     "motivation", "causality", "character_knowledge", "relationship_change",
     "thematic_consequence", "reader_expectation", "setup_payoff", "factual_continuity",
 )
-LLM_REVIEW_PROMPT_VERSION = "llm-review-v8"
+LLM_REVIEW_PROMPT_VERSION = "llm-review-v9"
 WHOLE_BOOK_LLM_REVIEW_PROMPT_VERSION = "whole-book-llm-review-v1"
 CUMULATIVE_CONTEXT_PROMPT_VERSION = "cumulative-context-v4"
 CUMULATIVE_CONTEXT_REBASE_INTERVAL = 5
@@ -4444,13 +4444,30 @@ def normalize_question_details(value: object) -> list[dict[str, object]]:
     return details
 
 
-def normalize_chapter_summary(payload: dict[str, object]) -> dict[str, object]:
+def normalize_chapter_summary(payload: dict[str, object], source_text: str = "") -> dict[str, object]:
     summary = str(normalized_model_field(payload, "summary", "chapter summary", "chapter_summary", "digest", "synopsis") or "").strip()
     if not summary:
         raise ChapterSummaryError("The model returned JSON without a chapter summary. This chapter remains retryable.", json.dumps(payload, ensure_ascii=False), [str(key) for key in payload])
     key_points = normalized_model_field(payload, "key points", "key_points", "keyPoints", "established facts")
     new_questions = normalized_model_field(payload, "new questions", "new_questions", "newQuestions", "open questions")
-    question_details = normalize_question_details(normalized_model_field(payload, "question details", "question_details", "questionDetails"))
+    raw_question_details = normalized_model_field(payload, "question details", "question_details", "questionDetails")
+    question_details = normalize_question_details(raw_question_details)
+    if source_text and question_details:
+        raw_by_question = {
+            str(normalized_model_field(item, "question", "text") or "").strip(): item
+            for item in raw_question_details if isinstance(item, dict)
+        } if isinstance(raw_question_details, list) else {}
+        for detail in question_details:
+            raw = raw_by_question.get(str(detail["question"]), {})
+            anchor = resolve_source_evidence(source_text, raw.get("evidence_ref") or raw.get("evidence"))
+            if anchor:
+                detail["evidence"] = anchor["quote"]
+                detail["evidenceAnchor"] = anchor
+            else:
+                # Never present model-authored near-quotes as source evidence.
+                # The question remains useful, but navigation is withheld until
+                # a canonical anchor exists.
+                detail["evidence"] = ""
     questions = [str(item).strip() for item in new_questions if str(item).strip()] if isinstance(new_questions, list) else []
     if question_details:
         questions = [str(item["question"]) for item in question_details]
@@ -4601,7 +4618,8 @@ Questions must be specific editorial leads earned by this chapter. Ask what rema
 Each question_details object must contain:
 - question: the concrete question, exactly matching an entry in new_questions
 - family: exactly one of motivation, causality, character_knowledge, relationship_change, thematic_consequence, reader_expectation, setup_payoff, factual_continuity
-- evidence: a short exact quotation or precise textual trigger from this chapter
+- evidence: a short exact quotation from this chapter
+- evidence_ref: the supplied passage ID, printed character start and end, and the same exact copied quotation
 - why_it_matters: the consequence for character, causality, relationship, theme, continuity, or reader expectation
 - promises_answer: true only when the manuscript appears to create an obligation to answer this later
 
@@ -4613,16 +4631,18 @@ Chapter title: {chapter.get('chapterTitle') or 'Not stated'}
 Viewpoint or section markers: {json.dumps(chapter.get('sectionMarkers') or [], ensure_ascii=False)}
 {manuscript_location_prompt(chapter)}
 
-{text}
+Canonical source passages:
+{evidence_passage_prompt(text)}
 """
-    question_detail = {"type": "object", "properties": {"question": {"type": "string", "minLength": 1}, "family": {"type": "string", "enum": list(QUESTION_FAMILIES)}, "evidence": {"type": "string"}, "why_it_matters": {"type": "string"}, "promises_answer": {"type": "boolean"}}, "required": ["question", "family", "evidence", "why_it_matters", "promises_answer"]}
+    evidence_ref = {"type": "object", "properties": {"passage_id": {"type": "string", "minLength": 1}, "quote": {"type": "string", "minLength": 1}, "character_start": {"type": "integer", "minimum": 0}, "character_end": {"type": "integer", "minimum": 1}}, "required": ["passage_id", "quote", "character_start", "character_end"]}
+    question_detail = {"type": "object", "properties": {"question": {"type": "string", "minLength": 1}, "family": {"type": "string", "enum": list(QUESTION_FAMILIES)}, "evidence": {"type": "string"}, "evidence_ref": evidence_ref, "why_it_matters": {"type": "string"}, "promises_answer": {"type": "boolean"}}, "required": ["question", "family", "evidence", "evidence_ref", "why_it_matters", "promises_answer"]}
     schema = {"type": "object", "properties": {"summary": {"type": "string", "minLength": 1}, "key_points": {"type": "array", "items": {"type": "string"}}, "new_questions": {"type": "array", "items": {"type": "string"}}, "question_details": {"type": "array", "items": question_detail}}, "required": ["summary", "key_points", "new_questions", "question_details"]}
     try:
         result, raw_response = run_structured_model(prompt, model, schema, cancel_event, run_key)
     except json.JSONDecodeError as error:
         raise ChapterSummaryError(f"The model returned malformed JSON: {error.msg}. This chapter remains retryable.") from error
     try:
-        normalized = normalize_chapter_summary(result)
+        normalized = normalize_chapter_summary(result, text)
         normalized.setdefault("questionDetails", [])
         normalized["promptVersion"] = SUMMARY_PROMPT_VERSION
         if is_front_matter(chapter):
@@ -7774,10 +7794,12 @@ def llm_editorial_adjudication_schema() -> dict[str, object]:
                         "candidate_number": {"type": "integer", "minimum": 1, "maximum": 3},
                         "verdict": {"type": "string", "enum": ["significant", "soft", "reject"]},
                         "already_answered_nearby": {"type": "boolean"},
+                        "concrete_source_problem": {"type": "boolean"},
+                        "source_observation": {"type": "string"},
                         "proposal_defect": {"type": "string", "enum": ["none", "unsupported", "factually_mistaken", "duplicative", "resolved_by_prior_context", "resolved_in_local_lead_in", "resolved_in_local_continuation", "generic", "deterministic_smell_only", "misreads_deliberate_technique"]},
                         "reason": {"type": "string", "minLength": 1},
                     },
-                    "required": ["candidate_number", "verdict", "already_answered_nearby", "proposal_defect", "reason"],
+                    "required": ["candidate_number", "verdict", "already_answered_nearby", "concrete_source_problem", "source_observation", "proposal_defect", "reason"],
                 },
                 "maxItems": 3,
             },
@@ -7988,8 +8010,10 @@ For saleability, discuss audience clarity, genre promise, positioning, accessibi
 
 Decide each supplied candidate independently:
 - significant: the source supports a concrete material reader effect and a professional editor would probably interrupt the author about it.
-- soft: the concern is plausible and worth showing a human, but intent, context, severity, or the best revision remains uncertain.
+- soft: the source contains a concrete, nameable problem or tradeoff worth showing a human, but intent, context, severity, or the best revision remains uncertain.
 - reject: identify a concrete defect in the proposal itself—it is unsupported by the source, factually mistaken, duplicative, already resolved by prior context, purely generic, or merely restates a deterministic Smell without narrative consequence.
+
+For significant or soft, set concrete_source_problem=true and use source_observation to name what the passage actually does—not what it vaguely "may" do. A generic possibility is not a soft lead. For example, "this may slow pacing; consider shortening" is generic unless it identifies the redundant beat, delayed expectation, or lost causal/emotional step. "The transition could be smoother" is generic unless it identifies the missing temporal, spatial, causal, or viewpoint bridge. Reject such proposals with proposal_defect=generic. Set concrete_source_problem=false for every rejected generic or unsupported proposal.
 
 Before assigning a verdict, read both local_before and local_continuation. Set already_answered_nearby=true when either side supplies the clarification, recognition, causal bridge, or explanation the proposal requests. In that case verdict must be reject. Use proposal_defect=resolved_in_local_lead_in when the answer precedes the anchor, or resolved_in_local_continuation when it follows. A proposal cannot be significant merely because its isolated anchor looks confusing after the model ignores nearby setup or a deliberately timed answer.
 
@@ -8037,6 +8061,14 @@ Candidates with local source context:
     for item in raw_candidates:
         decision = decisions.get(int(item["candidate_number"]), {})
         verdict = str(decision.get("verdict") or "soft")
+        concrete_source_problem = decision.get("concrete_source_problem")
+        if verdict in {"significant", "soft"} and concrete_source_problem is False:
+            verdict = "reject"
+            decision = {
+                **decision,
+                "proposal_defect": "generic",
+                "reason": str(decision.get("reason") or "The proposal does not identify a concrete source-level problem."),
+            }
         if verdict != "significant":
             candidate = {
                 "quote": str(item.get("quote") or ""),
@@ -8047,6 +8079,7 @@ Candidates with local source context:
                 "reason": str(decision.get("reason") or "The skeptical pass did not affirm this candidate."),
                 "adjudicationDefect": str(decision.get("proposal_defect") or "none"),
                 "alreadyAnsweredNearby": bool(decision.get("already_answered_nearby", False)),
+                "adjudicationObservation": str(decision.get("source_observation") or "").strip(),
                 "characterStart": int(item.get("character_start") or 0),
                 "characterEnd": int(item.get("character_end") or 0),
                 "readerEffect": str(item.get("reader_effect") or "").strip(),
@@ -8084,6 +8117,7 @@ Candidates with local source context:
             "adjudicationReason": str(decision.get("reason") or "").strip(),
             "adjudicationDefect": str(decision.get("proposal_defect") or "none"),
             "alreadyAnsweredNearby": bool(decision.get("already_answered_nearby", False)),
+            "adjudicationObservation": str(decision.get("source_observation") or "").strip(),
             "status": "proposed",
         })
     concern_count = len(proposals)
@@ -8430,7 +8464,10 @@ def run_question_tracker_pipeline(book_id: str) -> None:
         PIPELINE_CANCEL_EVENTS.pop(book_id, None)
 
 
-def analyze_chunk_dossier(chunk: dict[str, object], model: str, cancel_event: threading.Event | None = None, run_key: str = "") -> dict[str, object]:
+def analyze_chunk_dossier(
+    chunk: dict[str, object], model: str, cancel_event: threading.Event | None = None,
+    run_key: str = "", canonical_chapter_text: str = "",
+) -> dict[str, object]:
     front_matter = is_front_matter(chunk, "chapterLabel")
     material_guidance = front_matter_analysis_guidance("dossier") if front_matter else "This is narrative manuscript material; apply the dossier fields normally."
     text = str(chunk.get("text") or "")[:45_000]
@@ -8464,13 +8501,29 @@ Canonical source passages:
     if not synopsis:
         raise ValueError("The model returned a dossier without a synopsis.")
     question_details = normalize_question_details(result.get("question_details"))
-    evidence_anchors = [anchor for item in result.get("evidence", []) if (anchor := resolve_source_evidence(text, item))] if isinstance(result.get("evidence"), list) else []
+
+    def canonical_anchor(value: object) -> dict[str, object] | None:
+        """Resolve against the model input, then relocate into reader-visible text."""
+        chunk_anchor = resolve_source_evidence(text, value)
+        if not chunk_anchor:
+            return None
+        if not canonical_chapter_text:
+            return chunk_anchor
+        chapter_anchor = resolve_source_evidence(canonical_chapter_text, {"quote": chunk_anchor["quote"]})
+        if not chapter_anchor:
+            return None
+        chapter_anchor["chunkCharacterStart"] = chunk_anchor["characterStart"]
+        chapter_anchor["chunkCharacterEnd"] = chunk_anchor["characterEnd"]
+        chapter_anchor["anchorSource"] = "canonical-chapter"
+        return chapter_anchor
+
+    evidence_anchors = [anchor for item in result.get("evidence", []) if (anchor := canonical_anchor(item))] if isinstance(result.get("evidence"), list) else []
     normalized = {"synopsis": synopsis, **{key: [str(item).strip() for item in result.get(key, []) if str(item).strip()] if isinstance(result.get(key), list) else [] for key in ("facts", "events", "entities", "locations", "current_times", "questions", "promises", "timeline_observations")}, "evidence": [str(item["quote"]) for item in evidence_anchors], "evidenceAnchors": evidence_anchors}
     if "question_details" in result:
         raw_details = {str(item.get("question") or ""): item for item in result.get("question_details", []) if isinstance(item, dict)}
         for detail in question_details:
             raw = raw_details.get(str(detail["question"]), {})
-            anchor = resolve_source_evidence(text, raw.get("evidence_ref") or raw.get("evidence"))
+            anchor = canonical_anchor(raw.get("evidence_ref") or raw.get("evidence"))
             if anchor:
                 detail["evidence"] = anchor["quote"]
                 detail["evidenceAnchor"] = anchor
@@ -8491,6 +8544,7 @@ def analyze_chunk_dossier_resilient(
     model: str,
     cancel_event: threading.Event | None = None,
     run_key: str = "",
+    canonical_chapter_text: str = "",
     attempts: int = 2,
     retry_delay: float = 0.75,
 ) -> dict[str, object]:
@@ -8498,7 +8552,7 @@ def analyze_chunk_dossier_resilient(
     failures: list[dict[str, object]] = []
     for attempt in range(1, max(1, attempts) + 1):
         try:
-            dossier = analyze_chunk_dossier(chunk, model, cancel_event, run_key)
+            dossier = analyze_chunk_dossier(chunk, model, cancel_event, run_key, canonical_chapter_text)
             if failures:
                 dossier["retryDiagnostics"] = failures
             return dossier
@@ -8594,7 +8648,12 @@ def run_dossier_pipeline(book_id: str, chapter_sequence: int | None = None) -> N
             pipeline.update({"message": f"Building dossier {index + 1} of {len(chunks)} · {visible.get('chapterLabel')}, chunk {visible.get('chunkInChapter')}.", "updatedAt": utc_now()})
             write_pipeline(book, pipeline)
             try:
-                dossier = analyze_chunk_dossier_resilient(artifact, model, cancel_event, book_id)
+                chapter_source = load_chapter_source(book, int(visible.get("chapterSequence") or 0))
+                canonical_chapter_text = str(chapter_source.get("text") or "") if chapter_source else ""
+                dossier = analyze_chunk_dossier_resilient(
+                    artifact, model, cancel_event, book_id,
+                    canonical_chapter_text=canonical_chapter_text,
+                )
                 finished = utc_now()
                 duration = round(time.monotonic() - started, 1)
                 result = {
