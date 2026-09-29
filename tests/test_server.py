@@ -3460,6 +3460,21 @@ def test_chapter_summary_accepts_common_model_key_variants() -> None:
     assert result == {"summary": "A useful digest.", "keyPoints": ["One"], "newQuestions": ["Why?"]}
 
 
+def test_chapter_summary_anchors_literal_chapter_ending_state() -> None:
+    source = "The servants forced the locked door. But Carmilla was gone."
+    result = normalize_chapter_summary({
+        "summary": "The room is opened and Carmilla is absent.",
+        "key_points": [], "new_questions": [], "question_details": [],
+        "ending_state": [{
+            "fact": "The servants open the locked room and discover that Carmilla is gone.",
+            "evidence_ref": {"passage_id": "P0001", "quote": "But Carmilla was gone.", "character_start": 38, "character_end": 60},
+        }],
+    }, source)
+
+    assert result["endingState"][0]["evidence"] == "But Carmilla was gone."
+    assert source[result["endingState"][0]["evidenceAnchor"]["characterStart"]:result["endingState"][0]["evidenceAnchor"]["characterEnd"]] == "But Carmilla was gone."
+
+
 def test_front_matter_summary_preserves_structure_without_inventing_story_questions() -> None:
     import bookinator.server.__main__ as server
 
@@ -3596,6 +3611,24 @@ def test_dossier_analysis_preserves_structured_evidence() -> None:
     assert result["evidence"] == ["Exact supporting words"]
     assert result["evidenceAnchors"][0]["characterStart"] == 0
     assert result["facts"] == response["facts"]
+
+
+def test_dossier_discards_generic_relationship_questions() -> None:
+    response = {
+        "synopsis": "The companions speak.", "facts": ["They are intimate companions."],
+        "events": [], "entities": ["Laura", "Carmilla"], "locations": [], "current_times": [],
+        "questions": ["What is the relationship between Laura and Carmilla?", "Why does Carmilla refuse to identify the woman in Laura's dream?"],
+        "question_details": [
+            {"question": "What is the relationship between Laura and Carmilla?", "family": "relationship_change", "evidence": "They are intimate companions.", "why_it_matters": "Their bond matters.", "promises_answer": False},
+            {"question": "Why does Carmilla refuse to identify the woman in Laura's dream?", "family": "motivation", "evidence": "I cannot tell you.", "why_it_matters": "The refusal preserves a secret.", "promises_answer": True},
+        ],
+        "promises": [], "timeline_observations": [], "evidence": [],
+    }
+    with patch.object(server, "run_structured_model", return_value=(response, "raw")):
+        result = server.analyze_chunk_dossier({"chapterLabel": "VII", "text": "They are intimate companions. I cannot tell you."}, "model")
+
+    assert result["questions"] == ["Why does Carmilla refuse to identify the woman in Laura's dream?"]
+    assert [item["question"] for item in result["questionDetails"]] == result["questions"]
 
 
 def test_dossier_evidence_offsets_are_relocated_into_canonical_chapter_text() -> None:
@@ -4485,7 +4518,20 @@ def test_chapter_tag_schema_requires_evidence_for_every_returned_signal() -> Non
     signal = schema["properties"]["signals"]["items"]
     assert signal["properties"]["score"]["minimum"] == .25
     assert signal["properties"]["evidence"]["minItems"] == 1
-    assert server.TAG_PROMPT_VERSION == "chapter-tags-v4"
+    assert server.TAG_PROMPT_VERSION == "chapter-tags-v5"
+
+
+def test_mortality_tag_requires_mortality_evidence() -> None:
+    response = {
+        "signals": [{"id": "mortality", "family": "theme_topic", "score": .75, "confidence": .8, "explanation": "Her languor suggests mortality.", "evidence": [{"quote": "She slept through the melancholy afternoon."}]}],
+        "candidate_signals": [],
+    }
+    with patch.object(server, "run_structured_model", return_value=(response, "{}")):
+        artifact = server.analyze_chapter_tags({"sequence": 9, "title": "VII", "text": "She slept through the melancholy afternoon."}, "qwen")
+
+    assert artifact["signals"] == []
+    assert artifact["rejectedSignals"][0]["id"] == "mortality"
+    assert "credible mortal danger" in artifact["rejectedSignals"][0]["reason"]
 
 
 def test_chapter_tags_keep_mystery_genre_distinct_from_withheld_information() -> None:
@@ -4719,6 +4765,25 @@ def test_cumulative_context_disposes_every_prior_open_thread_without_silent_loss
     assert "Who called at midnight?" not in context["openThreads"]
     assert "Why is the portrait familiar?" in context["openThreads"]
     assert context["threadUpdates"][0]["status"] == "resolved"
+
+
+def test_cumulative_context_retires_non_specific_bookkeeping_threads() -> None:
+    response = {
+        "story_so_far": "The search continues.", "key_events": [], "established_facts": [],
+        "entities_and_significance": [], "character_states": [], "relationship_states": [],
+        "knowledge_states": [], "locations_and_timeline": [], "open_threads": [],
+        "resolved_threads": [], "retired_threads": ["What happens next?"],
+        "thread_updates": [{"previous_thread": "What happens next?", "status": "retired", "current_wording": "What happens next?"}],
+        "reader_promises": [], "themes_and_motifs": [], "voice_and_form": [],
+    }
+    with patch.object(server, "run_structured_model", return_value=(response, "raw")):
+        context = server.build_cumulative_context(
+            previous={"openThreads": ["What happens next?"]}, evidence=[], through_chapter=8,
+            model="qwen", rebased=False, cancel_event=threading.Event(), run_key="book-1234",
+        )
+
+    assert context["openThreads"] == []
+    assert context["retiredThreads"] == ["What happens next?"]
 
 
 def test_authored_chapter_labels_do_not_count_prologue_as_chapter_one() -> None:
@@ -4989,6 +5054,36 @@ def test_llm_review_discards_a_soft_candidate_without_a_concrete_source_problem(
     assert result["rejectedCandidates"] == []
     assert result["discardedCandidates"][0]["status"] == "rejected_by_model"
     assert result["discardedCandidates"][0]["adjudicationDefect"] == "generic"
+
+
+def test_llm_review_rejects_functional_withholding_when_present_scene_is_clear() -> None:
+    text = "The charm burned cold against her wrist, but no one yet knew why."
+    editorial = {
+        "editorial_verdict": "material_concerns_found", "editorial_summary": "One candidate.",
+        "verdict_basis": "The charm's rule remains unstated.", "strengths": [],
+        "editorial_proposals": [{
+            "passage_id": "P0001", "quote": text, "character_start": 0, "character_end": len(text),
+            "category": "clarity", "priority": "normal", "comment": "Explain exactly what the charm protects against.",
+            "reader_effect": "The mechanism is unknown.", "prior_context": "The charm is a live mystery.",
+            "intentionality_check": "The answer may be withheld.", "revision_goal": "State the rule now.", "confidence": .9,
+        }],
+    }
+    decisions = {"decisions": [{
+        "candidate_number": 1, "verdict": "soft", "already_answered_nearby": False,
+        "concrete_source_problem": True, "withheld_information": True,
+        "present_scene_comprehensible": True, "withholding_is_functional": True,
+        "source_observation": "The charm reacts while its mechanism remains concealed.",
+        "proposal_defect": "none", "reason": "The scene is legible and the mechanism is intentionally withheld.",
+    }]}
+    dimensions = {key: {"applicable": True, "score": 4, "confidence": "medium", "rationale": "Supported.", "evidence": []} for key in server.LLM_REVIEW_DIMENSIONS}
+    assessment = {"dimensions": dimensions, "likely_readers": [], "commercial_strengths": [], "commercial_risks": []}
+    packet = {"chapter": {"sequence": 1, "text": text}, "priorContext": {"openThreads": ["What power does the charm have?"]}}
+
+    with patch.object(server, "run_structured_model", side_effect=[(editorial, ""), (decisions, ""), (assessment, "")]):
+        result = server.review_context_packet(packet, "reader", threading.Event(), "book-1234")
+
+    assert result["rejectedCandidates"] == []
+    assert result["discardedCandidates"][0]["adjudicationDefect"] == "misreads_deliberate_technique"
 
 
 def test_llm_review_normalizes_an_empty_proposal_set_to_a_direct_clear_verdict() -> None:

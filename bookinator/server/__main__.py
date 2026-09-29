@@ -121,12 +121,12 @@ EMOTION_SCHEMA_VERSION = "bookinator-emotion-v1"
 EMOTION_LABELS = ("anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise")
 TAG_SCHEMA_VERSION = "bookinator-chapter-tags-v2"
 TAG_TAXONOMY_VERSION = "bookinator-chapter-signals-v2"
-TAG_PROMPT_VERSION = "chapter-tags-v4"
+TAG_PROMPT_VERSION = "chapter-tags-v5"
 SMELL_SCHEMA_VERSION = "bookinator-smells-v2"
 SMELL_POLICY_VERSION = "smell-routing-v1"
 SMELL_PROMPT_VERSION = "smell-review-v2"
-SUMMARY_PROMPT_VERSION = "chapter-summary-v3"
-DOSSIER_PROMPT_VERSION = "chapter-dossier-v4"
+SUMMARY_PROMPT_VERSION = "chapter-summary-v4"
+DOSSIER_PROMPT_VERSION = "chapter-dossier-v5"
 ANNOTATION_SCHEMA_VERSION = "bookinator-annotation-v2"
 REVIEWER_SIGNOFF_SCHEMA_VERSION = "bookinator-reviewer-signoff-v1"
 ANNOTATION_CATEGORIES = ("editorial", "clarity", "character", "continuity", "plot", "prose", "question", "praise")
@@ -134,9 +134,9 @@ QUESTION_FAMILIES = (
     "motivation", "causality", "character_knowledge", "relationship_change",
     "thematic_consequence", "reader_expectation", "setup_payoff", "factual_continuity",
 )
-LLM_REVIEW_PROMPT_VERSION = "llm-review-v9"
+LLM_REVIEW_PROMPT_VERSION = "llm-review-v10"
 WHOLE_BOOK_LLM_REVIEW_PROMPT_VERSION = "whole-book-llm-review-v1"
-CUMULATIVE_CONTEXT_PROMPT_VERSION = "cumulative-context-v4"
+CUMULATIVE_CONTEXT_PROMPT_VERSION = "cumulative-context-v5"
 CUMULATIVE_CONTEXT_REBASE_INTERVAL = 5
 LLM_REVIEW_DIMENSIONS = (
     "narrative_engagement", "character_likability", "character_relatability",
@@ -204,7 +204,7 @@ STAGE_ROLLUP_DEFINITIONS: dict[str, dict[str, object]] = {
         "resultKey": "wholeBookSummary",
         "collection": "chapters",
         "statusField": "status",
-        "payloadFields": ("sequence", "number", "title", "chapterTitle", "summary", "keyPoints", "newQuestions", "questionDetails", "promptVersion", "model", "completedAt"),
+        "payloadFields": ("sequence", "number", "title", "chapterTitle", "summary", "keyPoints", "endingState", "newQuestions", "questionDetails", "promptVersion", "model", "completedAt"),
         "excludeFrontMatter": True,
     },
     "dossier": {
@@ -4451,6 +4451,7 @@ def normalize_chapter_summary(payload: dict[str, object], source_text: str = "")
     key_points = normalized_model_field(payload, "key points", "key_points", "keyPoints", "established facts")
     new_questions = normalized_model_field(payload, "new questions", "new_questions", "newQuestions", "open questions")
     raw_question_details = normalized_model_field(payload, "question details", "question_details", "questionDetails")
+    raw_ending_state = normalized_model_field(payload, "ending state", "ending_state", "endingState")
     question_details = normalize_question_details(raw_question_details)
     if source_text and question_details:
         raw_by_question = {
@@ -4476,6 +4477,16 @@ def normalize_chapter_summary(payload: dict[str, object], source_text: str = "")
         "keyPoints": [str(item).strip() for item in key_points if str(item).strip()] if isinstance(key_points, list) else [],
         "newQuestions": questions,
     }
+    ending_state: list[dict[str, object]] = []
+    for item in raw_ending_state if isinstance(raw_ending_state, list) else []:
+        if not isinstance(item, dict):
+            continue
+        fact = str(normalized_model_field(item, "fact", "state") or "").strip()
+        anchor = resolve_source_evidence(source_text, normalized_model_field(item, "evidence ref", "evidence_ref", "evidence")) if source_text else None
+        if fact and anchor:
+            ending_state.append({"fact": fact, "evidence": anchor["quote"], "evidenceAnchor": anchor})
+    if ending_state:
+        normalized["endingState"] = ending_state
     if question_details:
         normalized.update({"questionDetails": question_details, "promptVersion": SUMMARY_PROMPT_VERSION})
     return normalized
@@ -4610,8 +4621,10 @@ def summarize_chapter(chapter: dict[str, object], model: str, cancel_event: thre
     text = str(chapter.get("text") or "")[:60_000]
     material_guidance = front_matter_analysis_guidance("summary") if is_front_matter(chapter) else "This is narrative manuscript material."
     prompt = f"""Read this manuscript chapter and create a compact editorial digest.
-Return JSON only with: summary (string, 2-4 paragraphs), key_points (array of strings), new_questions (array of strings), and question_details (array of objects).
+Return JSON only with: summary (string, 2-4 paragraphs), key_points (array of strings), ending_state (array of objects), new_questions (array of strings), and question_details (array of objects).
 Report what the text establishes; do not invent resolutions or facts. This is a chapter summary, not a critique.
+
+Before drafting the summary, inspect the final source passages closely. ending_state is the literal state of important people, objects, places, and unresolved actions at the chapter boundary. Each object contains fact and evidence_ref. Anchor every fact to an exact source quotation. Preserve grammatical actors and objects: a locked door or room does not mean a person was found locked inside it; a forced entry followed by an empty room means the person is absent, not found. Distinguish what a character observes from what the text establishes. If summary prose conflicts with anchored ending_state, ending_state must be correct.
 
 Questions must be specific editorial leads earned by this chapter. Ask what remains uncertain about a particular choice, avoided action, competing motive, causal bridge, concealed knowledge, relationship change, thematic pressure, reader expectation, setup, or factual continuity. Name the exact action, revelation, contradiction, image, line of dialogue, or change that creates the question. Reject generic discussion prompts that could fit almost any chapter, and reject questions the chapter already answers. Prefer questions a later passage could answer, complicate, transform, or deliberately leave open. Do not force a question when the chapter creates no meaningful unresolved pressure.
 
@@ -4635,8 +4648,9 @@ Canonical source passages:
 {evidence_passage_prompt(text)}
 """
     evidence_ref = {"type": "object", "properties": {"passage_id": {"type": "string", "minLength": 1}, "quote": {"type": "string", "minLength": 1}, "character_start": {"type": "integer", "minimum": 0}, "character_end": {"type": "integer", "minimum": 1}}, "required": ["passage_id", "quote", "character_start", "character_end"]}
+    ending_state = {"type": "object", "properties": {"fact": {"type": "string", "minLength": 1}, "evidence_ref": evidence_ref}, "required": ["fact", "evidence_ref"]}
     question_detail = {"type": "object", "properties": {"question": {"type": "string", "minLength": 1}, "family": {"type": "string", "enum": list(QUESTION_FAMILIES)}, "evidence": {"type": "string"}, "evidence_ref": evidence_ref, "why_it_matters": {"type": "string"}, "promises_answer": {"type": "boolean"}}, "required": ["question", "family", "evidence", "evidence_ref", "why_it_matters", "promises_answer"]}
-    schema = {"type": "object", "properties": {"summary": {"type": "string", "minLength": 1}, "key_points": {"type": "array", "items": {"type": "string"}}, "new_questions": {"type": "array", "items": {"type": "string"}}, "question_details": {"type": "array", "items": question_detail}}, "required": ["summary", "key_points", "new_questions", "question_details"]}
+    schema = {"type": "object", "properties": {"summary": {"type": "string", "minLength": 1}, "key_points": {"type": "array", "items": {"type": "string"}}, "ending_state": {"type": "array", "items": ending_state}, "new_questions": {"type": "array", "items": {"type": "string"}}, "question_details": {"type": "array", "items": question_detail}}, "required": ["summary", "key_points", "ending_state", "new_questions", "question_details"]}
     try:
         result, raw_response = run_structured_model(prompt, model, schema, cancel_event, run_key)
     except json.JSONDecodeError as error:
@@ -4644,12 +4658,14 @@ Canonical source passages:
     try:
         normalized = normalize_chapter_summary(result, text)
         normalized.setdefault("questionDetails", [])
+        normalized.setdefault("endingState", [])
         normalized["promptVersion"] = SUMMARY_PROMPT_VERSION
         if is_front_matter(chapter):
             # Never promote questions inferred from a table of contents into
             # the story's obligation ledger, even if the model overreaches.
             normalized["newQuestions"] = []
             normalized["questionDetails"] = []
+            normalized["endingState"] = []
             normalized["analysisMode"] = "front-matter-structural"
         return normalized
     except ChapterSummaryError as error:
@@ -5213,6 +5229,16 @@ def narrative_person_metrics(text: str) -> dict[str, object]:
     return {"firstPersonPronouns": first, "secondPersonPronouns": second, "thirdPersonPronouns": third, "narrationWordCount": words, "dominantPerson": dominant}
 
 
+def evidence_supports_mortality(evidence_items: list[dict[str, object]]) -> bool:
+    """Require the mortality tag to point at death or credible mortal danger."""
+    language = " ".join(str(item.get("quote") or "") for item in evidence_items)
+    return bool(re.search(
+        r"\b(?:death|dead|die|dies|died|dying|mortal|mortality|kill(?:ed|ing|s)?|murder(?:ed|ing|s)?|"
+        r"assassin(?:ated|ation)?|fatal|corpse|grave|burial|buried|life[- ]threatening|life and death)\b",
+        language, re.I,
+    ))
+
+
 def chapter_tag_schema() -> dict[str, object]:
     all_ids = [signal_id for ids in TAG_FAMILIES.values() for signal_id in ids]
     evidence = {"type": "object", "properties": {"passage_id": {"type": "string", "minLength": 1}, "quote": {"type": "string", "minLength": 1}, "character_start": {"type": "integer", "minimum": 0}, "character_end": {"type": "integer", "minimum": 1}, "location": {"type": "string"}}, "required": ["passage_id", "quote", "character_start", "character_end"]}
@@ -5237,6 +5263,11 @@ Narration measured outside quoted dialogue: {json.dumps(person_metrics, ensure_a
 Evidence discipline: a first_person signal must cite a passage containing first-person narration (I, me, my, we, or us) outside dialogue. Do not use a neutral descriptive sentence merely because it occurs in a first-person chapter.
 
 Chapter-function discipline: use setup only when this chapter plants a specific later-facing obligation, condition, object, relationship, or expectation that is not already active. Mere orientation, exposition, atmosphere, or continuation of an existing thread is not setup. Prefer the more concrete function when the evidence supports one.
+
+Taxonomy discipline:
+- exposition requires direct delivery of prior-world facts, background, history, or an explicit explanation. Recollection of the immediately preceding action, active dialogue, atmosphere, and dream imagery are not exposition merely because they inform the reader.
+- mortality requires direct evidence of death, dying, fatal danger, bodily decline that credibly threatens life, or a character's explicit confrontation with mortality. Melancholy, sleep, elapsed time, or languor alone are insufficient.
+- setup requires a newly planted later-facing element. Do not relabel a continuing mystery or already-active promise as setup.
 
 Taxonomy:
 {vocabulary}
@@ -5298,6 +5329,11 @@ Canonical source passages:
             for item in evidence_items
         ):
             reason = "The model labeled this chapter first-person, but none of its evidence passages contains first-person narration."
+            candidate_signals.append({"label": signal_id, "family": family, "explanation": reason})
+            rejected_signals.append({"id": signal_id, "family": family, "reason": reason})
+            continue
+        if signal_id == "mortality" and not evidence_supports_mortality(evidence_items):
+            reason = "The model labeled this chapter mortality, but its evidence does not mention death, dying, or credible mortal danger."
             candidate_signals.append({"label": signal_id, "family": family, "explanation": reason})
             rejected_signals.append({"id": signal_id, "family": family, "reason": reason})
             continue
@@ -5843,7 +5879,7 @@ def analysis_run_artifact(book: dict[str, object], kind: str, item_id: str) -> d
         sequence = int(item_id)
         inspection_input = load_chapter_source(book, sequence)
         inspection_output = {key: chapter.get(key) for key in (
-            "status", "summary", "keyPoints", "newQuestions", "questionDetails", "model",
+            "status", "summary", "keyPoints", "endingState", "newQuestions", "questionDetails", "model",
             "startedAt", "completedAt", "durationSeconds", "error", "failedRuns", "summaryRuns",
         ) if chapter.get(key) is not None}
         status = chapter.get("status")
@@ -5884,7 +5920,7 @@ def analysis_run_artifact(book: dict[str, object], kind: str, item_id: str) -> d
     elif kind in {"whole-summary", "whole-dossier", "whole-llm-review"}:
         if kind == "whole-summary":
             inspection_input = [
-                {key: chapter.get(key) for key in ("sequence", "title", "summary", "keyPoints", "newQuestions", "questionDetails") if chapter.get(key) is not None}
+                {key: chapter.get(key) for key in ("sequence", "title", "summary", "keyPoints", "endingState", "newQuestions", "questionDetails") if chapter.get(key) is not None}
                 for chapter in chapters if chapter.get("status") == "complete"
             ]
             record = pipeline.get("wholeBookSummary")
@@ -6243,7 +6279,7 @@ def prepare_manuscript_pipeline(book_id: str) -> None:
 
 def reset_summary_run(book: dict[str, object], pipeline: dict[str, object]) -> dict[str, object]:
     archived_fields = ("model", "startedAt", "completedAt", "durationSeconds", "inputCharacters", "status")
-    generated_fields = ("summary", "keyPoints", "newQuestions", "questionDetails", "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt", "durationSeconds", "inputCharacters")
+    generated_fields = ("summary", "keyPoints", "endingState", "newQuestions", "questionDetails", "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt", "durationSeconds", "inputCharacters")
     for chapter in pipeline.get("chapters", []):
         if chapter.get("model") or chapter.get("completedAt"):
             history = chapter.setdefault("summaryRuns", [])
@@ -6343,7 +6379,7 @@ def reset_analysis_after_sequence(
     if sequence < 1:
         raise ValueError("Choose a valid development boundary.")
     summary_fields = (
-        "summary", "keyPoints", "newQuestions", "questionDetails", "promptVersion",
+        "summary", "keyPoints", "endingState", "newQuestions", "questionDetails", "promptVersion",
         "analysisMode", "error", "model", "startedAt", "completedAt",
         "durationSeconds", "inputCharacters", "summaryRuns",
     )
@@ -6466,7 +6502,7 @@ def refresh_analysis_result(book: dict[str, object], pipeline: dict[str, object]
         was_running = chapter.get("status") == "running"
         if chapter.get("model") or chapter.get("completedAt"):
             chapter.setdefault("summaryRuns", []).append({key: chapter.get(key) for key in ("model", "startedAt", "completedAt", "durationSeconds", "inputCharacters", "status", "error") if chapter.get(key) is not None})
-        for key in ("summary", "keyPoints", "newQuestions", "questionDetails", "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt", "durationSeconds", "inputCharacters"):
+        for key in ("summary", "keyPoints", "endingState", "newQuestions", "questionDetails", "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt", "durationSeconds", "inputCharacters"):
             chapter.pop(key, None)
         chapter["status"] = "pending"
         invalidate_pipeline_stage(pipeline, "summaries", include_self=True, status="pending", detail=f"Chapter {sequence} is waiting for a fresh summary.")
@@ -6623,7 +6659,7 @@ def retry_failed_analysis(book: dict[str, object], pipeline: dict[str, object]) 
                     for key in ("model", "startedAt", "completedAt", "durationSeconds", "inputCharacters", "status", "error")
                     if chapter.get(key) is not None
                 })
-            for key in ("summary", "keyPoints", "newQuestions", "questionDetails", "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt", "durationSeconds", "inputCharacters"):
+            for key in ("summary", "keyPoints", "endingState", "newQuestions", "questionDetails", "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt", "durationSeconds", "inputCharacters"):
                 chapter.pop(key, None)
             chapter["status"] = "pending"
             retried += 1
@@ -7502,13 +7538,26 @@ def chapter_dossier_payloads(pipeline: dict[str, object], sequence: int) -> list
     ]
 
 
+def context_thread_is_actionable(value: object) -> bool:
+    """Reject bookkeeping questions that do not name a durable uncertainty."""
+    thread = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not thread:
+        return False
+    return not any(re.match(pattern, thread, re.I) for pattern in (
+        r"^what (?:event|events) (?:occurs?|occurred|happens?|happened)(?: at the end of| in) (?:the )?chapter\??$",
+        r"^what happens next\??$",
+        r"^what does this mean\??$",
+        r"^what will happen\??$",
+    ))
+
+
 def cumulative_context_schema() -> dict[str, object]:
     strings = {"type": "array", "items": {"type": "string"}}
     thread_update = {
         "type": "object",
         "properties": {
             "previous_thread": {"type": "string", "minLength": 1},
-            "status": {"type": "string", "enum": ["open", "resolved"]},
+            "status": {"type": "string", "enum": ["open", "resolved", "retired"]},
             "current_wording": {"type": "string", "minLength": 1},
         },
         "required": ["previous_thread", "status", "current_wording"],
@@ -7526,12 +7575,13 @@ def cumulative_context_schema() -> dict[str, object]:
             "locations_and_timeline": strings,
             "open_threads": strings,
             "resolved_threads": strings,
+            "retired_threads": strings,
             "thread_updates": {"type": "array", "items": thread_update},
             "reader_promises": strings,
             "themes_and_motifs": strings,
             "voice_and_form": strings,
         },
-        "required": ["story_so_far", "key_events", "established_facts", "entities_and_significance", "character_states", "relationship_states", "knowledge_states", "locations_and_timeline", "open_threads", "resolved_threads", "thread_updates", "reader_promises", "themes_and_motifs", "voice_and_form"],
+        "required": ["story_so_far", "key_events", "established_facts", "entities_and_significance", "character_states", "relationship_states", "knowledge_states", "locations_and_timeline", "open_threads", "resolved_threads", "retired_threads", "thread_updates", "reader_promises", "themes_and_motifs", "voice_and_form"],
     }
 
 
@@ -7543,7 +7593,7 @@ def build_cumulative_context(
     prompt = f"""Maintain a compact but comprehensive, evidence-respecting memory of a manuscript through {through_label}.
 This is {'a five-chapter rebase' if rebased else 'an incremental update'}. Preserve facts from the prior checkpoint unless the supplied chapter evidence corrects or resolves them. Distinguish character knowledge from objective fact. Retain uncertainty. Do not predict later events or invent connective tissue.
 
-Return a concise story_so_far plus comprehensive arrays for key_events, established_facts, entities_and_significance, character_states, relationship_states, knowledge_states, locations_and_timeline, open_threads, resolved_threads, reader_promises, themes_and_motifs, and voice_and_form. Also return thread_updates with exactly one disposition for every open thread in the prior checkpoint: copy the previous wording, mark it open or resolved, and give its current wording. Never silently drop an earlier open thread.
+Return a concise story_so_far plus comprehensive arrays for key_events, established_facts, entities_and_significance, character_states, relationship_states, knowledge_states, locations_and_timeline, open_threads, resolved_threads, retired_threads, reader_promises, themes_and_motifs, and voice_and_form. Also return thread_updates with exactly one disposition for every open thread in the prior checkpoint: copy the previous wording, mark it open, resolved, or retired, and give its current wording. Never silently drop an earlier open thread: resolved means the text supplied an answer; retired means the old entry was malformed, non-specific, duplicative, already answered when created, or merely asked what happened rather than identifying a durable uncertainty.
 
 This memory will be the only prior-book context available to a later editorial reader. Compress wording, not distinct durable information. Preserve every named character, group, institution, location, object, event, causal link, revelation, promise, uncertainty, and state change that could matter to continuity, motivation, comprehension, payoff, or later interpretation. Do not impose an arbitrary item limit. Omit only scene texture that has no plausible future consequence. Use the authored chapter numbers in the supplied evidence, never source sequence numbers.
 
@@ -7551,9 +7601,12 @@ Apply these editorial distinctions carefully:
 - open_threads are live narrative uncertainties with plausible later consequence, not every unanswered curiosity, historical aside, or detail the prose simply has not elaborated.
 - reader_promises are expectations the manuscript creates for a later development, explanation, confrontation, or payoff. Do not record ordinary promises made between characters merely because the word "promise" applies.
 - resolved_threads should retire earlier uncertainty explicitly; do not keep a resolved item active in open_threads.
+- Retire bookkeeping questions such as "What happens next?", "What event occurs at the end of the chapter?", and generic questions already answered by the evidence. Do not preserve a question merely because an earlier model emitted it.
 - Every character_states, knowledge_states, and relationship_states item must begin with the explicit subject's name. Verify who actually knows, refuses, suspects, or acts. Never turn the narrator's lack of knowledge into another character's refusal unless the evidence explicitly shows that refusal.
 - Paratext, framing apparatus, and editorial provenance belong in story memory only when they materially govern how the reader interprets the continuing narrative.
 - Prefer durable, specific state over speculative significance. Preserve uncertainty instead of upgrading a possibility into fact.
+- Treat anchored endingState facts in the saved evidence as authoritative chapter-boundary state. Prefer them over free summary prose if they conflict. Preserve grammatical actors and objects: a locked door or room does not make a person locked inside; forced entry followed by an empty room establishes absence, not discovery of the person.
+- story_so_far must end with a precise account of the latest chapter's actual outcome. Reconcile superseded state rather than appending another near-duplicate. Keep the prose orientation compact; the arrays are the detailed ledger.
 
 Prior checkpoint:
 {json.dumps(previous, ensure_ascii=False)[:30_000] if previous else 'None; begin the manuscript memory.'}
@@ -7571,7 +7624,7 @@ Saved chapter evidence:
                 ("entities_and_significance", "entitiesAndSignificance"), ("character_states", "characterStates"),
                 ("relationship_states", "relationshipStates"), ("knowledge_states", "knowledgeStates"),
                 ("locations_and_timeline", "locationsAndTimeline"), ("open_threads", "openThreads"),
-                ("resolved_threads", "resolvedThreads"), ("reader_promises", "readerPromises"),
+                ("resolved_threads", "resolvedThreads"), ("retired_threads", "retiredThreads"), ("reader_promises", "readerPromises"),
                 ("themes_and_motifs", "themesAndMotifs"),
                 ("voice_and_form", "voiceAndForm"),
             )
@@ -7585,21 +7638,26 @@ Saved chapter evidence:
     }
     open_threads = list(normalized["openThreads"])
     resolved_threads = list(normalized["resolvedThreads"])
+    retired_threads = list(normalized["retiredThreads"])
     for previous_thread in previous_open:
         update = disposition_by_key.get(normalize_lexical_key(previous_thread))
         # A missing disposition is model uncertainty, not evidence that the
         # narrative thread vanished. Preserve it until a later pass resolves it.
         if not update:
-            if previous_thread not in open_threads:
+            if context_thread_is_actionable(previous_thread) and previous_thread not in open_threads:
                 open_threads.append(previous_thread)
+            elif previous_thread not in retired_threads:
+                retired_threads.append(previous_thread)
             continue
         wording = str(update.get("current_wording") or previous_thread).strip()
-        target = resolved_threads if update.get("status") == "resolved" else open_threads
+        target = resolved_threads if update.get("status") == "resolved" else retired_threads if update.get("status") == "retired" else open_threads
         if wording and wording not in target:
             target.append(wording)
     resolved_keys = {normalize_lexical_key(item) for item in resolved_threads}
-    normalized["openThreads"] = [item for item in open_threads if normalize_lexical_key(item) not in resolved_keys]
+    retired_keys = {normalize_lexical_key(item) for item in retired_threads}
+    normalized["openThreads"] = [item for item in open_threads if context_thread_is_actionable(item) and normalize_lexical_key(item) not in resolved_keys | retired_keys]
     normalized["resolvedThreads"] = resolved_threads
+    normalized["retiredThreads"] = retired_threads
     normalized["threadUpdates"] = [dict(item) for item in updates if isinstance(item, dict)]
     return normalized
 
@@ -7676,6 +7734,7 @@ def run_cumulative_context_pipeline(book_id: str, chapter_sequence: int | None =
                     "title": strip_markdown_heading(source_chapter.get("title")),
                     "summary": source_chapter.get("summary"),
                     "keyPoints": source_chapter.get("keyPoints", []),
+                    "endingState": source_chapter.get("endingState", []),
                     "questions": source_chapter.get("questionDetails") or source_chapter.get("newQuestions", []),
                     "dossiers": chapter_dossier_payloads(pipeline, source_sequence),
                 })
@@ -7795,11 +7854,14 @@ def llm_editorial_adjudication_schema() -> dict[str, object]:
                         "verdict": {"type": "string", "enum": ["significant", "soft", "reject"]},
                         "already_answered_nearby": {"type": "boolean"},
                         "concrete_source_problem": {"type": "boolean"},
+                        "withheld_information": {"type": "boolean"},
+                        "present_scene_comprehensible": {"type": "boolean"},
+                        "withholding_is_functional": {"type": "boolean"},
                         "source_observation": {"type": "string"},
                         "proposal_defect": {"type": "string", "enum": ["none", "unsupported", "factually_mistaken", "duplicative", "resolved_by_prior_context", "resolved_in_local_lead_in", "resolved_in_local_continuation", "generic", "deterministic_smell_only", "misreads_deliberate_technique"]},
                         "reason": {"type": "string", "minLength": 1},
                     },
-                    "required": ["candidate_number", "verdict", "already_answered_nearby", "concrete_source_problem", "source_observation", "proposal_defect", "reason"],
+                    "required": ["candidate_number", "verdict", "already_answered_nearby", "concrete_source_problem", "withheld_information", "present_scene_comprehensible", "withholding_is_functional", "source_observation", "proposal_defect", "reason"],
                 },
                 "maxItems": 3,
             },
@@ -7956,6 +8018,8 @@ Return a proposal only when all of these are true:
 
 Do not restate deterministic Smells unless their narrative consequence matters. Do not report generic advice, plot summary, mild stylistic preference, or a concern already resolved by the supplied context. A strength is allowed only when it teaches the author something specific worth preserving. When uncertain, omit the proposal.
 
+Distinguish present-scene clarity from intentionally withheld story knowledge. A reader may understand what is happening, what a character experiences, and why the moment matters while not yet knowing the concealed cause, identity, mechanism, cure, or final explanation. Do not propose that a Gothic, mystery, suspense, or revelation-driven manuscript answer such a live question early merely because the answer is not yet available. Only flag withholding when the present action itself becomes incoherent, the text contradicts what the reader already knows, or the delay creates a concrete reader-facing cost worth discussing.
+
 {shared_inputs}
 """
     assessment_prompt = f"""Act as a rigorous manuscript assessor. Evaluate the current chapter in light of what a reader could know before it. This assessment is evidence for a human reviewer, not a verdict and not an editorial annotation task.
@@ -8017,6 +8081,10 @@ For significant or soft, set concrete_source_problem=true and use source_observa
 
 Before assigning a verdict, read both local_before and local_continuation. Set already_answered_nearby=true when either side supplies the clarification, recognition, causal bridge, or explanation the proposal requests. In that case verdict must be reject. Use proposal_defect=resolved_in_local_lead_in when the answer precedes the anchor, or resolved_in_local_continuation when it follows. A proposal cannot be significant merely because its isolated anchor looks confusing after the model ignores nearby setup or a deliberately timed answer.
 
+For each candidate, explicitly decide whether it concerns withheld_information, whether the present_scene_comprehensible without that answer, and whether the withholding_is_functional for mystery, suspense, dread, viewpoint limitation, or a later revelation. When all three are true, reject with proposal_defect=misreads_deliberate_technique. Asking the author to explain a concealed cause, supernatural mechanism, diagnosis, identity, or protection rule before the story chooses to reveal it is not a clarity repair when the immediate action and reader effect remain legible. A real tradeoff in pacing, trust, or emotional access may still be soft—but name that concrete cost instead of treating unanswered information itself as the defect.
+
+Consult the prior story state's open_threads and reader_promises. If the candidate merely demands an answer to an uncertainty the manuscript is actively carrying, reject it as misreads_deliberate_technique unless the present scene cannot be understood without the answer.
+
 For every decision choose one proposal_defect. Use none only for significant or genuinely soft concerns. A reject requires a concrete non-none defect; if no concrete defect applies, use soft rather than reject.
 
 Subjectivity or uncertainty alone is not grounds for rejection; use soft. Deliberate technique is grounds for rejection only when the candidate has misunderstood that technique rather than identified a real tradeoff. Do not improve or replace weak candidates. It is acceptable for every candidate to be significant, soft, or rejected, but explain the actual evidence for each decision.
@@ -8062,6 +8130,17 @@ Candidates with local source context:
         decision = decisions.get(int(item["candidate_number"]), {})
         verdict = str(decision.get("verdict") or "soft")
         concrete_source_problem = decision.get("concrete_source_problem")
+        if (
+            bool(decision.get("withheld_information"))
+            and bool(decision.get("present_scene_comprehensible"))
+            and bool(decision.get("withholding_is_functional"))
+        ):
+            verdict = "reject"
+            decision = {
+                **decision,
+                "proposal_defect": "misreads_deliberate_technique",
+                "reason": str(decision.get("reason") or "The proposal mistakes functional withholding for a present-scene clarity failure."),
+            }
         if verdict in {"significant", "soft"} and concrete_source_problem is False:
             verdict = "reject"
             decision = {
@@ -8464,6 +8543,20 @@ def run_question_tracker_pipeline(book_id: str) -> None:
         PIPELINE_CANCEL_EVENTS.pop(book_id, None)
 
 
+def dossier_question_is_specific(value: object) -> bool:
+    """Keep questions that name an actual unresolved narrative pressure."""
+    question = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not question:
+        return False
+    return not any(re.match(pattern, question, re.I) for pattern in (
+        r"^what is the relationship between .+ and .+\??$",
+        r"^what happens next\??$",
+        r"^what does this mean\??$",
+        r"^why is this important\??$",
+        r"^who is .+\??$",
+    ))
+
+
 def analyze_chunk_dossier(
     chunk: dict[str, object], model: str, cancel_event: threading.Event | None = None,
     run_key: str = "", canonical_chapter_text: str = "",
@@ -8479,6 +8572,8 @@ Promises must include both explicit commitments made by characters and narrative
 Evidence entries must include one supplied passage ID, the printed character start and end, and a short exact quote copied from that passage. These redundant coordinates are triangulated against the canonical source; unanchorable evidence is discarded. Do not invent facts or resolve uncertainty.
 
 Questions must be concrete enough to track later. Include unresolved motivation, causal bridges, concealed knowledge, conflicting goals, relationship consequences, moral or thematic pressure, implied promises, and ambiguities that materially change how the scene can be understood. Every question must name the exact action, revelation, contradiction, image, dialogue, or change that earned it. Reject generic discussion prompts and questions already answered in this excerpt. Do not manufacture questions merely to fill categories.
+
+Do not emit bare prompts such as "What is the relationship between X and Y?", "Who is X?", "What happens next?", or "What does this mean?" A relationship question must name the specific change, contradiction, concealment, or choice that remains unresolved. If the excerpt already establishes the relationship or identity, record it as a fact instead of asking about it.
 
 Each question_details object must contain question, family, evidence, evidence_ref, why_it_matters, and promises_answer. The question must exactly match an entry in questions. Family must be exactly one of: {', '.join(QUESTION_FAMILIES)}. Evidence is a short exact quotation or precise trigger. evidence_ref contains its supplied passage ID, printed character start and end, and copied quote. promises_answer is true only when the manuscript appears to owe the reader an eventual answer.
 
@@ -8501,6 +8596,7 @@ Canonical source passages:
     if not synopsis:
         raise ValueError("The model returned a dossier without a synopsis.")
     question_details = normalize_question_details(result.get("question_details"))
+    question_details = [item for item in question_details if dossier_question_is_specific(item.get("question"))]
 
     def canonical_anchor(value: object) -> dict[str, object] | None:
         """Resolve against the model input, then relocate into reader-visible text."""
@@ -8519,6 +8615,7 @@ Canonical source passages:
 
     evidence_anchors = [anchor for item in result.get("evidence", []) if (anchor := canonical_anchor(item))] if isinstance(result.get("evidence"), list) else []
     normalized = {"synopsis": synopsis, **{key: [str(item).strip() for item in result.get(key, []) if str(item).strip()] if isinstance(result.get(key), list) else [] for key in ("facts", "events", "entities", "locations", "current_times", "questions", "promises", "timeline_observations")}, "evidence": [str(item["quote"]) for item in evidence_anchors], "evidenceAnchors": evidence_anchors}
+    normalized["questions"] = [item for item in normalized["questions"] if dossier_question_is_specific(item)]
     if "question_details" in result:
         raw_details = {str(item.get("question") or ""): item for item in result.get("question_details", []) if isinstance(item, dict)}
         for detail in question_details:

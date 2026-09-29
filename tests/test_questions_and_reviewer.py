@@ -202,8 +202,8 @@ def test_prompts_demand_specific_questions_with_evidence() -> None:
     assert "Reject generic discussion prompts" in source
     assert "question_details" in source
     assert "promises_answer" in source
-    assert 'SUMMARY_PROMPT_VERSION = "chapter-summary-v3"' in source
-    assert 'DOSSIER_PROMPT_VERSION = "chapter-dossier-v4"' in source
+    assert 'SUMMARY_PROMPT_VERSION = "chapter-summary-v4"' in source
+    assert 'DOSSIER_PROMPT_VERSION = "chapter-dossier-v5"' in source
 
 
 def test_front_matter_never_promotes_editorial_questions() -> None:
