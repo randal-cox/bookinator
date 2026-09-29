@@ -14,11 +14,15 @@ if [[ ! -x "$launcher" ]]; then
   exit 1
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
+python_bin="$project_dir/.venv/bin/python"
+if [[ ! -x "$python_bin" ]]; then
+  python_bin="$(command -v python3 || true)"
+fi
+if [[ -z "$python_bin" || ! -x "$python_bin" ]]; then
   printf 'Bookinator needs Python 3. Install it, then run ./bin/serve again.\n' >&2
   exit 1
 fi
-project_version="$(python3 -c 'import pathlib,sys,tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["project"]["version"])' "$project_dir/pyproject.toml")"
+project_version="$("$python_bin" -c 'import pathlib,sys,tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["project"]["version"])' "$project_dir/pyproject.toml")"
 exec env \
   INATOR_PROJECT_DIR="$project_dir" \
   INATOR_SHARED_LAUNCHER=1 \
@@ -29,4 +33,4 @@ exec env \
   SERVE_PROJECT_VERSION="$project_version" \
   SERVE_HEALTH_PATH="/api/health" \
   SERVE_BROWSER="${SERVE_BROWSER:-Safari}" \
-  "$launcher" "$@" -- python3 -m bookinator.server --host @HOST@ --port @PORT@
+  "$launcher" "$@" -- "$python_bin" -m bookinator.server --host @HOST@ --port @PORT@

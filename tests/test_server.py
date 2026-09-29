@@ -1133,7 +1133,7 @@ def test_development_checkpoint_is_not_reported_as_an_interrupted_model_run() ->
     book = {"id": "book-1234", "title": "Bounded book", "priority": "high"}
     pipeline = {
         "status": "running", "phase": "chapter-complete", "workerPid": 999,
-        "developmentAnalysisLimit": 4, "developmentAnalysisLabel": "Chapter II",
+        "developmentAnalysisLimit": 4, "developmentAnalysisLimitLabel": "Chapter II",
         "stages": [
             {"id": "cumulative-context", "status": "pending"},
             {"id": "llm-review", "status": "pending"},
@@ -1409,6 +1409,19 @@ def test_development_checkpoint_blocks_version_migration_until_human_advances_it
     assert chapter["llmReviewStatus"] == "complete"
     assert chapter["llmReview"]["editorialSummary"] == "Preserve me too."
 
+    server.advance_development_checkpoint(pipeline, 3, "Chapter I")
+    assert pipeline["developmentPreservedThroughSequence"] == 2
+    assert pipeline["developmentCheckpointLocked"] is False
+    chapter.update({"contextStatus": "pending", "llmReviewStatus": "pending"})
+    chapter.pop("context", None)
+    chapter.pop("llmReview", None)
+    with patch.object(server, "BOOKS_ROOT", tmp_path):
+        server.ensure_llm_review_stages(book, pipeline)
+    assert chapter["contextStatus"] == "complete"
+    assert chapter["llmReviewStatus"] == "complete"
+    assert chapter["context"]["storySoFar"] == "Preserve me."
+    assert chapter["llmReview"]["editorialSummary"] == "Preserve me too."
+
 
 def test_reset_after_development_boundary_preserves_earlier_results_and_clears_later_work(tmp_path: Path) -> None:
     book = {"id": "book", "manuscriptId": "manuscript"}
@@ -1455,9 +1468,11 @@ def test_development_launcher_delegates_to_the_shared_inator_launcher() -> None:
     assert 'commons_dir="${INATOR_COMMONS_DIR:-$project_dir/../inator}"' in launcher
     assert '"$project_dir/../../inator/node_modules/.bin/inator-serve"' in launcher
     assert 'launcher="$commons_dir/node_modules/.bin/inator-serve"' in launcher
+    assert 'python_bin="$project_dir/.venv/bin/python"' in launcher
+    assert 'python_bin="$(command -v python3 || true)"' in launcher
     assert 'INATOR_PROJECT_DIR="$project_dir"' in launcher
     assert 'PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}"' in launcher
-    assert '"$launcher" "$@" -- python3 -m bookinator.server' in launcher
+    assert '"$launcher" "$@" -- "$python_bin" -m bookinator.server' in launcher
 
 
 def test_pipeline_payload_does_not_resend_manuscript_source_text() -> None:
@@ -4854,6 +4869,8 @@ def test_llm_review_rejects_proposed_annotations_without_an_exact_source_quote()
     assert result["editorialProposals"][0]["passageId"] == "P0001"
     assert result["editorialProposals"][0]["anchorMatchMethod"] == "exact"
     adjudication_prompt = run_model.call_args_list[1].args[0]
+    assert "read both local_before and local_continuation" in adjudication_prompt
+    assert "resolved_in_local_lead_in" in adjudication_prompt
     assert "local_continuation" in adjudication_prompt
     assert "already_answered_nearby=true" in adjudication_prompt
     assert result["dimensions"]["saleability"]["score"] == 4

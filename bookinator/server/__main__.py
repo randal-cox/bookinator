@@ -366,17 +366,25 @@ def ensure_llm_review_stages(book: dict[str, object], pipeline: dict[str, object
         return changed
     changed = False
     checkpoint_locked = bool(pipeline.get("developmentCheckpointLocked")) or pipeline.get("phase") == "development-checkpoint"
+    try:
+        checkpoint_limit = int(pipeline.get("developmentAnalysisLimit") or 0)
+        preserved_through = int(pipeline.get("developmentPreservedThroughSequence") or 0)
+    except (TypeError, ValueError):
+        checkpoint_limit = preserved_through = 0
+    if checkpoint_locked:
+        preserved_through = max(preserved_through, checkpoint_limit)
     if checkpoint_locked and not pipeline.get("developmentCheckpointLocked"):
         pipeline["developmentCheckpointLocked"] = True
         changed = True
-    if checkpoint_locked:
-        try:
-            checkpoint_limit = int(pipeline.get("developmentAnalysisLimit") or 0)
-        except (TypeError, ValueError):
-            checkpoint_limit = 0
+    # A development boundary protects the comparison baseline even while the
+    # next specimen is open and running. The durable child artifacts are the
+    # authority for that baseline; an older server or an interrupted worker may
+    # have left an in-memory chapter status pending without damaging the saved
+    # result itself.
+    if preserved_through:
         for chapter in pipeline.get("chapters", []):
             sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
-            if not sequence or sequence > checkpoint_limit or strip_markdown_heading(chapter.get("title")).casefold() == "front matter":
+            if not sequence or sequence > preserved_through or strip_markdown_heading(chapter.get("title")).casefold() == "front matter":
                 continue
             context_artifact = read_json_artifact(cumulative_context_path(book, sequence))
             if context_artifact.get("status") == "complete" and isinstance(context_artifact.get("context"), dict):
@@ -422,6 +430,8 @@ def ensure_llm_review_stages(book: dict[str, object], pipeline: dict[str, object
         if chapter.get("contextStatus") != "complete":
             continue
         sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
+        if sequence and sequence <= preserved_through:
+            continue
         artifact = read_json_artifact(cumulative_context_path(book, sequence)) if sequence else {}
         if artifact.get("schema") == CUMULATIVE_CONTEXT_PROMPT_VERSION:
             continue
@@ -429,6 +439,9 @@ def ensure_llm_review_stages(book: dict[str, object], pipeline: dict[str, object
         break
     if stale_context and not checkpoint_locked:
         for chapter in pipeline.get("chapters", []):
+            sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
+            if sequence and sequence <= preserved_through:
+                continue
             if strip_markdown_heading(chapter.get("title")).casefold() == "front matter":
                 continue
             chapter["contextStatus"] = "pending"
@@ -450,6 +463,8 @@ def ensure_llm_review_stages(book: dict[str, object], pipeline: dict[str, object
         if chapter.get("llmReviewStatus") != "complete":
             continue
         sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
+        if sequence and sequence <= preserved_through:
+            continue
         artifact = read_json_artifact(llm_review_result_path(book, sequence)) if sequence else {}
         if artifact.get("schema") == LLM_REVIEW_PROMPT_VERSION:
             continue
@@ -842,6 +857,27 @@ def development_limited_items(
         item for item in items
         if int(item.get(sequence_field) or item.get("number") or 0) <= limit
     ]
+
+
+def advance_development_checkpoint(
+    pipeline: dict[str, object], sequence: int, label: str,
+) -> dict[str, object]:
+    """Open exactly the next bounded specimen without invalidating the baseline."""
+    current = int(pipeline.get("developmentAnalysisLimit") or 0)
+    if current < 1 or sequence <= current:
+        raise ValueError("Advance the development checkpoint to a later section.")
+    pipeline.update({
+        "developmentPreservedThroughSequence": max(current, int(pipeline.get("developmentPreservedThroughSequence") or 0)),
+        "developmentAnalysisLimit": sequence,
+        "developmentAnalysisLimitLabel": label,
+        "developmentCheckpointLocked": False,
+        "status": "ready", "phase": "ready", "stopRequested": False,
+        "message": f"Development run advanced to {label}; earlier comparison artifacts remain preserved.",
+        "updatedAt": utc_now(),
+    })
+    for key in ("queuedAction", "completedAt", "error", "workerPid"):
+        pipeline.pop(key, None)
+    return pipeline
 
 
 def next_pipeline_action(book: dict[str, object], pipeline: dict[str, object]) -> str:
@@ -2596,7 +2632,11 @@ def reconcile_development_checkpoint(book: dict[str, object], pipeline: dict[str
     eligible = development_limited_items(pipeline, pipeline.get("chapters", []), "sequence")
     if not eligible:
         return False
-    label = str(pipeline.get("developmentAnalysisLabel") or f"section {limit}")
+    label = str(
+        pipeline.get("developmentAnalysisLimitLabel")
+        or pipeline.get("developmentAnalysisLabel")
+        or f"section {limit}"
+    )
     authored = [chapter for chapter in eligible if strip_markdown_heading(chapter.get("title")).casefold() != "front matter"]
     detail = f"Development checkpoint reached through {label}; {len(authored)} authored sections are preserved for inspection."
     before = (pipeline.get("status"), pipeline.get("phase"), pipeline.get("message"), pipeline.get("error"))
@@ -7704,7 +7744,7 @@ def llm_editorial_adjudication_schema() -> dict[str, object]:
                         "candidate_number": {"type": "integer", "minimum": 1, "maximum": 3},
                         "verdict": {"type": "string", "enum": ["significant", "soft", "reject"]},
                         "already_answered_nearby": {"type": "boolean"},
-                        "proposal_defect": {"type": "string", "enum": ["none", "unsupported", "factually_mistaken", "duplicative", "resolved_by_prior_context", "resolved_in_local_continuation", "generic", "deterministic_smell_only", "misreads_deliberate_technique"]},
+                        "proposal_defect": {"type": "string", "enum": ["none", "unsupported", "factually_mistaken", "duplicative", "resolved_by_prior_context", "resolved_in_local_lead_in", "resolved_in_local_continuation", "generic", "deterministic_smell_only", "misreads_deliberate_technique"]},
                         "reason": {"type": "string", "minLength": 1},
                     },
                     "required": ["candidate_number", "verdict", "already_answered_nearby", "proposal_defect", "reason"],
@@ -7910,7 +7950,7 @@ For saleability, discuss audience clarity, genre promise, positioning, accessibi
             end = int(candidate["character_end"])
             skeptical_candidates.append({
                 **candidate,
-                "local_before": chapter_text[max(0, start - 700):start],
+                "local_before": chapter_text[max(0, start - 1200):start],
                 "anchored_passage": chapter_text[start:end],
                 "local_continuation": chapter_text[end:min(len(chapter_text), end + 1200)],
             })
@@ -7921,7 +7961,7 @@ Decide each supplied candidate independently:
 - soft: the concern is plausible and worth showing a human, but intent, context, severity, or the best revision remains uncertain.
 - reject: identify a concrete defect in the proposal itself—it is unsupported by the source, factually mistaken, duplicative, already resolved by prior context, purely generic, or merely restates a deterministic Smell without narrative consequence.
 
-Before assigning a verdict, read local_continuation through the end. Set already_answered_nearby=true when that continuation supplies the clarification, recognition, causal bridge, or explanation the proposal requests. In that case verdict must be reject and proposal_defect must be resolved_in_local_continuation. A proposal cannot be significant merely because its anchored sentence creates a momentary question that the next sentence or paragraph deliberately answers.
+Before assigning a verdict, read both local_before and local_continuation. Set already_answered_nearby=true when either side supplies the clarification, recognition, causal bridge, or explanation the proposal requests. In that case verdict must be reject. Use proposal_defect=resolved_in_local_lead_in when the answer precedes the anchor, or resolved_in_local_continuation when it follows. A proposal cannot be significant merely because its isolated anchor looks confusing after the model ignores nearby setup or a deliberately timed answer.
 
 For every decision choose one proposal_defect. Use none only for significant or genuinely soft concerns. A reject requires a concrete non-none defect; if no concrete defect applies, use soft rather than reject.
 
