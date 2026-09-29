@@ -121,7 +121,7 @@ EMOTION_SCHEMA_VERSION = "bookinator-emotion-v1"
 EMOTION_LABELS = ("anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise")
 TAG_SCHEMA_VERSION = "bookinator-chapter-tags-v2"
 TAG_TAXONOMY_VERSION = "bookinator-chapter-signals-v2"
-TAG_PROMPT_VERSION = "chapter-tags-v3"
+TAG_PROMPT_VERSION = "chapter-tags-v4"
 SMELL_SCHEMA_VERSION = "bookinator-smells-v2"
 SMELL_POLICY_VERSION = "smell-routing-v1"
 SMELL_PROMPT_VERSION = "smell-review-v2"
@@ -2648,6 +2648,27 @@ def reconcile_development_checkpoint(book: dict[str, object], pipeline: dict[str
         "stopRequested": False,
         "updatedAt": utc_now(),
     })
+    # A bounded specimen can finish after a stage's ordinary whole-book pass
+    # wrote its aggregate detail. Recount from the durable chapter statuses so
+    # the checkpoint reports the specimen that actually just finished.
+    all_authored = [
+        chapter for chapter in pipeline.get("chapters", [])
+        if strip_markdown_heading(chapter.get("title")).casefold() != "front matter"
+    ]
+    for stage_id, status_field, label_text in (
+        ("emotions", "emotionStatus", "emotions"),
+        ("tags", "tagStatus", "tags"),
+        ("smells", "smellStatus", "smells"),
+    ):
+        stage = next((item for item in pipeline.get("stages", []) if item.get("id") == stage_id), None)
+        if not stage:
+            continue
+        completed = sum(1 for chapter in all_authored if chapter.get(status_field) == "complete")
+        failed = sum(1 for chapter in all_authored if chapter.get(status_field) == "failed")
+        stage.update({
+            "status": "pending" if completed + failed < len(all_authored) else "warning" if failed else "complete",
+            "detail": f"Completed {completed} of {len(all_authored)} manuscript chapter {label_text}; front matter excluded.",
+        })
     for key in ("error", "queuedAction", "workerPid"):
         pipeline.pop(key, None)
     for stage_id in ("cumulative-context", "llm-review"):
@@ -5193,6 +5214,7 @@ Score means strength in the text; confidence means confidence in your judgment. 
 Return only signals that score at least .25. Every returned signal requires at least one evidence reference; signals above .6 normally require two unless one scene dominates the chapter. For every reference return the supplied passage ID, its printed character start and end, and an exact quote copied from that passage. These redundant coordinates will be triangulated against the canonical source. Omit weak or absent signals instead of returning them with empty evidence. Do not force a label. Put a useful missing label in candidate_signals rather than inventing an ID.
 
 Narration measured outside quoted dialogue: {json.dumps(person_metrics, ensure_ascii=False)}. Treat a decisive measured person as a constraint. Do not label first-person narration as third-person merely because the narrator describes other characters.
+Evidence discipline: a first_person signal must cite a passage containing first-person narration (I, me, my, we, or us) outside dialogue. Do not use a neutral descriptive sentence merely because it occurs in a first-person chapter.
 
 Chapter-function discipline: use setup only when this chapter plants a specific later-facing obligation, condition, object, relationship, or expectation that is not already active. Mere orientation, exposition, atmosphere, or continuation of an existing thread is not setup. Prefer the more concrete function when the evidence supports one.
 
@@ -5248,6 +5270,14 @@ Canonical source passages:
                 evidence_items.append(anchored)
         if not evidence_items:
             reason = f"The model suggested {signal_id}, but its evidence could not be anchored uniquely in the chapter."
+            candidate_signals.append({"label": signal_id, "family": family, "explanation": reason})
+            rejected_signals.append({"id": signal_id, "family": family, "reason": reason})
+            continue
+        if signal_id == "first_person" and not any(
+            int(narrative_person_metrics(str(item.get("quote") or "")).get("firstPersonPronouns") or 0) > 0
+            for item in evidence_items
+        ):
+            reason = "The model labeled this chapter first-person, but none of its evidence passages contains first-person narration."
             candidate_signals.append({"label": signal_id, "family": family, "explanation": reason})
             rejected_signals.append({"id": signal_id, "family": family, "reason": reason})
             continue

@@ -1137,12 +1137,15 @@ def test_development_checkpoint_is_not_reported_as_an_interrupted_model_run() ->
         "stages": [
             {"id": "cumulative-context", "status": "pending"},
             {"id": "llm-review", "status": "pending"},
+            {"id": "emotions", "status": "pending", "detail": "Completed 2 of 17 manuscript chapter emotions; front matter excluded."},
+            {"id": "tags", "status": "pending", "detail": "Completed 2 of 17 manuscript chapter tags; front matter excluded."},
+            {"id": "smells", "status": "pending", "detail": "Completed 2 of 17 manuscript chapter smells; front matter excluded."},
         ],
         "chapters": [
             {"sequence": 1, "title": "Front matter", "status": "complete"},
-            {"sequence": 2, "title": "Prologue", "status": "complete"},
-            {"sequence": 3, "title": "I", "status": "complete"},
-            {"sequence": 4, "title": "II", "status": "complete"},
+            {"sequence": 2, "title": "Prologue", "status": "complete", "emotionStatus": "complete", "tagStatus": "complete", "smellStatus": "complete"},
+            {"sequence": 3, "title": "I", "status": "complete", "emotionStatus": "complete", "tagStatus": "complete", "smellStatus": "complete"},
+            {"sequence": 4, "title": "II", "status": "complete", "emotionStatus": "complete", "tagStatus": "complete", "smellStatus": "complete"},
             {"sequence": 5, "title": "III", "status": "pending"},
         ],
         "error": "The local model's previous reading process ended without returning a result.",
@@ -1154,6 +1157,10 @@ def test_development_checkpoint_is_not_reported_as_an_interrupted_model_run() ->
     assert pipeline["phase"] == "development-checkpoint"
     assert "Chapter II" in pipeline["message"]
     assert "error" not in pipeline
+    stages = {stage["id"]: stage for stage in pipeline["stages"]}
+    assert stages["emotions"]["detail"] == "Completed 3 of 4 manuscript chapter emotions; front matter excluded."
+    assert stages["tags"]["detail"] == "Completed 3 of 4 manuscript chapter tags; front matter excluded."
+    assert stages["smells"]["detail"] == "Completed 3 of 4 manuscript chapter smells; front matter excluded."
 
 
 def test_assessment_evidence_converts_passage_ids_to_readable_source_quotes() -> None:
@@ -4421,6 +4428,26 @@ def test_first_person_measurement_rejects_contradictory_third_limited_tag() -> N
     assert "first-person pronouns" in artifact["rejectedSignals"][0]["reason"]
 
 
+def test_first_person_tag_requires_first_person_evidence() -> None:
+    import bookinator.server.__main__ as server
+
+    text = "This evening the messenger arrived. I watched him cross the hall and remembered my warning."
+    response = {
+        "signals": [{
+            "id": "first_person", "family": "viewpoint", "score": 1, "confidence": 1,
+            "explanation": "The chapter uses first-person narration.",
+            "evidence": [{"quote": "This evening the messenger arrived."}],
+        }],
+        "candidate_signals": [],
+    }
+    with patch.object(server, "run_structured_model", return_value=(response, "{}")):
+        artifact = server.analyze_chapter_tags({"sequence": 7, "title": "V", "text": text}, "qwen")
+
+    assert artifact["signals"] == []
+    assert artifact["candidateSignals"][0]["label"] == "first_person"
+    assert "none of its evidence passages" in artifact["rejectedSignals"][0]["reason"]
+
+
 def test_dialogue_first_person_does_not_override_third_person_narration() -> None:
     import bookinator.server.__main__ as server
 
@@ -4436,7 +4463,7 @@ def test_chapter_tag_schema_requires_evidence_for_every_returned_signal() -> Non
     signal = schema["properties"]["signals"]["items"]
     assert signal["properties"]["score"]["minimum"] == .25
     assert signal["properties"]["evidence"]["minItems"] == 1
-    assert server.TAG_PROMPT_VERSION == "chapter-tags-v3"
+    assert server.TAG_PROMPT_VERSION == "chapter-tags-v4"
 
 
 def test_chapter_tags_keep_mystery_genre_distinct_from_withheld_information() -> None:
