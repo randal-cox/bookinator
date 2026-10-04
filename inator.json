@@ -16,6 +16,7 @@
     }
   },
   "controlRoom": {
+    "icon": "/assets/bookinator.svg",
     "ui": {
       "url": "http://127.0.0.1:4890/"
     },
