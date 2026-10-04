@@ -1,0 +1,46 @@
+{
+  "$schema": "https://inator.com/schemas/consumer-v1.json",
+  "schemaVersion": 1,
+  "product": {
+    "id": "book.inator",
+    "name": "Bookinator",
+    "version": "0.1.0"
+  },
+  "development": {
+    "serve": {
+      "environment": {
+        "SERVE_BANNER_TITLE": "Bookinator",
+        "SERVE_HEALTH_PATH": "/api/health",
+        "SERVE_PROJECT_NAME": "Bookinator"
+      }
+    }
+  },
+  "controlRoom": {
+    "ui": {
+      "url": "http://127.0.0.1:4890/"
+    },
+    "health": {
+      "url": "http://127.0.0.1:4890/api/health"
+    },
+    "lifecycle": {
+      "adapter": "inator-development-server"
+    },
+    "capabilities": [
+      "open"
+    ]
+  },
+  "capabilities": {
+    "development-serving": {
+      "package": "@inator/dev-tools",
+      "version": "0.4.1-dev.3"
+    },
+    "product-history": {
+      "package": "@inator/ui",
+      "version": "0.4.1-dev.29"
+    },
+    "product-shell": {
+      "package": "@inator/ui",
+      "version": "0.4.1-dev.29"
+    }
+  }
+}
