@@ -40,6 +40,8 @@ an author or editor's judgment.
 ## Requirements for a source checkout
 
 - Python 3.11 or newer
+- Node.js 22 or newer with npm, used to install the pinned Inator Commons
+  development tools
 - `curl`, used by the current development launcher for its local health check
 - a modern browser
 - [Ollama](https://ollama.com/) for model-backed analysis
@@ -62,17 +64,15 @@ Clone the repository and start its loopback-only server:
 ```sh
 git clone https://github.com/randal-cox/bookinator.git
 cd bookinator
+npm install
 ./bin/serve
 ```
 
-During the current paired-development phase, `bin/serve` delegates to
-Inator Commons. The launcher prefers the eventual project-home layout with the
-Commons checkout beside this repository as `../inator`; during the folder
-migration it also recognizes the current `../../inator` location. Set
-`INATOR_COMMONS_DIR` to an absolute path to override either lookup. This
-temporary development-source dependency will be replaced by the urgent,
-versioned `@inator/dev-tools` installer. It does not make the running product
-call back to Commons or to a remote service.
+`bin/serve` delegates to the pinned `@inator/dev-tools` package installed by
+npm. The package archive is kept in this repository, so installation does not
+require a neighboring Inator Commons source checkout or a live package
+registry. It does not make the running product call back to Commons or to a
+remote service. Run `./bin/inator doctor` to inspect the installed contract.
 
 On macOS the launcher opens Bookinator in Safari. On other systems, or if a
 browser does not open, visit the local URL printed in the terminal. The default

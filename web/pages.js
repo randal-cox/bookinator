@@ -74,6 +74,7 @@ export const articlePages = {
     kicker: "Bookinator information", title: "Legal and privacy", intro: "Short, readable promises now; formal release documents before distribution.",
     tabs: {
       privacy: ["Privacy", `<h2>Local means local.</h2><p>Bookinator is designed to keep manuscripts, derived text, model prompts, embeddings, findings, and reports on the user's computer.</p><p>Installing a model may contact Ollama's registry. Manuscript content is not part of that request.</p>`],
+      security: ["Security", `<h2>The local boundary is part of the design.</h2><p>Bookinator is served on the loopback interface. Its browser UI controls a Python server that owns project files, ingestion, queue state, dependency checks, exports, and communication with Ollama.</p><p>Saved runs expose status, timing, model identity, failures, source ranges, and available evidence so consequential work remains inspectable.</p>`],
       license: ["License", `<h2>Business Source License 1.1</h2><p>Bookinator 0.1.0 is source-available. Personal, educational, research, and internal business production use is permitted; offering Bookinator as a commercial hosted or managed service, or selling it as part of a competing commercial product, requires a separate commercial license.</p><p>On September 24, 2030, this version converts to GPL-3.0-or-later. The repository <code>LICENSE</code> file contains the controlling terms.</p>`],
       terms: ["Terms", `<h2>Editorial aid, not editorial authority</h2><p>Bookinator produces evidence-linked hypotheses. It can be wrong, overly literal, or unaware of deliberate ambiguity. Authors and editors remain responsible for applying its findings.</p>`],
     },
@@ -81,7 +82,7 @@ export const articlePages = {
   releases: {
     kicker: "Bookinator releases",
     title: "Milestones, not machinery",
-    intro: "A high-level record of what each release made possible, why it mattered, and what Bookinator was not yet pretending to be.",
+    intro: "Shared Commons presentation generated from Bookinator's product-owned milestone ledger. Only milestones that actually shipped appear as releases.",
     tabs: {
       milestones: ["Milestones", `<section class="release-history" aria-labelledby="release-030-title">
         <header class="release-history-intro">
@@ -97,17 +98,17 @@ export const articlePages = {
           </aside>
           <div class="release-entry-body">
             <header>
-              <div><p>Independent pipeline</p><h2 id="release-030-title">The Engine Room</h2></div>
+              <div><p>Commons conversion</p><h2 id="release-030-title">Common Ground</h2></div>
               <span class="release-state">Planned</span>
             </header>
-            <p class="release-lede">Analysis becomes a durable background service: controlled by the web UI, but no longer dependent on the web server or an open browser for its lifetime.</p>
+            <p class="release-lede">Bookinator becomes an ordinary consumer of installable Inator Commons contracts without moving manuscript, analysis, editorial, or saved-book behavior out of Bookinator.</p>
             <section class="release-accomplishments" aria-label="Planned milestone pieces">
-              <article><span>01</span><div><h3>One independent worker owns computation</h3><p>Scheduling, model calls, retries, cancellation, crash recovery, and pipeline-state writes move behind a stable process boundary.</p></div></article>
-              <article><span>02</span><div><h3>Controllers share one protocol</h3><p>The web UI, command line, and a later menu-bar companion inspect and control the same worker instead of recreating its logic.</p></div></article>
-              <article><span>03</span><div><h3>Background work behaves like a guest</h3><p>Pause-after-current, conservative concurrency, resource profiles, and battery and thermal awareness make unattended work legible and courteous.</p></div></article>
-              <article><span>04</span><div><h3>Bookinator proves it before Inator inherits it</h3><p>The reusable pipeline contract moves to Inator only after reconnects, restarts, priorities, and failures have survived real Bookinator use.</p></div></article>
+              <article><span>01</span><div><h3>Installable Commons becomes the foundation</h3><p>Versioned public packages replace the temporary sibling-checkout dependency through pinned, diagnosable installation boundaries.</p></div></article>
+              <article><span>02</span><div><h3>Shared interfaces gain shared behavior</h3><p>Navigation, dialogs, status, releases, help, backup, and machine conventions move behind Commons contracts and thin Bookinator adapters.</p></div></article>
+              <article><span>03</span><div><h3>Bookinator keeps its domain</h3><p>Manuscript processing, analysis, editorial judgment, local privacy, and saved-book compatibility remain product-owned.</p></div></article>
+              <article><span>04</span><div><h3>Research waits for stable ground</h3><p>GLiNER, semantic forks, prompt changes, and the independent worker stay outside this infrastructure milestone.</p></div></article>
             </section>
-            <section class="release-meaning"><p>Why it is next</p><h3>Hours of useful work deserve an engine, not a browser tab.</h3><p>The local worker boundary also creates the honest foundation for future menu-bar, LAN, or remote compute experiments without promising them yet.</p></section>
+            <section class="release-meaning"><p>Why it is next</p><h3>Reader research needs boringly trustworthy ground.</h3><p>A reproducible Commons installation lets later pipeline experiments change model behavior without changing infrastructure at the same time.</p></section>
           </div>
         </article>
         <article class="release-entry current">
@@ -160,8 +161,8 @@ export const articlePages = {
   },
   roadmap: {
     kicker: "Bookinator roadmap",
-    title: "A larger memory for the book",
-    intro: "This is the working field of possibilities: practical editorial wins, enabling foundations, and ambitious experiments. The order is a hypothesis, not a promise—sort it to see what rises when ease, impact, or subject matters most.",
+    title: "The road from working reader to trustworthy editor",
+    intro: "Shared Commons presentation generated from Bookinator's milestone ledger. Detailed feature candidates remain product-owned while this view shows the committed sequence.",
     tabs: {
       priorities: ["Priorities", `<section class="roadmap-introduction"><div><h2>Build the editorial loop, then widen the intelligence.</h2><p>Bookinator already reads a manuscript as connected evidence rather than isolated prompts. The next work closes the loop between machine observation, human judgment, author revision, and trustworthy sharing. Beyond that lie deeper models of causality, reader memory, character state, geography, and time.</p></div><dl><div><dt>Ease</dt><dd>How directly the idea can grow from foundations already in Bookinator.</dd></div><div><dt>Impact</dt><dd>How much editorial or author value the finished capability could create.</dd></div><div><dt>Payoff</dt><dd>Ease × impact. A useful first ordering—not a substitute for judgment.</dd></div></dl></section><section class="roadmap-landscape" aria-label="Roadmap payoff landscape"><div><strong>Close the loop</strong><span>Reviewer · Author editing · Revisions · Sharing</span></div><i aria-hidden="true"></i><div><strong>Understand the book</strong><span>Scenes · Characters · Causality · Reader memory</span></div><i aria-hidden="true"></i><div><strong>Explore the frontier</strong><span>Chronology · Maps · Simulations · Time travel</span></div></section><section class="roadmap-ledger" data-roadmap-ledger></section>`],
     },

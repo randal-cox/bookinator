@@ -1,5 +1,7 @@
 .DS_Store
 .venv/
+.venv-gliner/
+node_modules/
 .pytest_cache/
 __pycache__/
 *.py[cod]
@@ -7,6 +9,10 @@ __pycache__/
 # Local manuscripts, models, settings, and analysis state.
 .bookinator/
 .bookinator-codex/
+.inator/rollback/
+.inator/packages/*.tgz
+!.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz
+!.inator/packages/inator-ui-0.4.1-dev.29.tgz
 
 # Generated exports and visual-QA intermediates.
 output/

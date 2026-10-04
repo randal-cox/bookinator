@@ -2,15 +2,11 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "$0")/.." && pwd -P)"
-commons_dir="${INATOR_COMMONS_DIR:-$project_dir/../inator}"
-if [[ ! -x "$commons_dir/node_modules/.bin/inator-serve" && -x "$project_dir/../../inator/node_modules/.bin/inator-serve" ]]; then
-  commons_dir="$(cd "$project_dir/../../inator" && pwd -P)"
-fi
-launcher="$commons_dir/node_modules/.bin/inator-serve"
+launcher="$project_dir/node_modules/.bin/inator-serve"
 
 if [[ ! -x "$launcher" ]]; then
-  printf 'Inator Commons launcher is unavailable: %s\n' "$launcher" >&2
-  printf 'Set INATOR_COMMONS_DIR to the Inator Commons checkout.\n' >&2
+  printf 'Installed Inator launcher is unavailable: %s\n' "$launcher" >&2
+  printf 'Run npm install, then use ./bin/inator doctor for details.\n' >&2
   exit 1
 fi
 
@@ -23,14 +19,16 @@ if [[ -z "$python_bin" || ! -x "$python_bin" ]]; then
   exit 1
 fi
 project_version="$("$python_bin" -c 'import pathlib,sys,tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["project"]["version"])' "$project_dir/pyproject.toml")"
-exec env \
-  INATOR_PROJECT_DIR="$project_dir" \
-  INATOR_SHARED_LAUNCHER=1 \
-  PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}" \
-  PORT="${PORT:-4890}" \
-  SERVE_PROJECT_NAME="Bookinator" \
-  SERVE_BANNER_TITLE="Bookinator" \
-  SERVE_PROJECT_VERSION="$project_version" \
-  SERVE_HEALTH_PATH="/api/health" \
-  SERVE_BROWSER="${SERVE_BROWSER:-Safari}" \
-  "$launcher" "$@" -- "$python_bin" -m bookinator.server --host @HOST@ --port @PORT@
+serve_environment=(
+  "INATOR_PROJECT_DIR=$project_dir"
+  'INATOR_SHARED_LAUNCHER=1'
+  "PYTHONPATH=$project_dir${PYTHONPATH:+:$PYTHONPATH}"
+  "PORT=${PORT:-4890}"
+  'SERVE_PROJECT_NAME=Bookinator'
+  'SERVE_BANNER_TITLE=Bookinator'
+  "SERVE_PROJECT_VERSION=$project_version"
+  'SERVE_HEALTH_PATH=/api/health'
+  "SERVE_BROWSER=${SERVE_BROWSER:-Safari}"
+)
+
+exec env "${serve_environment[@]}" "$launcher" "$@" -- "$python_bin" -m bookinator.server --host @HOST@ --port @PORT@

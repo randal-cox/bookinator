@@ -1,0 +1,18 @@
+{
+  "name": "bookinator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first AI-assisted manuscript analysis",
+  "scripts": {
+    "inator:doctor": "inator doctor"
+  },
+  "devDependencies": {
+    "@inator/dev-tools": "file:.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz"
+  },
+  "dependencies": {
+    "@inator/ui": "file:.inator/packages/inator-ui-0.4.1-dev.29.tgz"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

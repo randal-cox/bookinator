@@ -4,63 +4,81 @@ This is Bookinator’s high-level release history. It records what each mileston
 
 The same history is available inside Bookinator from **Releases** in the footer.
 
-## 0.3.0 — The Engine Room
+## 0.3.0 — Common Ground
 
-**Planned next milestone · Independent pipeline**
+**Planned next milestone · Complete the Commons conversion**
 
-Bookinator’s analysis engine will become a durable background service rather
-than a thread owned by the web server. The browser remains the richest control
-and inspection surface, but closing it—or restarting the web application—will
-not own the lifetime of an active analysis queue.
+Bookinator will become an ordinary consumer of the installable Inator Commons
+architecture. The temporary sibling-checkout dependency and remaining bespoke
+shell, lifecycle, backup, diagnostics, and shared-interface seams will move to
+versioned public Commons packages and contracts without relocating
+Bookinator-owned manuscript, analysis, or editorial logic.
 
 ### Intended pieces
 
-- **One independent worker owns computation.** Queue scheduling, job claiming,
-  model calls, retries, cancellation, crash recovery, and pipeline-state writes
-  move behind a stable worker boundary.
-- **Every controller speaks the same protocol.** The web UI, a command-line
-  controller, and a later menu-bar companion can inspect, start, pause, drain,
-  prioritize, retry, or stop work without reimplementing the scheduler.
-- **Background work behaves like a guest.** Conservative concurrency,
-  pause-after-current semantics, battery and thermal awareness, and explicit
-  resource profiles keep unattended analysis understandable and courteous.
-- **The queue becomes transactionally durable.** Atomic claims, ordered human
-  priorities, current ownership, attempts, and recent history survive process
-  restarts without relying on in-process locks.
-- **Bookinator proves the reusable contract first.** The shared pipeline
-  contract will move into Inator only after Bookinator has exercised the real
-  process boundary, reconnect behavior, and failure semantics.
+- **Installable Commons is the foundation.** Bookinator consumes versioned
+  launcher, UI, lifecycle, backup, and diagnostics contracts through public
+  package boundaries. Product-owned manuscript, analysis, and editorial logic
+  stays in Bookinator; Commons source is not copied into the repository.
+- **Migration does not redesign analysis.** Preserve current pipeline behavior,
+  saved-book compatibility, and the existing local-first privacy boundary so
+  infrastructure failures remain distinguishable from model-quality problems.
+- **Shared interface means shared behavior.** Adopt Commons navigation, dialogs,
+  status, releases, help, backup, and machine/lifecycle conventions through thin
+  Bookinator adapters rather than one-off imitations.
+- **Installation becomes reproducible.** Setup and launch no longer require a
+  neighboring Commons source checkout; versioned dependencies and diagnostics
+  can explain exactly what is installed and what needs attention.
 
 ### Why it matters
 
-Bookinator already performs work that can occupy a machine for hours. The
-Engine Room turns that work into infrastructure: the analysis can continue
-without an open browser, the UI can reconnect without guessing, and other
-Inator products can adopt a proven worker contract instead of inheriting
-Bookinator’s server internals.
+Bookinator has already benefited from Commons while depending on its development
+checkout. Common Ground completes that relationship: Bookinator becomes a real
+consumer with the same installable, testable boundaries expected of the rest of
+the Inator family. That gives later pipeline experiments a stable platform
+instead of asking infrastructure and model research to change simultaneously.
 
 ### Deliberately not finished
 
-This milestone establishes one reliable local worker and its control plane. It
-does not promise cloud execution, multiple simultaneous model workers, or a
-hosted Bookinator service. Those choices come after the local contract is
-boringly trustworthy.
+This milestone does not redesign Chapter Reading, add GLiNER to production, tune
+Qwen, or separate the pipeline into its eventual independent worker. Those are
+Reanimator and later Engine Room concerns. Common Ground should be small enough
+to finish and boring enough to trust.
 
 ---
 
-## 0.4.0 — Look Here
+## 0.4.0 — Reanimator
 
-**Planned following milestone · Editorial attention routing**
+**Planned following milestone · Structured reading and attention routing**
 
-Bookinator will add small, fast, inspectable models that decide where the
-expensive reader should look—not what the editor should conclude. The first
-goal is sharper attention: Qwen receives a ranked evidence packet instead of
-being asked to rediscover every possibly relevant passage. The second goal is
-speed where the evidence supports it: confidently irrelevant candidates can
-avoid a full-model reading, while uncertain material still reaches Qwen.
+Bookinator will rebuild its experimental deep reader around focused, inspectable
+parts. Small, fast models decide where the expensive reader should look—not
+what the editor should conclude. Cached semantic forks give separate jobs to
+identity, action, summary, dossier, and editorial branches without one enormous
+prompt asking the model to do everything at once. Deterministic validators and
+bounded reconciliation keep errors visible instead of letting dubious prose
+silently become cumulative memory.
+
+The first goal is factual discipline and attributable failure. The second is
+sharper attention: Qwen receives a ranked evidence packet instead of being
+asked to rediscover every possibly relevant passage. The third is speed where
+the evidence supports it: confidently irrelevant candidates can avoid a
+full-model reading, while uncertain material still reaches Qwen.
 
 ### Intended pieces
 
+- **Chapter Reading becomes componentized.** Entity identity, high-risk
+  multi-action passages, selective Summary and Dossier records, editorial
+  assessment, and conditional reconciliation become bounded components with
+  independent status, provenance, and failure handling.
+- **Prefix reuse prevents needless rereading.** Focused semantic forks reuse a
+  byte-identical chapter-and-evidence prefix where the local provider supports
+  it. Output schemas remain deliberately small; cache reuse is not an excuse
+  for unbounded generation.
+- **Deterministic checks come before another model call.** Exact quotation and
+  offset resolution, alias collisions, missing action audits, unsupported
+  relations, and schema/cardinality checks produce concrete repair requests.
+  Reconciliation returns surgical claim changes rather than another essay.
 - **One stable decision contract.** Jev-compatible yes/no, choice, and score
   requests become a replaceable local routing interface with saved inputs,
   probabilities, model revision, thresholds, timing, and exact source ranges.
@@ -128,9 +146,26 @@ corpus.
 
 ---
 
+## 0.5.0 — The Engine Room
+
+**Planned later milestone · Independent pipeline**
+
+Bookinator's analysis engine becomes a durable background service rather than a
+thread owned by the web server. Queue scheduling, job claiming, retries,
+cancellation, crash recovery, and pipeline-state writes move behind one stable
+worker protocol shared by the web UI, command line, and later native controller.
+
+The worker must behave like a guest: conservative concurrency,
+pause-after-current semantics, battery and thermal awareness, durable claims,
+and honest reconnect behavior. This milestone does not promise cloud execution
+or multiple simultaneous model workers; it establishes one boringly reliable
+local process boundary first.
+
+---
+
 ## 0.2.0 — Reviewer Tools
 
-**In progress · Human judgment milestone**
+**Closing release candidate · Human judgment milestone**
 
 Bookinator is becoming an editorial workspace rather than only an analysis
 machine. The product now asks sharper manuscript-specific questions, gives a
@@ -185,14 +220,19 @@ proposes; the reviewer judges, changes, signs, and hands off.
 
 ### Release gate
 
-Run **Carmilla** by J. Sheridan Le Fanu from fresh EPUB ingestion through
-chapter approval, every enabled analysis pass, LLM Review, human annotation,
-reviewer sign-off, `.bookinator` backup and restore, interactive HTML, and PDF.
-Its compact, chaptered Gothic structure makes a complete run practical, while
-its queer desire, predation, illness, horror, and narrative ambiguity give the
-editorial machinery something real to contend with. Record failures as release
-blockers; do not describe the regression as complete until the exported
-artifacts have been inspected.
+Use **Carmilla** by J. Sheridan Le Fanu as the accumulated full-pipeline
+regression and run a short chaptered smoke book against the final code. Inspect
+chapter approval, pipeline completion and recovery, evidence navigation, human
+annotation, reviewer sign-off, `.bookinator` backup and restore, interactive
+HTML, and PDF. Release blockers are loss or corruption of source/reviewer data,
+dishonest or unrecoverable pipeline state, broken evidence navigation, or a
+failed handoff/export path.
+
+Imperfect tags, awkward prose, missed editorial opportunities, conservative or
+over-eager model judgment, and slow local inference are known quality limits,
+not an endlessly moving release gate, provided their machine authorship and
+evidence remain inspectable. Record them for **0.4.0 — Reanimator** rather than
+holding Reviewer Tools open until a probabilistic reader becomes flawless.
 
 ### Deliberately not finished
 
@@ -204,9 +244,11 @@ counterarguments, reviewer voting and commentary, and calibration across more
 than one famous public-domain novel. Fast implementation is not sufficient
 validation for that stronger promise.
 
-The independent background worker is likewise not part of Reviewer Tools. It
-is the center of **0.3.0 — The Engine Room**, immediately following this
-release.
+The Commons conversion is likewise not part of Reviewer Tools. It is the center
+of **0.3.0 — Common Ground**, immediately following this release. The
+structured-reader, GLiNER, semantic-fork, and attention-routing experiments
+belong to **0.4.0 — Reanimator**; the independent background worker remains the
+later **0.5.0 — The Engine Room** milestone.
 
 ---
 

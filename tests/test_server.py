@@ -1234,6 +1234,23 @@ def test_next_pipeline_action_advances_without_retrying_failed_work_forever() ->
     assert normalize_book_priority("unexpected") == "normal"
 
 
+def test_next_pipeline_action_does_not_resurrect_a_stopped_book() -> None:
+    book = {"id": "book-1234", "manuscriptId": "manuscript", "priority": "high"}
+    pipeline = {
+        "status": "paused",
+        "phase": "paused",
+        "stages": [
+            {"id": "extraction", "status": "complete"},
+            {"id": "chapter-archive", "status": "complete"},
+            {"id": "summaries", "status": "pending"},
+        ],
+        "chapters": [{"sequence": 1, "status": "pending"}],
+        "chunks": [],
+    }
+
+    assert next_pipeline_action(book, pipeline) == ""
+
+
 def test_retry_failed_analysis_is_selective_and_preserves_run_history(tmp_path: Path) -> None:
     import bookinator.server.__main__ as server
 
@@ -1264,6 +1281,16 @@ def test_retry_failed_analysis_is_selective_and_preserves_run_history(tmp_path: 
     assert pipeline["chapters"][1]["tagStatus"] == "complete"
 
 
+def test_gliner_is_a_visible_elementary_step_before_chapter_reading() -> None:
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    gliner_definition = '{id: "gliner-signals", label: "GLiNER signals"'
+    reading_definition = '{id: "chapter-reading", label: "Chapter Reading"'
+
+    assert gliner_definition in app
+    assert app.index(gliner_definition) < app.index(reading_definition)
+    assert '"gliner-signals": {kind: "gliner", status: "glinerStatus"' in app
+
+
 @pytest.mark.parametrize("kind,stage_id", [("emotion", "emotions"), ("tag", "tags"), ("smell", "smells")])
 def test_one_result_refresh_uses_the_same_contract_for_every_chapter_signal(kind: str, stage_id: str) -> None:
     pipeline = {
@@ -1283,6 +1310,46 @@ def test_one_result_refresh_uses_the_same_contract_for_every_chapter_signal(kind
     assert kind not in pipeline["chapters"][0]
     assert pipeline["chapters"][1][f"{kind}Status"] == "complete"
     assert pipeline["chapters"][1][kind] == {"keep": True}
+
+
+def test_gliner_refresh_is_visible_and_invalidates_the_dependent_chapter_read(tmp_path: Path) -> None:
+    pipeline = {
+        "status": "complete",
+        "stages": [
+            {"id": "gliner-signals", "status": "complete"},
+            {"id": "summaries", "status": "complete"},
+        ],
+        "chapters": [{
+            "sequence": 1, "title": "Chapter I", "glinerStatus": "complete",
+            "glinerModel": "fastino/gliner2.5-small-v1", "glinerCompletedAt": "now",
+            "status": "complete", "chapterReadingStatus": "complete", "summary": "Saved",
+        }],
+        "chunks": [{"sequence": 1, "chapterSequence": 1, "dossierStatus": "complete", "dossier": {"saved": True}}],
+    }
+    with patch.object(server, "gliner_signals_path", return_value=tmp_path / "gliner.json"), \
+            patch.object(server, "chapter_reading_path", return_value=tmp_path / "reading.json"), \
+            patch.object(server, "write_pipeline"):
+        action, _ = server.refresh_analysis_result({"id": "book-1234"}, pipeline, "gliner", 1)
+
+    assert action == "gliner-signals"
+    assert pipeline["chapters"][0]["glinerStatus"] == "pending"
+    assert pipeline["chapters"][0]["chapterReadingStatus"] == "pending"
+    assert "summary" not in pipeline["chapters"][0]
+    assert pipeline["chunks"][0]["dossierStatus"] == "pending"
+
+
+def test_gliner_identity_candidates_preserve_exact_source_evidence() -> None:
+    text = "Laura watched Carmilla cross the long drawing room while the evening shadows gathered around them.\n"
+    artifact = {"raw": {"mentions": {"entities": {"person": [
+        {"text": "Laura", "start": 0, "end": 5, "confidence": 0.97},
+        {"text": "Carmilla", "start": 14, "end": 22, "confidence": 0.93},
+    ]}}}}
+
+    candidates = server.gliner_identity_candidates(artifact, text)
+
+    assert [item["exact_mention"] for item in candidates] == ["Laura", "Carmilla"]
+    assert candidates[0]["mentions"][0]["evidence_ref"]["quote"] == text.strip()
+    assert candidates[1]["mentions"][0]["character_start"] == 14
 
 
 def test_deferred_analysis_refreshes_survive_a_server_restart(tmp_path: Path) -> None:
@@ -1430,6 +1497,25 @@ def test_development_checkpoint_blocks_version_migration_until_human_advances_it
     assert chapter["llmReview"]["editorialSummary"] == "Preserve me too."
 
 
+def test_development_checkpoint_clears_stale_optional_stage_clocks() -> None:
+    book = {"id": "book", "priority": "high"}
+    pipeline = {
+        "status": "running", "phase": "chapter-complete", "developmentAnalysisLimit": 2,
+        "developmentAnalysisLimitLabel": "Chapter I",
+        "chapters": [{"sequence": 2, "title": "Chapter I", "contextStatus": "complete", "llmReviewStatus": "complete"}],
+        "stages": [
+            {"id": "cumulative-context", "status": "running", "startedAt": "2026-01-01T00:00:00+00:00", "durationSeconds": 5400},
+            {"id": "llm-review", "status": "running", "startedAt": "2026-01-01T00:00:00+00:00", "durationSeconds": 1800},
+        ],
+    }
+    with patch.object(server, "next_pipeline_action", return_value=""):
+        assert server.reconcile_development_checkpoint(book, pipeline) is True
+    for stage in pipeline["stages"]:
+        assert stage["status"] == "pending"
+        assert "startedAt" not in stage
+        assert "durationSeconds" not in stage
+
+
 def test_reset_after_development_boundary_preserves_earlier_results_and_clears_later_work(tmp_path: Path) -> None:
     book = {"id": "book", "manuscriptId": "manuscript"}
     kept = {"sequence": 4, "title": "II. Kept", "status": "complete", "summary": "Keep", "tagStatus": "complete", "tag": {"tags": ["keep"]}, "contextStatus": "pending", "llmReviewStatus": "pending"}
@@ -1471,15 +1557,30 @@ def test_pipeline_exposes_one_book_level_failed_work_recovery_control() -> None:
 
 
 def test_development_launcher_delegates_to_the_shared_inator_launcher() -> None:
-    launcher = (Path(__file__).parents[1] / "bin" / "serve").read_text(encoding="utf-8")
-    assert 'commons_dir="${INATOR_COMMONS_DIR:-$project_dir/../inator}"' in launcher
-    assert '"$project_dir/../../inator/node_modules/.bin/inator-serve"' in launcher
-    assert 'launcher="$commons_dir/node_modules/.bin/inator-serve"' in launcher
+    root = Path(__file__).parents[1]
+    launcher = (root / "bin" / "serve").read_text(encoding="utf-8")
+    manifest = json.loads((root / "inator.json").read_text(encoding="utf-8"))
+    package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+
+    assert 'launcher="$project_dir/node_modules/.bin/inator-serve"' in launcher
+    assert "INATOR_COMMONS_DIR" not in launcher
     assert 'python_bin="$project_dir/.venv/bin/python"' in launcher
     assert 'python_bin="$(command -v python3 || true)"' in launcher
-    assert 'INATOR_PROJECT_DIR="$project_dir"' in launcher
-    assert 'PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}"' in launcher
+    assert '"INATOR_PROJECT_DIR=$project_dir"' in launcher
+    assert '"PYTHONPATH=$project_dir${PYTHONPATH:+:$PYTHONPATH}"' in launcher
     assert '"$launcher" "$@" -- "$python_bin" -m bookinator.server' in launcher
+    requirement = manifest["capabilities"]["development-serving"]
+    assert requirement == {"package": "@inator/dev-tools", "version": "0.4.1-dev.3"}
+    assert package["devDependencies"]["@inator/dev-tools"] == "file:.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz"
+
+
+def test_server_exposes_the_installed_commons_ui_through_a_narrow_static_facade() -> None:
+    handler = server.BookinatorHandler.__new__(server.BookinatorHandler)
+    handler.directory = str(server.WEB_ROOT)
+
+    assert handler.translate_path("/commons/@inator/ui/index.js") == str(server.COMMONS_UI_ROOT / "index.js")
+    assert handler.translate_path("/commons/@inator/ui/product-history.css") == str(server.COMMONS_UI_ROOT / "product-history.css")
+    assert handler.translate_path("/commons/@inator/ui/../../../../pyproject.toml") != str(server.ROOT / "pyproject.toml")
 
 
 def test_pipeline_payload_does_not_resend_manuscript_source_text() -> None:
@@ -1708,6 +1809,120 @@ def test_stale_worker_cannot_overwrite_newer_chapter_map_decision(tmp_path: Path
     assert saved["chapterMapApproved"] is True
     assert saved["analysisProvisional"] is False
     assert saved["acceptedChapterLabelVariants"] == ["INTERLUDE"]
+
+
+def test_stale_worker_cannot_erase_newer_development_checkpoint(tmp_path: Path) -> None:
+    book = {"id": "book-1234", "manuscriptId": "manuscript-1234"}
+    project = tmp_path / "manuscript-1234"
+    project.mkdir()
+    persisted = {
+        "bookId": "book-1234",
+        "status": "paused",
+        "phase": "development-checkpoint",
+        "developmentAnalysisLimit": 11,
+        "developmentAnalysisLimitLabel": "Chapter IX",
+        "developmentPreservedThroughSequence": 10,
+        "developmentCheckpointLocked": True,
+        "stages": [],
+        "chapters": [{"sequence": 11, "title": "Chapter IX", "status": "complete", "summary": "Safe."}],
+    }
+    (project / "pipeline.json").write_text(json.dumps(persisted), encoding="utf-8")
+    stale_worker = {
+        "bookId": "book-1234",
+        "status": "running",
+        "phase": "summarizing",
+        "stages": [],
+        "chapters": [{"sequence": 11, "title": "Chapter IX", "status": "pending"}],
+    }
+
+    with patch.object(server, "BOOKS_ROOT", tmp_path):
+        server.write_pipeline(book, stale_worker)
+
+    saved = json.loads((project / "pipeline.json").read_text(encoding="utf-8"))
+    assert saved["developmentAnalysisLimit"] == 11
+    assert saved["developmentCheckpointLocked"] is True
+    assert saved["chapters"][0]["status"] == "complete"
+    assert saved["chapters"][0]["summary"] == "Safe."
+
+
+def test_long_worker_can_commit_after_read_side_revision_advances(tmp_path: Path) -> None:
+    book = {"id": "book-1234", "manuscriptId": "manuscript-1234"}
+    project = tmp_path / "manuscript-1234"
+    project.mkdir()
+    persisted = {
+        "bookId": "book-1234", "ledgerRevision": 9, "status": "paused",
+        "stages": [], "chapters": [{"sequence": 2, "status": "complete", "summary": "Preserved."}],
+    }
+    (project / "pipeline.json").write_text(json.dumps(persisted), encoding="utf-8")
+    completed_worker = {
+        "bookId": "book-1234", "ledgerRevision": 8, "status": "running",
+        "stages": [], "chapters": [{"sequence": 2, "status": "complete", "summary": "Fresh model result."}],
+    }
+
+    with patch.object(server, "BOOKS_ROOT", tmp_path):
+        server.write_pipeline(book, completed_worker)
+
+    saved = json.loads((project / "pipeline.json").read_text(encoding="utf-8"))
+    assert saved["ledgerRevision"] == 10
+    assert saved["chapters"][0]["status"] == "complete"
+    assert saved["chapters"][0]["summary"] == "Fresh model result."
+
+
+def test_unreadable_pipeline_fails_closed_instead_of_becoming_new_book(tmp_path: Path) -> None:
+    book = {"id": "book-1234", "manuscriptId": "manuscript-1234"}
+    project = tmp_path / "manuscript-1234"
+    project.mkdir()
+    (project / "pipeline.json").write_text('{"chapters": [', encoding="utf-8")
+
+    with patch.object(server, "BOOKS_ROOT", tmp_path):
+        pipeline = server.load_pipeline(book)
+
+    assert pipeline["status"] == "blocked"
+    assert pipeline["phase"] == "ledger-read-error"
+    assert pipeline["ledgerReadError"] is True
+    assert server.next_pipeline_action(book, pipeline) == ""
+    events = (project / "pipeline-events.jsonl").read_text(encoding="utf-8")
+    assert '"event": "ledger-read-failed"' in events
+
+
+def test_completed_atomic_reading_rehydrates_an_interrupted_ledger(tmp_path: Path) -> None:
+    book = {"id": "book-1234", "manuscriptId": "manuscript-1234"}
+    project = tmp_path / "manuscript-1234"
+    (project / "chapter-readings").mkdir(parents=True)
+    (project / "chunks").mkdir()
+    artifact = {
+        "schema": server.CHAPTER_READING_PROMPT_VERSION, "status": "complete", "chapterSequence": 2,
+        "model": "reader", "startedAt": "2026-10-01T01:00:00+00:00",
+        "completedAt": "2026-10-01T01:10:00+00:00", "durationSeconds": 600,
+        "primaryDurationSeconds": 500, "consistencyDurationSeconds": 100,
+        "inputSignature": "reading-signature",
+        "normalized": {
+            "summary": {"summary": "Recovered summary.", "keyPoints": ["Point"]},
+            "dossier": {"synopsis": "Recovered dossier.", "facts": []},
+            "review": {"editorialVerdict": "no_material_concerns"},
+            "cast": [], "consistency": {"status": "accepted"},
+        },
+    }
+    (project / "chapter-readings" / "0002.json").write_text(json.dumps(artifact), encoding="utf-8")
+    (project / "chunks" / "0001.json").write_text(json.dumps({"sequence": 1, "chapterSequence": 2}), encoding="utf-8")
+    pipeline = {
+        "stages": [
+            {"id": "summaries", "status": "running"},
+            {"id": "dossiers", "status": "running"},
+            {"id": "llm-review", "status": "running"},
+        ],
+        "chapters": [{"sequence": 2, "title": "Chapter X", "status": "running", "chapterReadingStatus": "running", "llmReviewStatus": "running"}],
+        "chunks": [{"sequence": 1, "chapterSequence": 2, "dossierStatus": "running"}],
+    }
+
+    with patch.object(server, "BOOKS_ROOT", tmp_path):
+        changed = server.reconcile_completed_chapter_readings(book, pipeline)
+
+    assert changed is True
+    assert pipeline["chapters"][0]["status"] == "complete"
+    assert pipeline["chapters"][0]["summary"] == "Recovered summary."
+    assert pipeline["chapters"][0]["llmReviewStatus"] == "complete"
+    assert pipeline["chunks"][0]["dossierStatus"] == "complete"
 
 
 def test_overall_pipeline_progress_counts_current_passes_per_manuscript_chapter() -> None:
@@ -1947,20 +2162,22 @@ def test_public_docs_exist_inside_the_docs_root() -> None:
     assert DOCS_ROOT.resolve() in resources.parents
 
 
-def test_roadmap_is_a_sortable_footer_destination() -> None:
+def test_roadmap_uses_shared_history_while_preserving_detailed_product_candidates() -> None:
     root = Path(__file__).parents[1]
     page = (root / "web" / "index.html").read_text(encoding="utf-8")
     pages = (root / "web" / "pages.js").read_text(encoding="utf-8")
     app = (root / "web" / "app.js").read_text(encoding="utf-8")
     styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
-    assert 'href="#roadmap/priorities" data-page="roadmap">Roadmap</a>' in page
+    assert 'data-inator-product-footer' in page
     assert "export const roadmapItems" in pages
     assert "Sharper summary and dossier questions" in pages
     assert "Book-title collision research" in pages
     for field in ("name", "description", "tags", "ease", "impact"):
         assert f"{field}:" in pages
     assert "item.payoff = item.ease * item.impact" in pages
-    assert 'if (collection === "roadmap") installRoadmapLedger();' in app
+    assert 'collection === "roadmap" ? "roadmap"' in app
+    assert "createProductHistoryView" in app
+    assert 'if (collection === "roadmap" && !productHistoryMode) installRoadmapLedger();' in app
     for field in ("name", "description", "tags", "ease", "impact", "payoff"):
         assert f'key: "{field}"' in app
     assert '<table class="roadmap-table">' in app
@@ -2463,7 +2680,8 @@ def test_dossier_time_sections_are_grouped_and_promises_include_reader_contracts
     assert 'label: "Current scene time"' in app
     assert 'label: "Timeline observations"' in app
     assert 'label: "Promises and reader contracts"' in app
-    assert 'Begin each promise with "Character promise:" or "Story promise:"' in server
+    assert 'promise_type, exactly "character" or "story"' in server
+    assert "A character promise requires an actual commitment" in server
 
 
 def test_connections_workspace_uses_dry_inspectable_entity_location_and_time_indices() -> None:
@@ -2769,7 +2987,7 @@ def test_chapter_inspection_is_embedded_in_the_whole_book_disclosure() -> None:
     assert ".chapter-map-inspection-verdict" in styles
 
 
-def test_server_launch_starts_the_library_pipeline_by_default() -> None:
+def test_server_launch_resumes_an_enabled_library_pipeline() -> None:
     import bookinator.server.__main__ as server
 
     pipeline_started = threading.Event()
@@ -2783,6 +3001,7 @@ def test_server_launch_starts_the_library_pipeline_by_default() -> None:
             return None
 
     with patch.object(server, "ThreadingHTTPServer", return_value=LocalServer()), \
+         patch.object(server, "pipeline_is_enabled", return_value=True), \
          patch.object(server, "start_global_pipeline", side_effect=pipeline_started.set) as start_pipeline, \
          patch.object(server.sys, "argv", ["bookinator"]):
         server.main()
@@ -2799,7 +3018,8 @@ def test_background_pipeline_startup_does_not_block_http_startup() -> None:
         pipeline_started.set()
         release_pipeline.wait(timeout=1)
 
-    with patch.object(server, "start_global_pipeline", side_effect=blocked_pipeline_start):
+    with patch.object(server, "pipeline_is_enabled", return_value=True), \
+         patch.object(server, "start_global_pipeline", side_effect=blocked_pipeline_start):
         started_at = time.monotonic()
         thread = server.start_background_services()
         elapsed = time.monotonic() - started_at
@@ -2809,6 +3029,17 @@ def test_background_pipeline_startup_does_not_block_http_startup() -> None:
         assert thread.name == "bookinator-pipeline-startup"
         release_pipeline.set()
         thread.join(timeout=1)
+
+
+def test_background_pipeline_startup_respects_the_durable_stop_state() -> None:
+    import bookinator.server.__main__ as server
+
+    with patch.object(server, "pipeline_is_enabled", return_value=False), \
+         patch.object(server, "start_global_pipeline") as start_pipeline:
+        thread = server.start_background_services()
+        thread.join(timeout=1)
+
+    start_pipeline.assert_not_called()
 
 
 def test_global_pipeline_does_not_load_books_while_holding_queue_lock() -> None:
@@ -2859,9 +3090,12 @@ def test_pipeline_ledger_exposes_elementary_work_in_chapter_order() -> None:
 
     assert 'id: "summaries", label: "Summary"' in ledger
     assert 'id: "dossiers", label: "Dossier"' in ledger
+    assert 'id: "chapter-reading", label: "Chapter Reading"' in ledger
+    assert '["summaries", "dossiers", "llm-review"].includes(definition.id)' in ledger
+    assert 'Produces Summary, Dossier' in ledger
     assert ledger.index('id: "llm-review"') < ledger.index('id: "cumulative-context"') < ledger.index('id: "emotions"') < ledger.index('id: "tags"') < ledger.index('id: "smells"')
     assert 'class="pipeline-chapter-group' in ledger
-    assert 'const open = openRows.has(key);' in ledger
+    assert 'pipelineDisclosureOpen(book.id, key, group.status === "running")' in ledger
     assert 'data-show-chapter-group-details' in ledger
     assert 'Chapter processing total' in ledger
     assert 'configureRunInspector();' in source
@@ -2870,6 +3104,33 @@ def test_pipeline_ledger_exposes_elementary_work_in_chapter_order() -> None:
     assert ".pipeline-chapter-tasks" in styles
     assert ".pipeline-elementary-task" in styles
     assert ".pipeline-chapter-group.running .chapter-status" in styles
+
+
+def test_pipeline_ledger_major_regions_are_collapsible_and_keep_status_visible() -> None:
+    root = Path(__file__).parents[1]
+    source = (root / "web" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+
+    assert 'function pipelineLedgerDisclosure' in source
+    assert 'key: "pipeline-section-intake"' in source
+    assert 'key: "pipeline-section-chapters"' in source
+    assert 'key: "pipeline-section-completion"' in source
+    assert 'const pipelineDisclosuresKey = "bookinator.pipeline-disclosures.v1";' in source
+    assert 'const sectionOpen = (key) => sameWorkspace ? openRows.has(key) : pipelineDisclosureOpen(book.id, key);' in source
+    assert 'rememberPipelineDisclosure(book.id, details.dataset.analysisKey, details.open)' in source
+    assert 'const readingDetailsTelemetryHistory = new Map();' in source
+    assert 'telemetry.previousCall = {' in source
+    assert 'function updateLiveModelTelemetry' in source
+    assert 'function formatStreamingJson' in source
+    assert 'updateLiveOutputInspector(telemetry)' in source
+    assert 'function pipelineStageDetailsSignature' in source
+    assert 'function chapterGroupDetailsSignature' in source
+    assert 'dialog.dataset.resultSignature = pipelineStageDetailsSignature(stage);' in source
+    assert '`${stage.className}\\n${template.innerHTML}`' not in source
+    assert 'pipelineLedgerProgress(preparation)' in source
+    assert 'pipelineLedgerProgress(finishing)' in source
+    assert '.pipeline-ledger-summary::-webkit-details-marker' in styles
+    assert '.pipeline-ledger-section[open] .pipeline-ledger-disclosure' in styles
 
 
 def test_source_document_stage_shows_format_size_and_download_control() -> None:
@@ -2984,7 +3245,7 @@ def test_running_details_show_live_duration_and_restart_controls() -> None:
     assert '`${formatRunDuration(elapsed, "running")}+`' in app
     assert 'id="restart-pipeline-stage"' in page
     assert 'refresh.textContent = row.dataset.analysisStatus === "running" ? "Restart" : row.dataset.analysisStatus === "failed" ? "Retry" : "Refresh"' in app
-    assert '{"summary", "dossier", "emotion", "tag", "smell", "context", "llm-review", "whole-summary", "whole-llm-review"}' in server
+    assert '{"gliner", "summary", "dossier", "emotion", "tag", "smell", "context", "llm-review", "whole-summary", "whole-llm-review"}' in server
 
 
 def test_official_ollama_model_error_does_not_ask_for_hugging_face_token() -> None:
@@ -3025,6 +3286,7 @@ def test_metadata_model_prefers_small_general_model_families() -> None:
 def test_large_memory_recommends_large_primary_editor() -> None:
     assert recommended_roles(645)["primary"] == "qwen3.5:122b"
     assert recommended_roles(645) == {"primary": "qwen3.5:122b", "fast": "qwen3.5:9b"}
+    assert recommended_roles(64) == {"primary": "qwen3.8:27b", "fast": "qwen3.5:9b"}
 
 
 def test_chapters_keep_manuscript_order_regardless_of_title() -> None:
@@ -3246,7 +3508,7 @@ def test_untrusted_chapter_map_invalidates_every_downstream_artifact() -> None:
 
 
 def test_pipeline_dependency_graph_cascades_structure_but_not_summary_siblings() -> None:
-    assert pipeline_stage_dependents("structure") == {"chapter-archive", "chunking", "summaries", "emotions", "tags", "smells", "dossiers", "question-tracker", "whole-book-summary", "whole-book-dossier", "cumulative-context", "llm-review", "whole-book-llm-review"}
+    assert pipeline_stage_dependents("structure") == {"chapter-archive", "chunking", "gliner-signals", "summaries", "emotions", "tags", "smells", "dossiers", "question-tracker", "whole-book-summary", "whole-book-dossier", "cumulative-context", "llm-review", "whole-book-llm-review"}
     assert pipeline_stage_dependents("summaries") == {"question-tracker", "whole-book-summary", "cumulative-context", "llm-review", "whole-book-llm-review"}
     pipeline = {"stages": [
         {"id": "source", "status": "complete"},
@@ -3274,6 +3536,13 @@ def test_timing_charts_cover_preparation_rollups_and_optional_review_work() -> N
         assert f'["{stage_id}",' in timing
     for label in ("Whole-book summary", "Whole-book dossier", "Questions & payoffs", "Context", "LLM Review"):
         assert label in timing
+    assert '["chapter-reading", "Chapter Reading"]' in timing
+    assert "Legacy chapter summaries" in timing
+    assert "Legacy chunk dossiers" in timing
+    assert "Legacy Context" in timing
+    assert "Legacy LLM Review" in timing
+    assert 'String(chapter.contextModel || "").includes("deterministic")' in timing
+    assert '!chapter.chapterReadingStatus' in timing
     assert prepare.count('"durationSeconds": round(time.monotonic() - stage_started, 3)') == 5
 
 
@@ -3312,7 +3581,7 @@ def test_start_over_preserves_source_annotations_and_identity_but_clears_analysi
     (project / "reviewer-signoff.json").write_text(json.dumps({"status": "complete", "reviewerName": "Randal", "notes": "Keep these notes."}), encoding="utf-8")
     (project / "extracted-chapters.json").write_text("[]", encoding="utf-8")
     (project / "pipeline.json").write_text(json.dumps({"status": "complete", "chapters": [{"summary": "Old"}]}), encoding="utf-8")
-    for dirname in ("chapters", "chunks", "llm-review"):
+    for dirname in ("chapters", "chunks", "chapter-readings", "llm-review"):
         derived = project / dirname
         derived.mkdir()
         (derived / "old.json").write_text("{}", encoding="utf-8")
@@ -3334,6 +3603,7 @@ def test_start_over_preserves_source_annotations_and_identity_but_clears_analysi
     assert not (project / "extracted-chapters.json").exists()
     assert not (project / "chapters").exists()
     assert not (project / "chunks").exists()
+    assert not (project / "chapter-readings").exists()
     assert not (project / "llm-review").exists()
     assert json.loads((project / "pipeline.json").read_text(encoding="utf-8"))["message"] == "Previous analysis was cleared. Source ingestion is first in line."
 
@@ -3430,13 +3700,15 @@ def test_chapter_summary_stream_can_be_cancelled_promptly() -> None:
             cancel.set()
             yield b'{"message":{"content":"late"},"done":false}\n'
 
-    with patch("bookinator.server.__main__.resident_ollama_models", return_value=set()), patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()):
+    with patch("bookinator.server.__main__.resident_ollama_models", return_value=set()), patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()) as urlopen:
         try:
             summarize_chapter({"title": "One", "text": "Words", "pageStart": 1, "pageEnd": 2}, "reader", cancel)
         except PipelineCancelled:
             pass
         else:
             raise AssertionError("A stopped model stream must not finish the chapter")
+    request_payload = json.loads(urlopen.call_args.args[0].data)
+    assert request_payload["think"] is False
 
 
 def test_active_model_response_can_be_closed_immediately() -> None:
@@ -3453,6 +3725,99 @@ def test_active_model_response_can_be_closed_immediately() -> None:
     assert cancel_active_model_response("book-1234") is True
     assert response.closed is True
     assert "book-1234" not in server.ACTIVE_MODEL_RESPONSES
+
+
+def test_structured_model_exposes_live_response_telemetry() -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'{"message":{"content":"{\\"ok\\":"},"done":false}\n'
+            snapshot = server.model_response_telemetry("book-live")
+            assert snapshot["active"] is True
+            assert snapshot["status"] == "generating"
+            assert snapshot["outputCharacters"] == 6
+            assert snapshot["responseText"] == '{"ok":'
+            yield b'{"message":{"content":"true}"},"done":true,"prompt_eval_count":123,"eval_count":7,"done_reason":"stop"}\n'
+
+    server.MODEL_RESPONSE_TELEMETRY.pop("book-live", None)
+    with patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()):
+        result, raw = server._run_structured_model(
+            "A compact prompt", "reader", {"type": "object"}, run_key="book-live", activity="chapter reading",
+        )
+    assert result == {"ok": True}
+    assert raw == '{"ok":true}'
+    snapshot = server.model_response_telemetry("book-live")
+    assert snapshot["active"] is False
+    assert snapshot["status"] == "complete"
+    assert snapshot["inputCharacters"] == len("A compact prompt")
+    assert snapshot["outputCharacters"] == len(raw)
+    assert snapshot["responseText"] == raw
+    assert snapshot["responseFragments"] == 2
+    assert snapshot["promptTokens"] == 123
+    assert snapshot["generatedTokens"] == 7
+    with patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()):
+        server._run_structured_model(
+            "Audit prompt", "reader", {"type": "object"}, run_key="book-live", activity="chapter reading consistency",
+        )
+    snapshot = server.model_response_telemetry("book-live")
+    assert snapshot["activity"] == "chapter reading consistency"
+    assert snapshot["previousCall"]["activity"] == "chapter reading"
+    assert snapshot["previousCall"]["outputCharacters"] == len(raw)
+    server.MODEL_RESPONSE_TELEMETRY.pop("book-live", None)
+
+
+def test_structured_model_salvages_complete_json_after_stream_close_race() -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'{"message":{"content":"{\\"ok\\":true}"},"done":false}\n'
+            raise AttributeError("'NoneType' object has no attribute 'peek'")
+
+    server.MODEL_RESPONSE_TELEMETRY.pop("book-recovered", None)
+    with patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()):
+        result, raw = server._run_structured_model(
+            "A compact prompt", "reader", {"type": "object"}, run_key="book-recovered", activity="chapter tags",
+        )
+
+    assert result == {"ok": True}
+    assert raw == '{"ok":true}'
+    snapshot = server.model_response_telemetry("book-recovered")
+    assert snapshot["status"] == "complete"
+    assert snapshot["transportRecovered"] == "AttributeError"
+    server.MODEL_RESPONSE_TELEMETRY.pop("book-recovered", None)
+
+
+def test_structured_model_close_race_during_stop_is_cancellation() -> None:
+    cancel = threading.Event()
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            cancel.set()
+            raise AttributeError("'NoneType' object has no attribute 'peek'")
+            yield  # pragma: no cover
+
+    with patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()), pytest.raises(PipelineCancelled):
+        server._run_structured_model(
+            "A compact prompt", "reader", {"type": "object"}, cancel, run_key="book-cancelled", activity="chapter tags",
+        )
+    assert server.model_response_telemetry("book-cancelled")["status"] == "cancelled"
+    server.MODEL_RESPONSE_TELEMETRY.pop("book-cancelled", None)
 
 
 def test_chapter_summary_accepts_common_model_key_variants() -> None:
@@ -3473,6 +3838,71 @@ def test_chapter_summary_anchors_literal_chapter_ending_state() -> None:
 
     assert result["endingState"][0]["evidence"] == "But Carmilla was gone."
     assert source[result["endingState"][0]["evidenceAnchor"]["characterStart"]:result["endingState"][0]["evidenceAnchor"]["characterEnd"]] == "But Carmilla was gone."
+
+
+def test_chapter_summary_keeps_only_anchored_key_points_with_supported_polarity() -> None:
+    source = "The servants forced the locked door. But Carmilla was gone."
+    result = normalize_chapter_summary({
+        "summary": "The servants enter and find Carmilla absent.",
+        "key_points": [
+            {"claim": "The servants force the locked door.", "subject": "The servants", "evidence_ref": {"quote": "The servants forced the locked door."}},
+            {"claim": "There are no signs of forced entry.", "subject": "The room", "evidence_ref": {"quote": "The servants forced the locked door."}},
+        ],
+        "ending_state": [], "new_questions": [], "question_details": [],
+    }, source)
+
+    assert result["keyPoints"] == ["The servants force the locked door."]
+    assert result["keyPointDetails"][0]["subject"] == "The servants"
+
+
+def test_chapter_summary_coverage_detects_an_opening_only_digest() -> None:
+    source = "The doctor examines Laura. " + ("The family waits in uncertainty. " * 20) + "At sunset Laura meets General Spielsdorf on the road."
+    late_quote = "At sunset Laura meets General Spielsdorf on the road."
+    start = source.index(late_quote)
+    normalized = normalize_chapter_summary({
+        "summary": "The doctor examines Laura and discusses her health with her father.",
+        "key_points": [{
+            "claim": "Laura meets General Spielsdorf on the road at sunset.",
+            "subject": "Laura",
+            "evidence_ref": {"quote": late_quote, "character_start": start, "character_end": start + len(late_quote)},
+        }],
+        "ending_state": [], "new_questions": [], "question_details": [],
+    }, source)
+
+    coverage = server.chapter_summary_ending_coverage(normalized["summary"], normalized, source)
+    assert coverage["covered"] is False
+    assert coverage["lateFacts"] == ["Laura meets General Spielsdorf on the road at sunset."]
+
+
+def test_chapter_summary_coverage_accepts_the_final_narrative_turn() -> None:
+    source = "The doctor examines Laura. " + ("The family waits in uncertainty. " * 20) + "At sunset Laura meets General Spielsdorf on the road."
+    late_quote = "At sunset Laura meets General Spielsdorf on the road."
+    start = source.index(late_quote)
+    normalized = normalize_chapter_summary({
+        "summary": "After the examination, Laura encounters General Spielsdorf on the road.",
+        "key_points": [{
+            "claim": "Laura meets General Spielsdorf on the road at sunset.",
+            "subject": "Laura",
+            "evidence_ref": {"quote": late_quote, "character_start": start, "character_end": start + len(late_quote)},
+        }],
+        "ending_state": [], "new_questions": [], "question_details": [],
+    }, source)
+
+    assert server.chapter_summary_ending_coverage(normalized["summary"], normalized, source)["covered"] is True
+
+
+def test_evidence_claims_do_not_upgrade_observation_into_cause() -> None:
+    source = "The doctor looked at the small blue spot below her throat."
+    result = normalize_chapter_summary({
+        "summary": "The doctor observes a blue spot.",
+        "key_points": [
+            {"claim": "The doctor observes a blue spot.", "subject": "The doctor", "evidence_ref": {"quote": source}},
+            {"claim": "The blue spot is the source of Laura's illness.", "subject": "The blue spot", "evidence_ref": {"quote": source}},
+        ],
+        "ending_state": [], "new_questions": [], "question_details": [],
+    }, source)
+
+    assert result["keyPoints"] == ["The doctor observes a blue spot."]
 
 
 def test_front_matter_summary_preserves_structure_without_inventing_story_questions() -> None:
@@ -3611,6 +4041,28 @@ def test_dossier_analysis_preserves_structured_evidence() -> None:
     assert result["evidence"] == ["Exact supporting words"]
     assert result["evidenceAnchors"][0]["characterStart"] == 0
     assert result["facts"] == response["facts"]
+
+
+def test_dossier_claim_form_rejects_unanchored_and_fake_character_promises() -> None:
+    import bookinator.server.__main__ as server
+
+    source = "My father said that he would visit the doctor in the morning."
+    response = {
+        "synopsis": "The narrator's father plans a visit.",
+        "facts": [{"claim": "The narrator's father plans to visit the doctor.", "subject": "the narrator's father", "evidence_ref": {"quote": source}}],
+        "events": [], "entities": [], "locations": [], "current_times": [], "questions": [], "question_details": [],
+        "promises": [
+            {"claim": "The narrator's father will visit the doctor.", "subject": "the narrator's father", "promise_type": "character", "evidence_ref": {"quote": source}},
+            {"claim": "The narrator's father promises to ask questions and theorize.", "subject": "the narrator's father", "promise_type": "character", "evidence_ref": {"quote": "My father said"}},
+        ],
+        "timeline_observations": [], "evidence": [],
+    }
+    with patch.object(server, "run_structured_model", return_value=(response, "raw")):
+        result = server.analyze_chunk_dossier({"chapterLabel": "VIII", "text": source}, "model")
+
+    assert result["facts"] == ["The narrator's father plans to visit the doctor."]
+    assert result["promises"] == ["The narrator's father will visit the doctor."]
+    assert {item["kind"] for item in result["claimRecords"]} == {"facts", "promises"}
 
 
 def test_dossier_discards_generic_relationship_questions() -> None:
@@ -4222,12 +4674,9 @@ def test_book_worker_runs_each_chapter_through_dependency_order_before_advancing
     calls = []
     rollup_ran = False
 
-    def summarize(_book_id: str, chapter_sequence: int | None = None) -> None:
-        calls.append(("summaries", chapter_sequence))
+    def chapter_reading(_book_id: str, chapter_sequence: int, include_review: bool | None = None) -> None:
+        calls.append(("chapter-reading", chapter_sequence))
         pipeline["chapters"][chapter_sequence - 1]["status"] = "complete"
-
-    def dossier(_book_id: str, chapter_sequence: int | None = None) -> None:
-        calls.append(("dossiers", chapter_sequence))
         next(chunk for chunk in pipeline["chunks"] if chunk["chapterSequence"] == chapter_sequence)["dossierStatus"] = "complete"
 
     def signal(_book_id: str, kind: str, chapter_sequence: int | None = None) -> None:
@@ -4243,14 +4692,13 @@ def test_book_worker_runs_each_chapter_through_dependency_order_before_advancing
     server.QUEUE_CANCEL_EVENT.clear()
     with patch.object(server, "find_book", return_value={"id": "book-1234"}), \
          patch.object(server, "load_pipeline", return_value=pipeline), \
-         patch.object(server, "run_summary_pipeline", side_effect=summarize), \
+         patch.object(server, "run_chapter_reading_pipeline", side_effect=chapter_reading), \
          patch.object(server, "run_chapter_signal_pipeline", side_effect=signal), \
-         patch.object(server, "run_dossier_pipeline", side_effect=dossier), \
          patch.object(server, "run_ready_stage_rollups", side_effect=ready_rollups):
         server.run_book_chapter_pipeline("book-1234")
     server.PIPELINE_THREADS.pop("book-1234", None)
     server.PIPELINE_CANCEL_EVENTS.pop("book-1234", None)
-    assert calls == [("summaries", 1), ("dossiers", 1), ("emotions", 1), ("tags", 1), ("summaries", 2), ("summary-rollup", None), ("dossiers", 2), ("emotions", 2), ("tags", 2)]
+    assert calls == [("chapter-reading", 1), ("emotions", 1), ("tags", 1), ("chapter-reading", 2), ("summary-rollup", None), ("emotions", 2), ("tags", 2)]
 
 
 def test_summary_rollup_requires_summaries_but_not_independent_analysis_passes() -> None:
@@ -4512,13 +4960,38 @@ def test_dialogue_first_person_does_not_override_third_person_narration() -> Non
     assert metrics["dominantPerson"] != "first_person"
 
 
+def test_viewpoint_shift_rejects_second_person_found_only_in_dialogue() -> None:
+    text = (
+        "I followed my father down the road and watched the carriage approach. "
+        "My hands were cold, but I kept walking.\n\n"
+        "“That is what you call a picnic, and you may enjoy it,” the General said."
+    )
+    response = {
+        "signals": [{
+            "id": "viewpoint_shift", "family": "viewpoint", "score": .75, "confidence": .9,
+            "explanation": "The narration shifts from first to second person.",
+            "evidence": [
+                {"quote": "I followed my father down the road and watched the carriage approach."},
+                {"quote": "That is what you call a picnic, and you may enjoy it"},
+            ],
+        }],
+        "candidate_signals": [],
+    }
+    with patch.object(server, "run_structured_model", return_value=(response, "{}")):
+        artifact = server.analyze_chapter_tags({"sequence": 11, "title": "IX", "text": text}, "qwen")
+
+    assert artifact["signals"] == []
+    assert artifact["rejectedSignals"][0]["id"] == "viewpoint_shift"
+    assert "outside dialogue" in artifact["rejectedSignals"][0]["reason"]
+
+
 def test_chapter_tag_schema_requires_evidence_for_every_returned_signal() -> None:
     import bookinator.server.__main__ as server
     schema = server.chapter_tag_schema()
     signal = schema["properties"]["signals"]["items"]
     assert signal["properties"]["score"]["minimum"] == .25
     assert signal["properties"]["evidence"]["minItems"] == 1
-    assert server.TAG_PROMPT_VERSION == "chapter-tags-v5"
+    assert server.TAG_PROMPT_VERSION == "chapter-tags-v6"
 
 
 def test_mortality_tag_requires_mortality_evidence() -> None:
@@ -4696,91 +5169,133 @@ def test_llm_review_uses_only_prior_context_and_current_canonical_chapter() -> N
     packet = server.build_llm_review_packet(book, pipeline, chapter, source, prior_context)
 
     assert packet["chapter"]["text"] == source["text"]
-    assert packet["priorContext"] == prior_context
+    assert packet["priorContext"]["records"] == []
+    assert "storySoFar" not in packet["priorContext"]
     assert not {"summary", "dossiers", "signals"} & packet.keys()
     assert packet["schema"] == "bookinator-editorial-context-packet-v3"
     assert packet["chapter"]["number"] == 1
     assert packet["chapter"]["sourceSequence"] == 2
 
 
-def test_cumulative_context_uses_authored_number_and_preserves_comprehensive_fields() -> None:
-    captured = {}
-
-    def structured(prompt, _model, _schema, _cancel_event, _run_key):
-        captured["prompt"] = prompt
-        return ({
-            "story_so_far": "Dunwich has been introduced.",
-            "key_events": ["The narrator surveys Dunwich."],
-            "established_facts": ["Dunwich is isolated."],
-            "entities_and_significance": ["Dunwich — the principal setting."],
-            "character_states": [],
-            "relationship_states": [],
-            "knowledge_states": ["The reader knows the region's reputation."],
-            "locations_and_timeline": ["Dunwich — present-day survey."],
-            "open_threads": ["The sounds in the hills remain unexplained."],
-            "resolved_threads": [],
-            "reader_promises": ["The source of the sounds will matter."],
-            "themes_and_motifs": ["Inherited decay."],
-            "voice_and_form": ["Antiquarian omniscient narration."],
-        }, "raw")
-
-    evidence = [{"chapter": 1, "sourceSequence": 2, "summary": "A remote region is introduced."}]
-    with patch.object(server, "run_structured_model", side_effect=structured):
+def test_cumulative_context_builds_a_deterministic_age_aware_evidence_ledger() -> None:
+    evidence = [
+        {
+            "chapter": "Chapter I", "sourceSequence": 2, "summary": "A remote region is introduced.",
+            "keyPointDetails": [{"claim": "Dunwich is isolated.", "subject": "Dunwich", "evidence": "a lonely place", "evidenceAnchor": {"characterStart": 1, "characterEnd": 15}}],
+            "questions": [{"question": "What makes the sounds in the hills?", "evidence": "crying in the hills"}],
+            "dossiers": [{"claimRecords": [{"kind": "entities", "claim": "Dunwich is the principal setting.", "subject": "Dunwich", "evidence": "village of Dunwich"}]}],
+        },
+        {
+            "chapter": "Chapter II", "sourceSequence": 3, "summary": "The inherited summary says the recurrence was supernatural.",
+            "keyPointDetails": [{"claim": "The sounds recur.", "subject": "sounds", "evidence": "again the sound came"}],
+            "questions": [{"question": "What makes the sounds in the hills?", "evidence": "the hills answered"}],
+            "dossiers": [],
+        },
+    ]
+    with patch.object(server, "run_structured_model") as model:
         context = server.build_cumulative_context(
-            previous={}, evidence=evidence, through_chapter=1, model="qwen2.5:32B",
+            previous={}, evidence=evidence, through_chapter="Chapter II", model="qwen2.5:32B",
             rebased=False, cancel_event=threading.Event(), run_key="book-1234",
         )
 
-    assert "authored chapter 1" in captured["prompt"]
-    assert '"sourceSequence": 2' in captured["prompt"]
-    assert "Never silently drop an earlier open thread" in captured["prompt"]
-    assert "explicit subject's name" in captured["prompt"]
-    assert context["keyEvents"] == ["The narrator surveys Dunwich."]
-    assert context["entitiesAndSignificance"] == ["Dunwich — the principal setting."]
-    assert context["readerPromises"] == ["The source of the sounds will matter."]
+    model.assert_not_called()
+    assert context["schema"] == server.CUMULATIVE_CONTEXT_PROMPT_VERSION
+    assert all("summary" not in digest for digest in context["chapterDigests"])
+    assert "A remote region is introduced." not in json.dumps(context)
+    assert "the recurrence was supernatural" not in json.dumps(context)
+    isolated = next(item for item in context["records"] if item["claim"] == "Dunwich is isolated.")
+    assert isolated["introducedChapter"] == "Chapter I"
+    assert isolated["chaptersAgo"] == 1
+    repeated = next(item for item in context["records"] if item["claim"] == "What makes the sounds in the hills?")
+    assert repeated["introducedChapter"] == "Chapter I"
+    assert repeated["lastConfirmedChapter"] == "Chapter II"
+    assert repeated["chaptersAgo"] == 0
+    assert context["entitiesAndSignificance"] == ["Dunwich is the principal setting."]
 
 
-def test_cumulative_context_disposes_every_prior_open_thread_without_silent_loss() -> None:
-    def structured(_prompt, _model, _schema, _cancel_event, _run_key):
-        return ({
-            "story_so_far": "The visitor arrived.", "key_events": [], "established_facts": [],
-            "entities_and_significance": [], "character_states": [], "relationship_states": [],
-            "knowledge_states": [], "locations_and_timeline": [],
-            "open_threads": ["The locked room remains unexplained."],
-            "resolved_threads": ["The caller was revealed as Carmilla."],
-            "thread_updates": [
-                {"previous_thread": "Who called at midnight?", "status": "resolved", "current_wording": "The caller was revealed as Carmilla."},
-            ],
-            "reader_promises": [], "themes_and_motifs": [], "voice_and_form": [],
-        }, "raw")
+def test_review_context_selection_never_truncates_serialized_json() -> None:
+    context = {
+        "schema": server.CUMULATIVE_CONTEXT_PROMPT_VERSION, "throughChapter": "Chapter VIII",
+        "chapterDigests": [{"chapter": f"Chapter {index}", "summary": "x" * 3000} for index in range(1, 9)],
+        "records": [
+            {
+                "id": str(index), "kind": "fact", "claim": f"Fact {index} " + "y" * 600,
+                "status": "active", "chaptersAgo": index,
+                "provenance": [{"chapter": f"Chapter {index}", "evidence": f"Exact evidence {index}.", "evidenceAnchor": {"matchMethod": "exact", "matchScore": 1.0}}],
+            }
+            for index in range(40)
+        ],
+    }
+    selected = server.context_for_review(context, max_characters=12_000)
+    encoded = json.dumps(selected)
+    assert len(encoded) <= 12_000
+    assert json.loads(encoded) == selected
+    assert selected["omittedRecordCount"] > 0
 
-    previous = {"openThreads": ["Who called at midnight?", "Why is the portrait familiar?"]}
-    with patch.object(server, "run_structured_model", side_effect=structured):
-        context = server.build_cumulative_context(
-            previous=previous, evidence=[], through_chapter=2, model="qwen",
-            rebased=False, cancel_event=threading.Event(), run_key="book-1234",
-        )
 
-    assert "The caller was revealed as Carmilla." in context["resolvedThreads"]
-    assert "Who called at midnight?" not in context["openThreads"]
-    assert "Why is the portrait familiar?" in context["openThreads"]
-    assert context["threadUpdates"][0]["status"] == "resolved"
+def test_review_context_selection_balances_record_kinds_before_repeating_questions() -> None:
+    records = [
+        {"id": f"q-{index}", "kind": "open_thread", "claim": f"Question {index}?", "status": "active", "chaptersAgo": 0,
+         "provenance": [{"chapter": "Chapter IX", "evidence": f"Question evidence {index}.", "evidenceAnchor": {"matchMethod": "exact"}}]}
+        for index in range(80)
+    ]
+    records.extend([
+        {"id": "ending", "kind": "ending_state", "claim": "Laura meets the General on the road.", "status": "active", "chaptersAgo": 0},
+        {"id": "fact", "kind": "fact", "claim": "A blue mark is observed below Laura's throat.", "status": "active", "chaptersAgo": 0},
+        {"id": "event", "kind": "event", "claim": "The doctor examines Laura.", "status": "active", "chaptersAgo": 0},
+        {"id": "entity", "kind": "entity", "claim": "General Spielsdorf is an old family friend.", "status": "active", "chaptersAgo": 1},
+    ])
+    for index, record in enumerate(records[-4:]):
+        record["provenance"] = [{"chapter": "Chapter IX", "evidence": f"Exact canonical evidence {index}.", "evidenceAnchor": {"matchMethod": "exact"}}]
+    selected = server.context_for_review({
+        "schema": server.CUMULATIVE_CONTEXT_PROMPT_VERSION,
+        "throughChapter": "Chapter IX",
+        "chapterDigests": [{"chapter": "Chapter IX", "summary": "The doctor visits."}],
+        "records": records,
+    }, max_characters=5_000)
+
+    kinds = {item["kind"] for item in selected["records"]}
+    assert {"ending_state", "fact", "event"} <= kinds
+    assert "entity" not in kinds
+    assert selected["selectedRecordCounts"]["open_thread"] < 80
+
+
+def test_review_context_selection_deduplicates_identical_active_records() -> None:
+    duplicate = {
+        "kind": "fact", "claim": "The carriage leaves at dusk.", "status": "active", "chaptersAgo": 0,
+        "provenance": [{"chapter": "Chapter IX", "evidence": "The carriage leaves at dusk.", "evidenceAnchor": {"matchMethod": "exact"}}],
+    }
+    selected = server.context_for_review({"records": [{"id": "one", **duplicate}, {"id": "two", **duplicate}]}, max_characters=5_000)
+
+    assert len(selected["records"]) == 1
+    assert selected["duplicateRecordCount"] == 1
+
+
+def test_review_context_excludes_unanchored_claims_and_recursive_summary_prose() -> None:
+    context = {
+        "storySoFar": "A fluent but false cumulative summary.",
+        "chapterDigests": [{"chapter": "Chapter IX", "summary": "Another inherited invention."}],
+        "records": [
+            {"kind": "fact", "claim": "Unsupported claim.", "status": "active", "chaptersAgo": 0, "provenance": []},
+            {"kind": "fact", "claim": "Supported claim.", "status": "active", "chaptersAgo": 1,
+             "provenance": [{"chapter": "Chapter VIII", "evidence": "Canonical source words.", "evidenceAnchor": {"matchMethod": "exact"}}]},
+        ],
+    }
+
+    selected = server.context_for_review(context)
+
+    encoded = json.dumps(selected)
+    assert "false cumulative summary" not in encoded
+    assert "inherited invention" not in encoded
+    assert [record["claim"] for record in selected["records"]] == ["Supported claim."]
+    assert selected["unsupportedRecordCount"] == 1
 
 
 def test_cumulative_context_retires_non_specific_bookkeeping_threads() -> None:
-    response = {
-        "story_so_far": "The search continues.", "key_events": [], "established_facts": [],
-        "entities_and_significance": [], "character_states": [], "relationship_states": [],
-        "knowledge_states": [], "locations_and_timeline": [], "open_threads": [],
-        "resolved_threads": [], "retired_threads": ["What happens next?"],
-        "thread_updates": [{"previous_thread": "What happens next?", "status": "retired", "current_wording": "What happens next?"}],
-        "reader_promises": [], "themes_and_motifs": [], "voice_and_form": [],
-    }
-    with patch.object(server, "run_structured_model", return_value=(response, "raw")):
-        context = server.build_cumulative_context(
-            previous={"openThreads": ["What happens next?"]}, evidence=[], through_chapter=8,
-            model="qwen", rebased=False, cancel_event=threading.Event(), run_key="book-1234",
-        )
+    context = server.build_cumulative_context(
+        previous={}, evidence=[{"chapter": "Chapter VIII", "sourceSequence": 8, "questions": [{"question": "What happens next?"}]}], through_chapter="Chapter VIII",
+        model="qwen", rebased=False, cancel_event=threading.Event(), run_key="book-1234",
+    )
 
     assert context["openThreads"] == []
     assert context["retiredThreads"] == ["What happens next?"]
@@ -4993,6 +5508,252 @@ def test_llm_review_rejects_proposed_annotations_without_an_exact_source_quote()
     assert result["editorialStrengths"] == ["The opening establishes place efficiently."]
 
 
+def test_combined_chapter_reading_reuses_precomputed_review_views_without_more_model_calls() -> None:
+    dimensions = {
+        key: {"applicable": True, "score": 4, "confidence": "medium", "rationale": "Supported.", "evidence": ["Exact sentence."]}
+        for key in server.LLM_REVIEW_DIMENSIONS
+    }
+    editorial = {
+        "editorial_verdict": "no_material_concerns",
+        "editorial_summary": "No material editorial concerns found.",
+        "verdict_basis": "The brief scene is clear and complete.",
+        "strengths": ["The sentence is direct."],
+        "editorial_proposals": [],
+    }
+    assessment = {
+        "dimensions": dimensions,
+        "likely_readers": ["General readers"], "commercial_strengths": ["Clarity"], "commercial_risks": [],
+    }
+    packet = {"chapter": {"sequence": 1, "text": "Exact sentence."}, "priorContext": {}}
+    with patch.object(server, "run_structured_model") as run_model:
+        result = server.review_context_packet(
+            packet, "reader", threading.Event(), "book-1234",
+            precomputed_editorial=editorial, precomputed_assessment=assessment,
+        )
+    run_model.assert_not_called()
+    assert result["editorialSummary"] == "No material editorial concerns found."
+    assert result["dimensions"]["clarity"]["score"] == 4
+
+
+def test_chapter_reading_schema_requires_identity_ledger_before_shared_views() -> None:
+    schema = server.chapter_reading_schema(True)
+    assert schema["required"][:4] == ["cast", "action_audit", "summary", "dossier"]
+    assert schema["properties"]["cast"]["items"]["required"] == [
+        "entity_id", "canonical_name", "aliases", "role", "evidence_ref",
+    ]
+
+
+def test_action_recall_passages_preserve_exact_source_and_find_carmilla_movement() -> None:
+    source = (
+        "The room was blue and still.\n\n"
+        "The lady started back, with her eyes fixed on me, and then slipped down upon the floor, "
+        "and, as I thought, hid herself under the bed."
+    )
+    passages = server.chapter_action_passages(source)
+    assert len(passages) == 1
+    assert passages[0]["exact_source"].startswith("The lady started back")
+    assert passages[0]["exact_source"] == source[passages[0]["character_start"]:passages[0]["character_end"]]
+
+
+def test_action_coverage_gaps_are_target_specific() -> None:
+    source = "The lady started back and, as I thought, hid herself under the bed."
+    passage = server.source_evidence_passages(source)[0]
+    ref = {
+        "passage_id": passage["id"], "quote": passage["text"],
+        "character_start": passage["characterStart"], "character_end": passage["characterEnd"],
+    }
+    raw = {
+        "action_audit": [{
+            "passage_id": passage["id"], "verdict": "material_action", "actor_entity_id": "lady",
+            "literal_action": "hid under the bed", "resulting_state": "out of view",
+            "epistemic_status": "the narrator thought this", "evidence_ref": ref,
+        }],
+        "summary": {"key_points": [{"claim": "The narrator thought she hid.", "subject": "lady", "evidence_ref": ref}]},
+        "dossier": {"events": []},
+    }
+    gaps = server.chapter_action_coverage_gaps(raw, source)
+    assert [(item["passage_id"], item["target"]) for item in gaps] == [(passage["id"], "dossier_event")]
+
+
+def test_action_repair_refuses_to_flatten_uncertain_perception_into_fact() -> None:
+    quote = "The lady slipped down and, as I thought, hid herself under the bed."
+    gap = {
+        "passage_id": "P0001", "target": "summary_key_point",
+        "evidence_ref": {"passage_id": "P0001", "quote": quote, "character_start": 0, "character_end": len(quote)},
+    }
+    raw = {"cast": [], "summary": {"summary": "Current.", "key_points": []}, "dossier": {"synopsis": "Current.", "events": []}}
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [], "decisions": [], "issues": [],
+        "coverage_decisions": [{
+            "passage_id": "P0001", "target": "summary_key_point", "verdict": "add",
+            "claim": "The lady hid under the bed.", "subject": "lady", "evidence_ref": gap["evidence_ref"], "reason": "Material.",
+        }],
+    }, set(), [gap])
+    assert cleaned["summary"]["key_points"] == []
+    assert report["unsafeCoverageAdditionCount"] == 1
+
+    accepted, accepted_report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [], "decisions": [], "issues": [],
+        "coverage_decisions": [{
+            "passage_id": "P0001", "target": "summary_key_point", "verdict": "add",
+            "claim": "The narrator thought the lady hid under the bed.", "subject": "lady", "evidence_ref": gap["evidence_ref"], "reason": "Material.",
+        }],
+    }, set(), [gap])
+    assert accepted["summary"]["key_points"][0]["claim"].startswith("The narrator thought")
+    assert accepted_report["coverageAdditionCount"] == 1
+
+
+def test_chapter_reading_cast_keeps_aliases_with_one_canonical_identity() -> None:
+    source = "A masked young lady entered. Her mother called her Millarca."
+    cast = server.normalize_chapter_reading_cast([{
+        "entity_id": "millarca",
+        "canonical_name": "Millarca",
+        "aliases": ["the masked young lady", "Millarca"],
+        "role": "A newly arrived visitor",
+        "evidence_ref": {"quote": "Her mother called her Millarca."},
+    }], source)
+    assert cast[0]["entityId"] == "millarca"
+    assert cast[0]["aliases"] == ["Millarca", "the masked young lady"]
+    assert cast[0]["evidenceAnchor"]["matchMethod"] == "exact"
+
+
+def test_chapter_reading_cast_ids_become_readable_subjects_after_verification() -> None:
+    raw = {
+        "summary": {"key_points": [{"claim": "She arrives.", "subject": "ent_millarca"}]},
+        "dossier": {"facts": [{"claim": "She is a visitor.", "subject": "ent_millarca"}]},
+    }
+    cleaned = server.replace_cast_ids_with_names(raw, [{"entityId": "ent_millarca", "canonicalName": "Millarca"}])
+    assert cleaned["summary"]["key_points"][0]["subject"] == "Millarca"
+    assert cleaned["dossier"]["facts"][0]["subject"] == "Millarca"
+    assert raw["summary"]["key_points"][0]["subject"] == "ent_millarca"
+
+
+def test_identity_audit_exposes_cast_hypotheses_and_co_present_relationship_labels() -> None:
+    source = (
+        "The Countess presented her daughter Millarca.\n\n"
+        "The young lady, replacing her mask, joined my ward, and they chatted together."
+    )
+    raw = {"cast": [{
+        "entity_id": "millarca", "canonical_name": "Millarca", "aliases": ["the young lady"],
+        "role": "The General's ward", "evidence_ref": {"quote": "her daughter Millarca"},
+    }]}
+    cast = server.normalize_chapter_reading_cast(raw["cast"], source)
+    candidates = server.chapter_reading_consistency_candidates(raw, source)
+    assert candidates[0]["candidateId"] == "cast:0"
+    excerpts = server.identity_sensitive_source_excerpts(source, cast)
+    assert any("joined my ward" in excerpt for excerpt in excerpts)
+
+
+def test_identity_audit_can_correct_cast_without_changing_stable_entity_id() -> None:
+    source = "The Countess presented her daughter Millarca."
+    raw = {
+        "cast": [{
+            "entity_id": "millarca", "canonical_name": "Millarca", "aliases": [],
+            "role": "The General's ward", "evidence_ref": {"quote": "daughter Millarca"},
+        }],
+        "summary": {"key_points": [{"claim": "Millarca speaks.", "subject": "millarca"}]},
+        "dossier": {"facts": []},
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "decisions": [], "issues": [],
+        "cast_corrections": [{
+            "candidate_id": "cast:0", "canonical_name": "Millarca", "aliases": ["the Countess's daughter"],
+            "role": "The Countess's daughter and a guest", "evidence_ref": {"quote": "daughter Millarca"},
+            "reason": "The source assigns her to the Countess, not the General.",
+        }],
+    }, {"cast:0"})
+    assert cleaned["cast"][0]["entity_id"] == "millarca"
+    assert cleaned["cast"][0]["role"] == "The Countess's daughter and a guest"
+    assert report["castCorrectionCount"] == 1
+
+
+def test_chapter_reading_consistency_rejects_only_addressed_claims_and_corrects_overviews() -> None:
+    source = (
+        "The General introduced his unnamed ward. Later a masked young lady arrived. "
+        "Her mother called her Millarca. At midnight the chaperone returned, while the pale gentleman withdrew."
+    )
+    ward_quote = "The General introduced his unnamed ward."
+    millarca_quote = "Her mother called her Millarca."
+    ending_quote = "At midnight the chaperone returned, while the pale gentleman withdrew."
+    raw = {
+        "cast": [],
+        "summary": {
+            "summary": "Millarca is the General's ward, and both visitors depart.",
+            "key_points": [
+                {"claim": "Millarca is the General's ward.", "subject": "millarca", "evidence_ref": {"quote": ward_quote}},
+                {"claim": "Millarca arrives masked.", "subject": "millarca", "evidence_ref": {"quote": millarca_quote}},
+            ],
+            "ending_state": [
+                {"fact": "The chaperone and pale gentleman depart.", "evidence_ref": {"quote": ending_quote}},
+            ],
+        },
+        "dossier": {
+            "synopsis": "The General's ward is revealed as Millarca.",
+            "facts": [{"claim": "The General's ward is Millarca.", "subject": "ward", "evidence_ref": {"quote": ward_quote}}],
+        },
+        "assessment": {"dimensions": {"coherence_and_continuity": {
+            "applicable": True, "score": 5, "confidence": "high",
+            "rationale": "The identities and departures are completely coherent.", "evidence": [ending_quote],
+        }}},
+    }
+    candidates = server.chapter_reading_consistency_candidates(raw, source)
+    ids = {item["candidateId"] for item in candidates}
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "The General's unnamed ward and Millarca are distinct visitors; the chaperone returns as the pale gentleman withdraws.",
+        "corrected_dossier_synopsis": "The chapter introduces the General's unnamed ward and, separately, Millarca.",
+        "decisions": [
+            {"candidate_id": "summary.key_points:0", "verdict": "reject", "reason": "Role inversion."},
+            {"candidate_id": "summary.key_points:1", "verdict": "keep", "reason": "Supported."},
+            {"candidate_id": "summary.ending_state:0", "verdict": "reject", "reason": "The chaperone returns."},
+            {"candidate_id": "dossier.facts:0", "verdict": "reject", "reason": "The source distinguishes them."},
+            {"candidate_id": "assessment.dimensions:coherence_and_continuity", "verdict": "reject", "reason": "It relies on the inverted ending."},
+            {"candidate_id": "not-a-real-candidate", "verdict": "reject", "reason": "Ignored."},
+        ],
+        "issues": ["The primary reading merged two characters."],
+    }, ids)
+    assert [item["claim"] for item in cleaned["summary"]["key_points"]] == ["Millarca arrives masked."]
+    assert cleaned["summary"]["ending_state"] == []
+    assert cleaned["dossier"]["facts"] == []
+    assert cleaned["summary"]["summary"].startswith("The General's unnamed ward")
+    assert cleaned["assessment"]["dimensions"]["coherence_and_continuity"]["applicable"] is False
+    assert cleaned["assessment"]["dimensions"]["coherence_and_continuity"]["score"] == 0
+    assert report["rejectedCandidateCount"] == 4
+    assert report["issues"] == ["The primary reading merged two characters."]
+
+
+def test_combined_chapter_reading_calls_only_conditional_skeptic_when_it_has_a_candidate() -> None:
+    text = "Exact sentence."
+    editorial = {
+        "editorial_verdict": "material_concerns_found", "editorial_summary": "One concern.",
+        "verdict_basis": "The wording interrupts comprehension.", "strengths": [],
+        "editorial_proposals": [{
+            "passage_id": "P0001", "quote": text, "character_start": 0, "character_end": len(text),
+            "category": "clarity", "priority": "normal", "comment": "Clarify this.",
+            "reader_effect": "The reader pauses.", "prior_context": "", "intentionality_check": "No clear purpose.",
+            "revision_goal": "Make the relation explicit.", "confidence": .9,
+        }],
+    }
+    assessment = {
+        "dimensions": {key: {"applicable": True, "score": 3, "confidence": "medium", "rationale": "Supported.", "evidence": [text]} for key in server.LLM_REVIEW_DIMENSIONS},
+        "likely_readers": [], "commercial_strengths": [], "commercial_risks": [],
+    }
+    adjudication = {"decisions": [{
+        "candidate_number": 1, "verdict": "soft", "already_answered_nearby": False,
+        "concrete_source_problem": True, "withheld_information": False,
+        "present_scene_comprehensible": True, "withholding_is_functional": False,
+        "source_observation": "The relation is compressed.", "proposal_defect": "none",
+        "reason": "Worth human attention, but severity is uncertain.",
+    }]}
+    with patch.object(server, "run_structured_model", return_value=(adjudication, "raw")) as run_model:
+        result = server.review_context_packet(
+            {"chapter": {"sequence": 1, "text": text}, "priorContext": {}},
+            "reader", threading.Event(), "book-1234",
+            precomputed_editorial=editorial, precomputed_assessment=assessment,
+        )
+    assert run_model.call_count == 1
+    assert len(result["rejectedCandidates"]) == 1
+
+
 def test_llm_review_calibration_preserves_significant_soft_and_discarded_outcomes() -> None:
     text = "The door opened without warning. The clock contradicted her memory. The wallpaper was blue."
     proposals = []
@@ -5084,6 +5845,61 @@ def test_llm_review_rejects_functional_withholding_when_present_scene_is_clear()
 
     assert result["rejectedCandidates"] == []
     assert result["discardedCandidates"][0]["adjudicationDefect"] == "misreads_deliberate_technique"
+
+
+def test_llm_review_hard_gate_rejects_direct_observation_as_viewpoint_drift() -> None:
+    text = "I saw Carmilla's eye follow him with a sly dark glance."
+    editorial = {
+        "editorial_verdict": "material_concerns_found", "editorial_summary": "One candidate.",
+        "verdict_basis": "The narration may enter Carmilla's mind.", "strengths": [],
+        "editorial_proposals": [{
+            "passage_id": "P0001", "quote": text, "character_start": 0, "character_end": len(text),
+            "category": "continuity", "priority": "normal", "comment": "This creates omniscient viewpoint drift.",
+            "reader_effect": "The point of view becomes uncertain.", "prior_context": "First-person narration.",
+            "intentionality_check": "The shift appears accidental.", "revision_goal": "Keep the viewpoint in Laura's mind.", "confidence": .9,
+        }],
+    }
+    decisions = {"decisions": [{
+        "candidate_number": 1, "verdict": "soft", "already_answered_nearby": False,
+        "concrete_source_problem": True, "withheld_information": False,
+        "present_scene_comprehensible": True, "withholding_is_functional": False,
+        "source_observation": "Laura reports the glance.", "proposal_defect": "none", "reason": "Possibly unstable viewpoint.",
+    }]}
+    dimensions = {key: {"applicable": True, "score": 4, "confidence": "medium", "rationale": "Supported.", "evidence": []} for key in server.LLM_REVIEW_DIMENSIONS}
+    assessment = {"dimensions": dimensions, "likely_readers": [], "commercial_strengths": [], "commercial_risks": []}
+    with patch.object(server, "run_structured_model", side_effect=[(editorial, ""), (decisions, ""), (assessment, "")]):
+        result = server.review_context_packet({"chapter": {"sequence": 1, "text": text}, "priorContext": {}}, "reader", threading.Event(), "book-1234")
+
+    assert result["rejectedCandidates"] == []
+    assert result["discardedCandidates"][0]["adjudicationDefect"] == "factually_mistaken"
+
+
+def test_llm_review_hard_gate_rejects_spoken_question_engaged_by_continuation() -> None:
+    question = '"Why was the sofa moved?" I asked.'
+    text = question + ' My father replied, "We moved it before the guests arrived."'
+    editorial = {
+        "editorial_verdict": "material_concerns_found", "editorial_summary": "One candidate.",
+        "verdict_basis": "The question appears unanswered.", "strengths": [],
+        "editorial_proposals": [{
+            "passage_id": "P0001", "quote": question, "character_start": 0, "character_end": len(question),
+            "category": "continuity", "priority": "normal", "comment": "The sofa question is not addressed.",
+            "reader_effect": "The missing answer may confuse readers.", "prior_context": "", "intentionality_check": "No reason to withhold it.",
+            "revision_goal": "Answer or clarify the question.", "confidence": .9,
+        }],
+    }
+    decisions = {"decisions": [{
+        "candidate_number": 1, "verdict": "significant", "already_answered_nearby": False,
+        "concrete_source_problem": True, "withheld_information": False,
+        "present_scene_comprehensible": True, "withholding_is_functional": False,
+        "source_observation": "A question is raised.", "proposal_defect": "none", "reason": "Readers need an answer.",
+    }]}
+    dimensions = {key: {"applicable": True, "score": 4, "confidence": "medium", "rationale": "Supported.", "evidence": []} for key in server.LLM_REVIEW_DIMENSIONS}
+    assessment = {"dimensions": dimensions, "likely_readers": [], "commercial_strengths": [], "commercial_risks": []}
+    with patch.object(server, "run_structured_model", side_effect=[(editorial, ""), (decisions, ""), (assessment, "")]):
+        result = server.review_context_packet({"chapter": {"sequence": 1, "text": text}, "priorContext": {}}, "reader", threading.Event(), "book-1234")
+
+    assert result["editorialProposals"] == []
+    assert result["discardedCandidates"][0]["adjudicationDefect"] == "resolved_in_local_continuation"
 
 
 def test_llm_review_normalizes_an_empty_proposal_set_to_a_direct_clear_verdict() -> None:
@@ -5295,6 +6111,27 @@ def test_generic_run_artifact_reconstructs_standard_chapter_inputs(tmp_path: Pat
     assert artifact["input"]["text"] == "The old road climbed."
     assert artifact["output"]["summary"] == "A road climbs."
     assert artifact["output"]["keyPoints"] == ["The road is old."]
+
+
+def test_chapter_reading_artifact_exposes_the_single_saved_input_and_all_outputs(tmp_path: Path) -> None:
+    book = {"id": "book-12345678", "manuscriptId": "manuscript-12345678"}
+    project = tmp_path / book["manuscriptId"] / "chapter-readings"
+    project.mkdir(parents=True)
+    saved = {
+        "schema": "chapter-reading-v1", "status": "complete", "model": "qwen",
+        "input": {"chapter": {"sequence": 1, "text": "The old road climbed."}},
+        "output": {"summary": {"summary": "A road climbs."}, "dossier": {"facts": ["The road is old."]}, "editorial": {}, "assessment": {}},
+        "normalized": {"summary": {"summary": "A road climbs."}, "dossier": {"facts": ["The road is old."]}, "review": {}},
+    }
+    (project / "0001.json").write_text(json.dumps(saved), encoding="utf-8")
+
+    with patch.object(server, "BOOKS_ROOT", tmp_path):
+        artifact = server.analysis_run_artifact(book, "chapter-reading", "1")
+
+    assert artifact["inputFidelity"] == "saved"
+    assert artifact["input"] == saved["input"]
+    assert artifact["output"]["modelResponse"] == saved["output"]
+    assert artifact["output"]["normalized"] == saved["normalized"]
 
 
 def test_chapter_map_run_artifact_exposes_parser_inputs_and_detected_structure() -> None:
@@ -5512,6 +6349,36 @@ def test_chapter_pipeline_yields_to_new_priority_at_chapter_boundary() -> None:
         run_signal.assert_called_once_with(book["id"], "tag", chapter_sequence=1)
     finally:
         server.QUEUE_ACTIONS.clear()
+
+
+def test_per_book_stop_event_survives_stage_handoff() -> None:
+    import bookinator.server.__main__ as server
+    book = {"id": "book-1234", "manuscriptId": "manuscript", "priority": "normal"}
+    pipeline = {
+        "stages": [{"id": "tags", "status": "pending"}, {"id": "smells", "status": "pending"}],
+        "chapters": [{"sequence": 1, "title": "CHAPTER 1", "status": "complete", "tagStatus": "pending", "smellStatus": "pending"}],
+        "chunks": [],
+    }
+    server.BOOK_PIPELINE_CANCEL_EVENTS.clear()
+    calls = []
+
+    def stop_during_tags(book_id: str, kind: str, chapter_sequence: int | None = None) -> None:
+        calls.append((kind, chapter_sequence))
+        server.BOOK_PIPELINE_CANCEL_EVENTS[book_id].set()
+        # Simulate the child runner removing its public stage event in finally.
+        server.PIPELINE_CANCEL_EVENTS.pop(book_id, None)
+
+    try:
+        with patch.object(server, "find_book", return_value=book), \
+             patch.object(server, "load_pipeline", return_value=pipeline), \
+             patch.object(server, "run_ready_stage_rollups"), \
+             patch.object(server, "run_chapter_signal_pipeline", side_effect=stop_during_tags):
+            server.run_book_chapter_pipeline(book["id"], summaries=False, emotions=False, tags=True, smells=True, dossiers=False)
+    finally:
+        server.BOOK_PIPELINE_CANCEL_EVENTS.clear()
+        server.PIPELINE_CANCEL_EVENTS.clear()
+
+    assert calls == [("tag", 1)]
 
 
 def test_smells_preserve_all_evidence_and_checkpoint_editorial_batches() -> None:

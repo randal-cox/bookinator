@@ -30,6 +30,7 @@ import uuid
 import zipfile
 import unicodedata
 import xml.etree.ElementTree as ET
+from collections import Counter
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +39,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "web"
 DOCS_ROOT = ROOT / "docs"
+COMMONS_UI_ROOT = ROOT / "node_modules" / "@inator" / "ui" / "src"
 LOCAL_PACKAGES = ROOT / ".bookinator" / "packages"
 DATA_ROOT = Path(os.environ.get("BOOKINATOR_DATA_DIR", ROOT / ".bookinator"))
 SETTINGS_PATH = DATA_ROOT / "settings.json"
@@ -52,10 +54,16 @@ LIBRARY_PATH = DATA_ROOT / "library.json"
 LIBRARY_LOCK = threading.Lock()
 REPORTS_LOCK = threading.Lock()
 ANNOTATIONS_LOCK = threading.Lock()
+PIPELINE_WRITE_LOCK = threading.RLock()
 PIPELINE_THREADS: dict[str, threading.Thread] = {}
 PIPELINE_CANCEL_EVENTS: dict[str, threading.Event] = {}
+# Stage runners historically remove PIPELINE_CANCEL_EVENTS when each elementary
+# call returns. Keep a second chapter-pass owner so per-book Stop survives that
+# handoff and cannot be mistaken for permission to begin the next stage.
+BOOK_PIPELINE_CANCEL_EVENTS: dict[str, threading.Event] = {}
 ACTIVE_MODEL_RESPONSES: dict[str, object] = {}
 ACTIVE_MODEL_RESPONSES_LOCK = threading.Lock()
+MODEL_RESPONSE_TELEMETRY: dict[str, dict[str, object]] = {}
 STRUCTURED_MODEL_LOCK = threading.RLock()
 LAST_STRUCTURED_MODEL = ""
 QUEUE_THREAD: threading.Thread | None = None
@@ -69,12 +77,12 @@ DEFERRED_ANALYSIS_REFRESHES: dict[str, list[tuple[str, int]]] = {}
 EXPLICIT_QUEUE_ACTIONS = {
     "prepare", "summarize", "restart", "whole-summary", "whole-dossier", "questions",
     "emotions", "emotion-restart", "tags", "tag-restart", "smells", "smell-restart",
-    "dossiers", "dossier-restart", "chapter-pipeline", "cumulative-context", "llm-review", "whole-llm-review",
+    "dossiers", "dossier-restart", "chapter-pipeline", "gliner-signals", "cumulative-context", "llm-review", "whole-llm-review",
     "deferred-refresh", "deferred-retry-failed",
 }
 PAUSABLE_PIPELINE_ACTIONS = {
     "summarize", "whole-summary", "dossiers", "whole-dossier", "questions",
-    "cumulative-context", "llm-review", "whole-llm-review", "emotions", "tags", "smells",
+    "gliner-signals", "cumulative-context", "llm-review", "whole-llm-review", "emotions", "tags", "smells",
 }
 BOOK_PRIORITY_ORDER = {"high": 0, "normal": 1, "low": 2, "shelved": 3}
 if LOCAL_PACKAGES.exists():
@@ -87,7 +95,7 @@ MODEL_ROLES = {
 }
 MODEL_CATALOG = [
     {"tag": "qwen3.5:9b", "sizeGb": 6.6, "tier": "quick", "label": "Quick reader", "use": "Intake, extraction, and inexpensive structured passes", "hf": "https://huggingface.co/Qwen"},
-    {"tag": "qwen3.5:35b", "sizeGb": 24, "tier": "balanced", "label": "Balanced editor", "use": "Chapter reading and routine editorial roles", "hf": "https://huggingface.co/Qwen"},
+    {"tag": "qwen3.8:27b", "sizeGb": 18, "tier": "balanced", "label": "Balanced editor", "use": "Chapter reading and routine editorial roles", "hf": "https://huggingface.co/Qwen/Qwen3.8-27B"},
     {"tag": "qwen3.5:122b", "sizeGb": 81, "tier": "primary", "label": "Primary editor", "use": "Whole-book synthesis, continuity, structure, and argument", "hf": "https://huggingface.co/Qwen"},
     {"tag": "qwen3:235b-a22b-instruct-2507-q8_0", "sizeGb": 250, "tier": "heavy", "label": "Heavyweight reviewer", "use": "Maximum-capability comparison and difficult adjudication", "hf": "https://huggingface.co/Qwen/Qwen3-235B-A22B-Instruct-2507"},
     {"tag": "qwen3-embedding:8b", "sizeGb": 4.7, "tier": "embedding", "label": "Similarity engine", "use": "Redundancy candidates and evidence retrieval", "hf": "https://huggingface.co/Qwen/Qwen3-Embedding-8B"},
@@ -117,16 +125,20 @@ class ImportTitleCollision(ValueError):
         self.collisions = collisions
 
 EMOTION_MODEL_ID = "j-hartmann/emotion-english-distilroberta-base"
+GLINER_MODEL_ID = "fastino/gliner2.5-small-v1"
+GLINER_SCHEMA_VERSION = "bookinator-gliner-chapter-signals-v1"
 EMOTION_SCHEMA_VERSION = "bookinator-emotion-v1"
 EMOTION_LABELS = ("anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise")
 TAG_SCHEMA_VERSION = "bookinator-chapter-tags-v2"
 TAG_TAXONOMY_VERSION = "bookinator-chapter-signals-v2"
-TAG_PROMPT_VERSION = "chapter-tags-v5"
+TAG_PROMPT_VERSION = "chapter-tags-v6"
 SMELL_SCHEMA_VERSION = "bookinator-smells-v2"
 SMELL_POLICY_VERSION = "smell-routing-v1"
 SMELL_PROMPT_VERSION = "smell-review-v2"
-SUMMARY_PROMPT_VERSION = "chapter-summary-v4"
-DOSSIER_PROMPT_VERSION = "chapter-dossier-v5"
+SUMMARY_PROMPT_VERSION = "chapter-summary-v6"
+DOSSIER_PROMPT_VERSION = "chapter-dossier-v7"
+CHAPTER_READING_PROMPT_VERSION = "chapter-reading-v5"
+CHAPTER_READING_CONSISTENCY_VERSION = "chapter-reading-consistency-v4"
 ANNOTATION_SCHEMA_VERSION = "bookinator-annotation-v2"
 REVIEWER_SIGNOFF_SCHEMA_VERSION = "bookinator-reviewer-signoff-v1"
 ANNOTATION_CATEGORIES = ("editorial", "clarity", "character", "continuity", "plot", "prose", "question", "praise")
@@ -134,9 +146,9 @@ QUESTION_FAMILIES = (
     "motivation", "causality", "character_knowledge", "relationship_change",
     "thematic_consequence", "reader_expectation", "setup_payoff", "factual_continuity",
 )
-LLM_REVIEW_PROMPT_VERSION = "llm-review-v10"
+LLM_REVIEW_PROMPT_VERSION = "llm-review-v12"
 WHOLE_BOOK_LLM_REVIEW_PROMPT_VERSION = "whole-book-llm-review-v1"
-CUMULATIVE_CONTEXT_PROMPT_VERSION = "cumulative-context-v5"
+CUMULATIVE_CONTEXT_PROMPT_VERSION = "cumulative-context-ledger-v2"
 CUMULATIVE_CONTEXT_REBASE_INTERVAL = 5
 LLM_REVIEW_DIMENSIONS = (
     "narrative_engagement", "character_likability", "character_relatability",
@@ -171,6 +183,7 @@ PIPELINE_STAGE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "structure": ("extraction",),
     "chapter-archive": ("structure",),
     "chunking": ("chapter-archive",),
+    "gliner-signals": ("chapter-archive",),
     "summaries": ("chapter-archive",),
     "emotions": ("chapter-archive",),
     "tags": ("chapter-archive",),
@@ -190,7 +203,7 @@ PIPELINE_STAGE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
 # passes (tags, cruft checks, and similar work) belong here, with their inputs
 # declared above, rather than in another book-wide loop.
 CHAPTER_PIPELINE_STAGE_ORDER: tuple[str, ...] = (
-    "summaries", "dossiers", "llm-review", "cumulative-context", "emotions", "tags", "smells",
+    "gliner-signals", "summaries", "dossiers", "llm-review", "cumulative-context", "emotions", "tags", "smells",
 )
 
 # A rollup consumes only its own completed child artifacts. Adding another
@@ -231,6 +244,7 @@ STAGE_ROLLUP_DEFINITIONS: dict[str, dict[str, object]] = {
 }
 
 PIPELINE_STAGE_DEFINITIONS: dict[str, tuple[str, str]] = {
+    "gliner-signals": ("GLiNER signals", "Extract fast source-anchored entity and classification candidates before the chapter reader."),
     "emotions": ("Chapter emotions", "Score the recognizable emotional texture of every chapter with the local Hartmann model."),
     "tags": ("Chapter tags", "Apply the fixed evidence-bearing editorial taxonomy with the assigned local model."),
     "smells": ("Smells", "Find source-linked prose problems locally, then ask the assigned editor model which candidates are worth showing."),
@@ -305,11 +319,20 @@ def ensure_signal_stages(pipeline: dict[str, object]) -> None:
     existing = {str(stage.get("id") or "") for stage in stages}
     dossier_index = next((index for index, stage in enumerate(stages) if stage.get("id") == "dossiers"), len(stages))
     additions = []
-    for stage_id in ("emotions", "tags", "smells"):
+    for stage_id in ("gliner-signals", "emotions", "tags", "smells"):
         if stage_id not in existing:
             label, detail = PIPELINE_STAGE_DEFINITIONS[stage_id]
             additions.append({"id": stage_id, "label": label, "status": "pending", "detail": detail})
     stages[dossier_index:dossier_index] = additions
+    # A migrated ledger may already contain every other signal stage. Keep the
+    # new pre-read scaffold in its semantic position instead of appending it
+    # near the end of the chapter pipeline.
+    gliner_index = next((index for index, stage in enumerate(stages) if stage.get("id") == "gliner-signals"), None)
+    summary_index = next((index for index, stage in enumerate(stages) if stage.get("id") == "summaries"), None)
+    if gliner_index is not None and summary_index is not None and gliner_index > summary_index:
+        gliner_stage = stages.pop(gliner_index)
+        summary_index = next(index for index, stage in enumerate(stages) if stage.get("id") == "summaries")
+        stages.insert(summary_index, gliner_stage)
     record_pipeline_dependencies(pipeline)
     emotion_stage = next((stage for stage in stages if stage.get("id") == "emotions"), None)
     if emotion_stage and emotion_stage.get("setupRequired") and emotion_model_status().get("ready"):
@@ -496,15 +519,16 @@ def reconcile_orphaned_child_runs(pipeline: dict[str, object]) -> bool:
     changed = False
     stages = {str(stage.get("id") or ""): stage for stage in pipeline.get("stages", [])}
     now = utc_now()
-    active_stage_id = {
-        "summarizing": "summaries",
-        "dossiers": "dossiers",
-        "emotions": "emotions",
-        "tags": "tags",
-        "smells": "smells",
-        "cumulative-context": "cumulative-context",
-        "llm-review": "llm-review",
-    }.get(str(pipeline.get("phase") or ""), "") if pipeline.get("status") == "running" else ""
+    active_stage_ids = ({
+        "summarizing": {"summaries"},
+        "dossiers": {"dossiers"},
+        "chapter-reading": {"summaries", "dossiers", "llm-review"},
+        "emotions": {"emotions"},
+        "tags": {"tags"},
+        "smells": {"smells"},
+        "cumulative-context": {"cumulative-context"},
+        "llm-review": {"llm-review"},
+    }.get(str(pipeline.get("phase") or ""), set()) if pipeline.get("status") == "running" else set())
     # A stage is serial by contract. Multiple running children can only be
     # stale ledger state (most commonly two local servers sharing one data
     # directory). Preserve the newest marker and make every older one safely
@@ -535,7 +559,7 @@ def reconcile_orphaned_child_runs(pipeline: dict[str, object]) -> bool:
             stage.pop("error", None)
             changed = True
     for stage_id, (status_field, error_field, started_field) in child_fields.items():
-        if stage_id != active_stage_id:
+        if stage_id not in active_stage_ids:
             continue
         running = [chapter for chapter in pipeline.get("chapters", []) if chapter.get(status_field) == "running"]
         if len(running) <= 1:
@@ -550,7 +574,7 @@ def reconcile_orphaned_child_runs(pipeline: dict[str, object]) -> bool:
                 "interruptedAt": now,
             })
             changed = True
-    if active_stage_id == "dossiers":
+    if "dossiers" in active_stage_ids:
         running_chunks = [chunk for chunk in pipeline.get("chunks", []) if chunk.get("dossierStatus") == "running"]
         if len(running_chunks) > 1:
             newest = max(running_chunks, key=lambda chunk: str(chunk.get("dossierStartedAt") or ""))
@@ -565,7 +589,7 @@ def reconcile_orphaned_child_runs(pipeline: dict[str, object]) -> bool:
                 changed = True
     for stage_id in ("summaries", "dossiers", "emotions", "tags", "smells"):
         stage = stages.get(stage_id, {})
-        if stage.get("status") != "running" or stage_id == active_stage_id:
+        if stage.get("status") != "running" or stage_id in active_stage_ids:
             continue
         stage.update({
             "status": "warning",
@@ -877,12 +901,25 @@ def advance_development_checkpoint(
     })
     for key in ("queuedAction", "completedAt", "error", "workerPid"):
         pipeline.pop(key, None)
+    pipeline.pop("developmentAnalysisLabel", None)  # Legacy field; do not expose a contradictory checkpoint name.
     return pipeline
 
 
 def next_pipeline_action(book: dict[str, object], pipeline: dict[str, object]) -> str:
     """Return the next safe automatic pass, without endlessly retrying failures."""
     if not book.get("manuscriptId"):
+        return ""
+    # Paused is a durable scheduling decision, not merely presentation state.
+    # Only an explicit Continue/Prioritize request may move the ledger back to
+    # queued. Without this gate a stopped book reappears in the automatic queue
+    # after a server restart, once its in-memory cancellation token is gone.
+    if pipeline.get("status") == "paused" and pipeline.get("phase") == "paused":
+        return ""
+    book_id = str(book.get("id") or "")
+    book_cancel = BOOK_PIPELINE_CANCEL_EVENTS.get(book_id)
+    if book_cancel and book_cancel.is_set():
+        return ""
+    if pipeline.get("ledgerReadError"):
         return ""
     stages = {str(stage.get("id") or ""): str(stage.get("status") or "pending") for stage in pipeline.get("stages", [])}
     paused = paused_pipeline_actions(str(book.get("id") or ""))
@@ -902,6 +939,12 @@ def next_pipeline_action(book: dict[str, object], pipeline: dict[str, object]) -
     # run provisionally; this gate is reserved for structure we distrust.
     if pipeline.get("chapterMapSuspicious") and not pipeline.get("chapterMapApproved"):
         return ""
+    gliner_stage = next((stage for stage in pipeline.get("stages", []) if stage.get("id") == "gliner-signals"), {})
+    if gliner_stage and "gliner-signals" not in paused and gliner_stage.get("status") != "blocked" and any(
+        chapter.get("glinerStatus") in {None, "pending", "ready", "paused", "running"}
+        for chapter in manuscript_chapters
+    ):
+        return "gliner-signals"
     if "summarize" not in paused and any(chapter.get("status") in {None, "pending", "ready", "paused", "running"} for chapter in chapters):
         return "summarize"
     eligible_sequences = {int(chapter.get("sequence") or chapter.get("number") or 0) for chapter in chapters}
@@ -1014,6 +1057,7 @@ def pipeline_activity(book: dict[str, object], pipeline: dict[str, object]) -> d
     status = str(pipeline.get("status") or "ready")
     stages = {str(stage.get("id") or ""): stage for stage in pipeline.get("stages", [])}
     active_chapter = next((chapter for chapter in pipeline.get("chapters", []) if chapter.get("status") == "running"), None)
+    active_gliner = next((chapter for chapter in pipeline.get("chapters", []) if chapter.get("glinerStatus") == "running"), None)
     active_emotion = next((chapter for chapter in pipeline.get("chapters", []) if chapter.get("emotionStatus") == "running"), None)
     active_tag = next((chapter for chapter in pipeline.get("chapters", []) if chapter.get("tagStatus") == "running"), None)
     active_smell = next((chapter for chapter in pipeline.get("chapters", []) if chapter.get("smellStatus") == "running"), None)
@@ -1054,7 +1098,12 @@ def pipeline_activity(book: dict[str, object], pipeline: dict[str, object]) -> d
         item = chapter_activity_label(active_review.get("title"), active_review.get("sequence"))
         return {"state": "running", "phase": phase, "bookId": book_id, "book": title, "task": "LLM Review", "model": model, "item": item, "text": f"Bookinator · {model} is reviewing {item} in context"}
     if status == "running":
-        if phase == "summarizing":
+        if phase == "gliner-signals":
+            model = str(stages.get("gliner-signals", {}).get("model") or GLINER_MODEL_ID)
+            item = chapter_activity_label((active_gliner or {}).get("title"), (active_gliner or {}).get("sequence"))
+            task = "GLiNER signals"
+            text = f"Bookinator · {model} is extracting source signals from {title} · {item}"
+        elif phase == "summarizing":
             model = str(stages.get("summaries", {}).get("model") or "the local model")
             item = chapter_activity_label((active_chapter or {}).get("title"), (active_chapter or {}).get("sequence"))
             task = "Chapter summary"
@@ -1100,8 +1149,8 @@ def pipeline_activity(book: dict[str, object], pipeline: dict[str, object]) -> d
         return {"state": "running", "phase": phase, "bookId": book_id, "book": title, "task": task, "model": model, "item": item, "text": text}
     if status == "queued":
         action = str(pipeline.get("queuedAction") or next_pipeline_action(book, pipeline) or "analysis")
-        labels = {"prepare": "map", "summarize": "read", "restart": "reread", "whole-summary": "merge", "whole-dossier": "reconcile the dossier for", "questions": "match questions and payoffs in", "dossiers": "build dossiers for", "dossier-restart": "rebuild dossiers for", "emotions": "score emotions in", "emotion-restart": "rescore emotions in", "tags": "tag", "tag-restart": "retag", "smells": "review prose smells in", "smell-restart": "re-review prose smells in", "cumulative-context": "build context for", "llm-review": "review", "whole-llm-review": "synthesize the review for"}
-        tasks = {"prepare": "Manuscript map", "summarize": "Chapter summary", "restart": "Chapter summaries", "whole-summary": "Whole-book summary", "whole-dossier": "Whole-book dossier", "questions": "Questions & payoffs", "dossiers": "Chapter dossier", "dossier-restart": "Chapter dossiers", "emotions": "Emotion scoring", "emotion-restart": "Emotion scoring", "tags": "Chapter tags", "tag-restart": "Chapter tags", "smells": "Smells", "smell-restart": "Smells", "cumulative-context": "Cumulative context", "llm-review": "LLM Review", "whole-llm-review": "Whole-book LLM Review"}
+        labels = {"prepare": "map", "gliner-signals": "extract source signals from", "summarize": "read", "restart": "reread", "whole-summary": "merge", "whole-dossier": "reconcile the dossier for", "questions": "match questions and payoffs in", "dossiers": "build dossiers for", "dossier-restart": "rebuild dossiers for", "emotions": "score emotions in", "emotion-restart": "rescore emotions in", "tags": "tag", "tag-restart": "retag", "smells": "review prose smells in", "smell-restart": "re-review prose smells in", "cumulative-context": "build context for", "llm-review": "review", "whole-llm-review": "synthesize the review for"}
+        tasks = {"prepare": "Manuscript map", "gliner-signals": "GLiNER signals", "summarize": "Chapter summary", "restart": "Chapter summaries", "whole-summary": "Whole-book summary", "whole-dossier": "Whole-book dossier", "questions": "Questions & payoffs", "dossiers": "Chapter dossier", "dossier-restart": "Chapter dossiers", "emotions": "Emotion scoring", "emotion-restart": "Emotion scoring", "tags": "Chapter tags", "tag-restart": "Chapter tags", "smells": "Smells", "smell-restart": "Smells", "cumulative-context": "Cumulative context", "llm-review": "LLM Review", "whole-llm-review": "Whole-book LLM Review"}
         return {"state": "queued", "phase": action, "bookId": book_id, "book": title, "task": tasks.get(action, "Analysis"), "text": f"Bookinator is waiting to {labels.get(action, 'analyze')} {title}"}
     return {"state": "idle", "phase": phase, "bookId": book_id, "book": title, "task": "Ready", "text": f"Bookinator is ready for the next step in {title}"}
 
@@ -1125,6 +1174,7 @@ def reset_inactive_whole_book_runs(pipeline: dict[str, object], active_phase: st
 
 GLOBAL_ETA_FALLBACK_SECONDS: dict[str, float] = {
     "structure": 12,
+    "gliner-signals": 5,
     "summaries": 150,
     "dossiers": 150,
     "emotions": 3,
@@ -1149,13 +1199,14 @@ def global_pipeline_estimate(pipeline_records: list[tuple[dict[str, object], dic
         if chapters and stages.get("chapter-archive", {}).get("status") != "complete":
             remaining["structure"] += len(chapters)
         mappings = (
+            ("gliner-signals", "glinerStatus", "glinerDurationSeconds"),
             ("summaries", "status", "durationSeconds"),
             ("emotions", "emotionStatus", "emotionDurationSeconds"),
             ("tags", "tagStatus", "tagDurationSeconds"),
             ("smells", "smellStatus", "smellDurationSeconds"),
         )
         for kind, status_key, duration_key in mappings:
-            if kind == "smells" and "smells" not in stages:
+            if kind in {"gliner-signals", "smells"} and kind not in stages:
                 continue
             remaining[kind] += sum(1 for chapter in chapters if chapter.get(status_key) in {None, "pending", "ready", "paused", "running"})
             samples[kind].extend(float(chapter[duration_key]) for chapter in chapters if chapter.get(duration_key) and chapter.get(status_key) == "complete")
@@ -1197,6 +1248,7 @@ def global_pipeline_estimate(pipeline_records: list[tuple[dict[str, object], dic
 def global_pipeline_diagnostics(pipeline_records: list[tuple[dict[str, object], dict[str, object]]]) -> list[dict[str, object]]:
     """Collect current model and pipeline problems without requiring the affected book to be open."""
     process_labels = {
+        "gliner-signals": "GLiNER signals",
         "summaries": "Chapter summary",
         "dossiers": "Chapter dossier",
         "emotions": "Chapter emotions",
@@ -1224,17 +1276,18 @@ def global_pipeline_diagnostics(pipeline_records: list[tuple[dict[str, object], 
             chapter_label = str(chapter.get("title") or chapter.get("chapterTitle") or "Chapter")
             manuscript_chapter = strip_markdown_heading(chapter.get("title")).casefold() != "front matter"
             for stage, status_key, error_key, model_key, completed_key in (
+                ("gliner-signals", "glinerStatus", "glinerError", "glinerModel", "glinerCompletedAt"),
                 ("summaries", "status", "error", "model", "completedAt"),
                 ("emotions", "emotionStatus", "emotionError", "emotionModel", "emotionCompletedAt"),
                 ("tags", "tagStatus", "tagError", "tagModel", "tagCompletedAt"),
                 ("smells", "smellStatus", "smellError", "smellModel", "smellCompletedAt"),
             ):
-                if stage in {"emotions", "tags", "smells"} and not manuscript_chapter:
+                if stage in {"gliner-signals", "emotions", "tags", "smells"} and not manuscript_chapter:
                     continue
                 if chapter.get(status_key) != "failed":
                     continue
                 item = f"{process_labels[stage]} · {chapter_label}"
-                diagnostics.append({"bookId": book_id, "book": title, "stage": stage, "resultKind": {"summaries": "summary", "emotions": "emotion", "tags": "tag", "smells": "smell"}[stage], "resultId": chapter.get("sequence") or chapter.get("number"), "status": "failed", "item": item, "error": str(chapter.get(error_key) or "The local model did not produce a usable result."), "model": chapter.get(model_key), "completedAt": chapter.get(completed_key)})
+                diagnostics.append({"bookId": book_id, "book": title, "stage": stage, "resultKind": {"gliner-signals": "gliner", "summaries": "summary", "emotions": "emotion", "tags": "tag", "smells": "smell"}[stage], "resultId": chapter.get("sequence") or chapter.get("number"), "status": "failed", "item": item, "error": str(chapter.get(error_key) or "The local model did not produce a usable result."), "model": chapter.get(model_key), "completedAt": chapter.get(completed_key)})
         for chunk in pipeline.get("chunks", []):
             if not isinstance(chunk, dict) or chunk.get("dossierStatus") != "failed":
                 continue
@@ -1414,7 +1467,7 @@ def global_pipeline_state(
     estimate = global_pipeline_estimate(pipeline_records)
     diagnostics = global_pipeline_diagnostics(pipeline_records)
     task_labels = {
-        "prepare": "Manuscript inventory", "summarize": "Chapter summary", "dossiers": "Chapter dossier",
+        "prepare": "Manuscript inventory", "gliner-signals": "GLiNER signals", "summarize": "Chapter summary", "dossiers": "Chapter dossier",
         "whole-summary": "Whole-book summary", "whole-dossier": "Whole-book dossier", "questions": "Questions & payoffs",
         "emotions": "Emotion scoring", "tags": "Chapter tags", "smells": "Smells",
         "cumulative-context": "Cumulative context", "llm-review": "LLM Review", "whole-llm-review": "Whole-book LLM Review",
@@ -1773,7 +1826,7 @@ def load_deferred_analysis_refreshes() -> dict[str, list[tuple[str, int]]]:
         return {}
     if not isinstance(payload, dict):
         return {}
-    allowed = {"summary", "dossier", "emotion", "tag", "smell", "context", "llm-review", "whole-summary", "whole-llm-review"}
+    allowed = {"gliner", "summary", "dossier", "emotion", "tag", "smell", "context", "llm-review", "whole-summary", "whole-llm-review"}
     return {
         str(book_id): [(str(item[0]), int(item[1])) for item in requests if isinstance(item, list) and len(item) == 2 and str(item[0]) in allowed]
         for book_id, requests in payload.items() if isinstance(book_id, str) and isinstance(requests, list)
@@ -2675,7 +2728,8 @@ def reconcile_development_checkpoint(book: dict[str, object], pipeline: dict[str
         stage = next((item for item in pipeline.get("stages", []) if item.get("id") == stage_id), None)
         if stage and stage.get("status") not in {"complete", "warning", "failed"}:
             stage.update({"status": "pending", "detail": detail})
-            stage.pop("error", None)
+            for key in ("error", "startedAt", "completedAt", "durationSeconds"):
+                stage.pop(key, None)
     return before != (pipeline.get("status"), pipeline.get("phase"), pipeline.get("message"), pipeline.get("error"))
 
 
@@ -2690,7 +2744,7 @@ def repair_orphaned_pipeline(book: dict[str, object], pipeline: dict[str, object
     active_stage_id = {
         "preparing": "extraction", "extraction": "extraction", "chapter-map": "structure",
         "chapter-archive": "chapter-archive", "chunking": "chunking",
-        "summarizing": "summaries", "dossiers": "dossiers",
+        "summarizing": "summaries", "dossiers": "dossiers", "chapter-reading": "summaries",
     }.get(phase, phase if phase in {"cumulative-context", "llm-review"} else "extraction")
     model = str(next((stage.get("model") for stage in pipeline.get("stages", []) if stage.get("id") == active_stage_id), "") or "The local model")
     if phase in {"preparing", "extraction", "chapter-map", "chapter-archive", "chunking"}:
@@ -2710,6 +2764,13 @@ def repair_orphaned_pipeline(book: dict[str, object], pipeline: dict[str, object
     })
     for key in ("error", "queuedAction", "workerPid"):
         pipeline.pop(key, None)
+    for chapter in pipeline.get("chapters", []):
+        if chapter.get("chapterReadingStatus") == "running":
+            chapter.update({
+                "chapterReadingStatus": "pending",
+                "chapterReadingError": diagnostic,
+                "interruptedAt": interrupted_at,
+            })
     for stage in pipeline.get("stages", []):
         if stage.get("status") == "running":
             stage.update({"status": "pending", "detail": "Interrupted before completion; waiting to retry automatically.", "lastInterruption": diagnostic})
@@ -3270,6 +3331,27 @@ def pipeline_path(book: dict[str, object]) -> Path | None:
     return BOOKS_ROOT / manuscript_id / "pipeline.json" if manuscript_id else None
 
 
+def append_pipeline_event(book: dict[str, object], event: str, **details: object) -> None:
+    """Append a small forensic record for destructive or rejected transitions."""
+    path = pipeline_path(book)
+    if not path:
+        return
+    record = {
+        "at": utc_now(),
+        "event": event,
+        "bookId": book.get("id"),
+        "pid": os.getpid(),
+        "thread": threading.current_thread().name,
+        **details,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with (path.parent / "pipeline-events.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 def update_source_stage(book: dict[str, object], stages: list[dict[str, object]]) -> None:
     metadata = manuscript_metadata(str(book.get("manuscriptId") or ""))
     available = bool(metadata.get("sourceAvailable"))
@@ -3306,6 +3388,7 @@ def new_pipeline(book: dict[str, object]) -> dict[str, object]:
             {"id": "structure", "label": "Chapter detection", "status": "pending", "detail": "Find likely chapter boundaries for review."},
             {"id": "chapter-archive", "label": "Saved chapter objects", "status": "pending", "detail": "Write one durable local object per ordered manuscript section."},
             {"id": "chunking", "label": "Source chunks", "status": "pending", "detail": "Create page-linked processing units without replacing chapter structure."},
+            {"id": "gliner-signals", "label": "GLiNER signals", "status": "pending", "detail": PIPELINE_STAGE_DEFINITIONS["gliner-signals"][1]},
             {"id": "summaries", "label": "Chapter summaries", "status": "pending", "detail": "Read each chapter with the assigned local model."},
             {"id": "emotions", "label": "Chapter emotions", "status": "pending", "detail": PIPELINE_STAGE_DEFINITIONS["emotions"][1]},
             {"id": "tags", "label": "Chapter tags", "status": "pending", "detail": PIPELINE_STAGE_DEFINITIONS["tags"][1]},
@@ -3319,6 +3402,27 @@ def new_pipeline(book: dict[str, object]) -> dict[str, object]:
     return pipeline
 
 
+def pipeline_read_failure(book: dict[str, object], error: BaseException) -> dict[str, object]:
+    """Fail closed when a durable ledger cannot be read.
+
+    Treating a transient or malformed ledger as a brand-new book lets the
+    automatic queue run destructive preparation over recoverable work. A
+    blocked ledger is noisier, but it preserves the evidence needed to repair
+    the real failure.
+    """
+    append_pipeline_event(book, "ledger-read-failed", error=str(error)[:800] or type(error).__name__)
+    return {
+        "bookId": book.get("id"),
+        "status": "blocked",
+        "phase": "ledger-read-error",
+        "message": "Bookinator could not safely read this book’s analysis ledger. The source and derived artifacts were left untouched.",
+        "error": str(error)[:800] or type(error).__name__,
+        "ledgerReadError": True,
+        "stages": [],
+        "chapters": [],
+    }
+
+
 def load_pipeline(book: dict[str, object]) -> dict[str, object]:
     path = pipeline_path(book)
     if not path:
@@ -3328,6 +3432,7 @@ def load_pipeline(book: dict[str, object]) -> dict[str, object]:
         if not isinstance(payload, dict):
             return {}
         ensure_signal_stages(payload)
+        completed_reading_changed = reconcile_completed_chapter_readings(book, payload)
         llm_review_stages_changed = ensure_llm_review_stages(book, payload)
         legacy_prose_changed = remove_legacy_prose_analysis(payload)
         development_checkpoint_changed = reconcile_development_checkpoint(book, payload)
@@ -3440,14 +3545,44 @@ def load_pipeline(book: dict[str, object]) -> dict[str, object]:
         if tracker.get("status") == "complete":
             question_tracker_is_current(payload, tracker)
         question_signature_migrated = previous_question_signature != str(tracker.get("inputSignature") or "")
-        if llm_review_stages_changed or legacy_prose_changed or development_checkpoint_changed or manual_interruption_changed or interrupted_worker_changed or orphaned_child_changed or question_signature_migrated or (heading_metadata_changed and payload.get("status") != "running"):
+        if completed_reading_changed or llm_review_stages_changed or legacy_prose_changed or development_checkpoint_changed or manual_interruption_changed or interrupted_worker_changed or orphaned_child_changed or question_signature_migrated or (heading_metadata_changed and payload.get("status") != "running"):
             write_pipeline(book, payload)
         return payload
-    except (OSError, json.JSONDecodeError):
-        return new_pipeline(book)
+    except FileNotFoundError as error:
+        # A manuscript that has never entered the pipeline legitimately has no
+        # ledger. Missing pipeline.json beside durable derived artifacts is a
+        # recovery incident and must not masquerade as first-time ingestion.
+        project = path.parent
+        has_derived_artifacts = (
+            (project / "extracted-chapters.json").is_file()
+            or (project / "chapters" / "manifest.json").is_file()
+            or (project / "chunks" / "manifest.json").is_file()
+        )
+        return pipeline_read_failure(book, error) if has_derived_artifacts else new_pipeline(book)
+    except (OSError, json.JSONDecodeError) as error:
+        return pipeline_read_failure(book, error)
+
+
+def development_write_boundary(pipeline: dict[str, object]) -> int:
+    """Return the highest sequence protected by a bounded development run."""
+    try:
+        limit = int(pipeline.get("developmentAnalysisLimit") or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    try:
+        preserved = int(pipeline.get("developmentPreservedThroughSequence") or 0)
+    except (TypeError, ValueError):
+        preserved = 0
+    return max(limit, preserved)
 
 
 def write_pipeline(book: dict[str, object], pipeline: dict[str, object]) -> None:
+    """Serialize ledger writes so an older worker cannot replace newer state."""
+    with PIPELINE_WRITE_LOCK:
+        _write_pipeline_locked(book, pipeline)
+
+
+def _write_pipeline_locked(book: dict[str, object], pipeline: dict[str, object]) -> None:
     path = pipeline_path(book)
     if not path:
         return
@@ -3458,6 +3593,28 @@ def write_pipeline(book: dict[str, object], pipeline: dict[str, object]) -> None
         persisted = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         persisted = {}
+    # A bounded regression run is a destructive-analysis boundary chosen by a
+    # human. Model workers can retain an in-memory ledger for many minutes; if
+    # one began before that boundary was created or advanced, its eventual
+    # write must not replace the newer ledger wholesale. Intentional full
+    # resets unlink pipeline.json before writing, so rejecting this stale write
+    # does not interfere with the explicit reset path.
+    persisted_boundary = development_write_boundary(persisted) if isinstance(persisted, dict) else 0
+    incoming_boundary = development_write_boundary(pipeline)
+    if persisted_boundary > incoming_boundary:
+        append_pipeline_event(
+            book, "stale-write-rejected", reason="development-boundary",
+            persistedBoundary=persisted_boundary, incomingBoundary=incoming_boundary,
+        )
+        return
+    try:
+        persisted_revision = int(persisted.get("ledgerRevision") or 0) if isinstance(persisted, dict) else 0
+    except (TypeError, ValueError):
+        persisted_revision = 0
+    try:
+        incoming_revision = int(pipeline.get("ledgerRevision") or 0)
+    except (TypeError, ValueError):
+        incoming_revision = 0
     persisted_decision = str(persisted.get("chapterMapDecisionAt") or persisted.get("chapterMapApprovedAt") or "") if isinstance(persisted, dict) else ""
     incoming_decision = str(pipeline.get("chapterMapDecisionAt") or pipeline.get("chapterMapApprovedAt") or "")
     if persisted_decision and persisted_decision > incoming_decision:
@@ -3520,10 +3677,14 @@ def write_pipeline(book: dict[str, object], pipeline: dict[str, object]) -> None
         sanitize_chapter_headings(chapter)
     ensure_signal_stages(pipeline)
     remove_legacy_prose_analysis(pipeline)
+    pipeline["ledgerRevision"] = max(persisted_revision, incoming_revision) + 1
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(pipeline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(pipeline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def reset_book_pipeline(book: dict[str, object]) -> dict[str, object]:
@@ -3535,10 +3696,25 @@ def reset_book_pipeline(book: dict[str, object]) -> dict[str, object]:
         raise ValueError("This book does not have a resettable manuscript project.")
 
     pipeline_file = pipeline_path(book)
+    previous = {}
+    try:
+        previous = json.loads(pipeline_file.read_text(encoding="utf-8")) if pipeline_file else {}
+    except (OSError, json.JSONDecodeError):
+        pass
+    append_pipeline_event(
+        book, "analysis-reset",
+        reason="explicit-start-over",
+        previousRunId=previous.get("runId") if isinstance(previous, dict) else None,
+        previousStatus=previous.get("status") if isinstance(previous, dict) else None,
+        previousChapterCount=len(previous.get("chapters", [])) if isinstance(previous, dict) else 0,
+    )
     if pipeline_file:
         pipeline_file.unlink(missing_ok=True)
     extracted_chapters_path(book).unlink(missing_ok=True)
-    for derived_root in (chapter_artifacts_path(book), chunk_artifacts_path(book), project_root / "llm-review"):
+    for derived_root in (
+        chapter_artifacts_path(book), chunk_artifacts_path(book),
+        project_root / "chapter-readings", project_root / "gliner-signals", project_root / "llm-review",
+    ):
         if derived_root.parent == project_root and derived_root.is_dir():
             shutil.rmtree(derived_root)
 
@@ -4444,6 +4620,110 @@ def normalize_question_details(value: object) -> list[dict[str, object]]:
     return details
 
 
+EXPLICIT_NEGATION_RE = re.compile(r"\b(?:no|not|never|neither|none|nothing|nobody|without)\b", re.I)
+EVIDENCE_NEGATION_RE = re.compile(r"\b(?:no|not|never|neither|none|nothing|nobody|without|absent|empty|gone|missing|failed|refused|unable)\b", re.I)
+
+
+def claim_polarity_is_supported(claim: object, evidence: object) -> bool:
+    """Reject the easiest and most damaging unsupported polarity reversals.
+
+    This is intentionally narrow. It does not pretend to perform textual
+    entailment; it catches claims such as "without forced entry" when the
+    cited source contains no negation or absence at all.
+    """
+    claim_text = re.sub(r"\s+", " ", str(claim or "")).strip()
+    evidence_text = re.sub(r"\s+", " ", str(evidence or "")).strip()
+    return not EXPLICIT_NEGATION_RE.search(claim_text) or bool(EVIDENCE_NEGATION_RE.search(evidence_text))
+
+
+def claim_relation_is_supported(claim: object, evidence: object) -> bool:
+    """Reject a few high-cost relation upgrades absent from the cited words.
+
+    This deliberately covers only relations whose language is recognizable.
+    General entailment still belongs to the reader model and ultimately the
+    human reviewer.
+    """
+    claim_text = re.sub(r"\s+", " ", str(claim or "")).strip()
+    evidence_text = re.sub(r"\s+", " ", str(evidence or "")).strip()
+    guarded_relations = (
+        (r"\b(?:cause[sd]?|causing|source of|responsible for|results? in|leads? to)\b", r"\b(?:cause[sd]?|causing|source|responsible|because|due to|results? in|leads? to|comes? from|origin)\b"),
+        (r"\b(?:diagnos(?:e[sd]?|is|tic)|medically confirms?)\b", r"\b(?:diagnos(?:e[sd]?|is|tic)|disease|illness|condition|symptom)\b"),
+        (r"\b(?:prove[sd]?|validate[sd]?|confirm[sd]?)\b", r"\b(?:prove[sd]?|validate[sd]?|confirm[sd]?|demonstrate[sd]?|show[sd]?)\b"),
+        (r"\b(?:an? (?:external )?threat|enemy|hostile force)\b", r"\b(?:threat|danger|enemy|hostile|attack(?:ed|ing|s)?|harm(?:ed|ing|s)?|menace)\b"),
+    )
+    return all(not re.search(claim_pattern, claim_text, re.I) or bool(re.search(evidence_pattern, evidence_text, re.I)) for claim_pattern, evidence_pattern in guarded_relations)
+
+
+def normalized_evidence_claims(value: object, source_text: str) -> list[dict[str, object]]:
+    """Normalize model claim forms while retaining only source-anchored facts."""
+    if not isinstance(value, list):
+        return []
+    claims: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        claim = str(normalized_model_field(item, "claim", "fact", "state", "text") or "").strip()
+        subject = str(normalized_model_field(item, "subject", "actor", "entity") or "").strip()
+        anchor = resolve_source_evidence(source_text, normalized_model_field(item, "evidence ref", "evidence_ref", "evidence")) if source_text else None
+        if not claim or not anchor or not claim_polarity_is_supported(claim, anchor.get("quote")) or not claim_relation_is_supported(claim, anchor.get("quote")):
+            continue
+        claims.append({
+            "claim": claim,
+            "subject": subject,
+            "evidence": anchor["quote"],
+            "evidenceAnchor": anchor,
+        })
+    return claims
+
+
+SUMMARY_COVERAGE_STOPWORDS = {
+    "about", "after", "again", "against", "also", "among", "another", "because", "before", "being", "chapter", "could",
+    "does", "during", "each", "from", "have", "into", "itself", "later", "more", "narrator", "other", "over", "scene",
+    "should", "state", "still", "that", "their", "there", "these", "they", "this", "those", "through", "under", "very",
+    "what", "when", "where", "which", "while", "with", "would",
+}
+
+
+def chapter_summary_ending_coverage(summary: object, normalized: dict[str, object], source_text: str) -> dict[str, object]:
+    """Check that a digest reaches at least one anchored final-quarter event.
+
+    The check is intentionally lexical and conservative. It does not judge
+    prose quality; it only catches summaries that stop after an early scene
+    despite the model having already identified exact late-chapter facts.
+    """
+    if len(source_text) < 500:
+        return {"covered": True, "reason": "short-source"}
+    candidates: list[dict[str, object]] = []
+    for field, text_field in (("keyPointDetails", "claim"), ("endingState", "fact")):
+        for item in normalized.get(field, []) if isinstance(normalized.get(field), list) else []:
+            if not isinstance(item, dict) or not isinstance(item.get("evidenceAnchor"), dict):
+                continue
+            start = int(item["evidenceAnchor"].get("characterStart") or 0)
+            if start >= int(len(source_text) * 0.75):
+                candidates.append({"text": str(item.get(text_field) or ""), "characterStart": start})
+    if not candidates:
+        return {"covered": True, "reason": "no-anchored-final-quarter-fact"}
+
+    summary_terms = {
+        token for token in re.findall(r"[A-Za-z][A-Za-z'-]{3,}", str(summary or "").casefold())
+        if token not in SUMMARY_COVERAGE_STOPWORDS
+    }
+    latest = sorted(candidates, key=lambda item: int(item["characterStart"]), reverse=True)[:3]
+    for item in latest:
+        fact_terms = {
+            token for token in re.findall(r"[A-Za-z][A-Za-z'-]{3,}", str(item["text"]).casefold())
+            if token not in SUMMARY_COVERAGE_STOPWORDS
+        }
+        overlap = sorted(summary_terms & fact_terms)
+        if len(overlap) >= 2:
+            return {"covered": True, "reason": "late-fact-overlap", "matchingTerms": overlap[:8]}
+    return {
+        "covered": False,
+        "reason": "summary-does-not-reach-final-quarter",
+        "lateFacts": [str(item["text"]) for item in latest],
+    }
+
+
 def normalize_chapter_summary(payload: dict[str, object], source_text: str = "") -> dict[str, object]:
     summary = str(normalized_model_field(payload, "summary", "chapter summary", "chapter_summary", "digest", "synopsis") or "").strip()
     if not summary:
@@ -4472,18 +4752,22 @@ def normalize_chapter_summary(payload: dict[str, object], source_text: str = "")
     questions = [str(item).strip() for item in new_questions if str(item).strip()] if isinstance(new_questions, list) else []
     if question_details:
         questions = [str(item["question"]) for item in question_details]
+    key_point_details = normalized_evidence_claims(key_points, source_text) if source_text else []
+    legacy_key_points = [str(item).strip() for item in key_points if isinstance(item, str) and str(item).strip()] if isinstance(key_points, list) else []
     normalized = {
         "summary": summary,
-        "keyPoints": [str(item).strip() for item in key_points if str(item).strip()] if isinstance(key_points, list) else [],
+        "keyPoints": [str(item["claim"]) for item in key_point_details] or legacy_key_points,
         "newQuestions": questions,
     }
+    if key_point_details:
+        normalized["keyPointDetails"] = key_point_details
     ending_state: list[dict[str, object]] = []
     for item in raw_ending_state if isinstance(raw_ending_state, list) else []:
         if not isinstance(item, dict):
             continue
         fact = str(normalized_model_field(item, "fact", "state") or "").strip()
         anchor = resolve_source_evidence(source_text, normalized_model_field(item, "evidence ref", "evidence_ref", "evidence")) if source_text else None
-        if fact and anchor:
+        if fact and anchor and claim_polarity_is_supported(fact, anchor.get("quote")):
             ending_state.append({"fact": fact, "evidence": anchor["quote"], "evidenceAnchor": anchor})
     if ending_state:
         normalized["endingState"] = ending_state
@@ -4503,6 +4787,21 @@ def cancel_active_model_response(book_id: str) -> bool:
     except OSError:
         pass
     return True
+
+
+def model_response_telemetry(book_id: str) -> dict[str, object]:
+    """Return the newest safe progress snapshot for a book's local model call."""
+    with ACTIVE_MODEL_RESPONSES_LOCK:
+        candidates = [
+            dict(value)
+            for key, value in MODEL_RESPONSE_TELEMETRY.items()
+            if key == book_id or key.startswith(f"{book_id}:")
+        ]
+    if not candidates:
+        return {"active": False}
+    latest = max(candidates, key=lambda item: str(item.get("lastActivityAt") or item.get("startedAt") or ""))
+    latest["active"] = latest.get("status") in {"connecting", "generating"}
+    return latest
 
 
 def quiesce_pipeline_for_refresh(book_id: str, pipeline: dict[str, object], timeout_seconds: float = 5.0) -> bool:
@@ -4540,7 +4839,10 @@ def resident_ollama_models() -> set[str]:
         return set()
 
 
-def run_structured_model(prompt: str, model: str, schema: dict[str, object], cancel_event: threading.Event | None = None, run_key: str = "") -> tuple[dict[str, object], str]:
+def run_structured_model(
+    prompt: str, model: str, schema: dict[str, object], cancel_event: threading.Event | None = None,
+    run_key: str = "", *, activity: str = "",
+) -> tuple[dict[str, object], str]:
     """Run one structured response at a time, reusing only the current resident model."""
     global LAST_STRUCTURED_MODEL
     with STRUCTURED_MODEL_LOCK:
@@ -4561,21 +4863,62 @@ def run_structured_model(prompt: str, model: str, schema: dict[str, object], can
                 # have evicted the previous model during a service recovery.
                 pass
         LAST_STRUCTURED_MODEL = model
-        return _run_structured_model(prompt, model, schema, cancel_event, run_key)
+        return _run_structured_model(prompt, model, schema, cancel_event, run_key, activity=activity)
 
 
-def _run_structured_model(prompt: str, model: str, schema: dict[str, object], cancel_event: threading.Event | None = None, run_key: str = "") -> tuple[dict[str, object], str]:
+def _run_structured_model(
+    prompt: str, model: str, schema: dict[str, object], cancel_event: threading.Event | None = None,
+    run_key: str = "", *, activity: str = "",
+) -> tuple[dict[str, object], str]:
     options = {"temperature": 0.1}
+    telemetry_key = run_key or f"anonymous:{uuid.uuid4().hex}"
+    telemetry = {
+        "runKey": telemetry_key,
+        "model": model,
+        "status": "connecting",
+        "startedAt": utc_now(),
+        "lastActivityAt": utc_now(),
+        "inputCharacters": len(prompt),
+        "outputCharacters": 0,
+        "responseText": "",
+        "responseFragments": 0,
+        "activity": activity,
+    }
+    with ACTIVE_MODEL_RESPONSES_LOCK:
+        previous = MODEL_RESPONSE_TELEMETRY.get(telemetry_key)
+        if isinstance(previous, dict) and previous.get("status") == "complete":
+            telemetry["previousCall"] = {
+                key: previous.get(key)
+                for key in (
+                    "activity", "model", "status", "startedAt", "completedAt",
+                    "inputCharacters", "outputCharacters", "responseFragments",
+                    "promptTokens", "generatedTokens", "totalDurationNanoseconds",
+                )
+                if previous.get(key) is not None
+            }
+        telemetry_owner = telemetry_key.split(":", 1)[0]
+        for stale_key in [key for key in MODEL_RESPONSE_TELEMETRY if key.split(":", 1)[0] == telemetry_owner and key != telemetry_key]:
+            MODEL_RESPONSE_TELEMETRY.pop(stale_key, None)
+        MODEL_RESPONSE_TELEMETRY[telemetry_key] = telemetry
     request = urllib.request.Request(
         "http://127.0.0.1:11434/api/chat",
-        data=json.dumps({"model": model, "stream": True, "format": schema, "keep_alive": "10m", "options": options, "messages": [{"role": "user", "content": prompt}]}).encode("utf-8"),
+        data=json.dumps({"model": model, "stream": True, "think": False, "format": schema, "keep_alive": "10m", "options": options, "messages": [{"role": "user", "content": prompt}]}).encode("utf-8"),
         headers={"Content-Type": "application/json"}, method="POST",
     )
     parts: list[str] = []
-    response = urllib.request.urlopen(request, timeout=900)
-    if run_key:
+    stream_error: OSError | ValueError | AttributeError | None = None
+    try:
+        response = urllib.request.urlopen(request, timeout=900)
+    except (OSError, ValueError):
         with ACTIVE_MODEL_RESPONSES_LOCK:
+            telemetry.update({"status": "failed", "completedAt": utc_now(), "lastActivityAt": utc_now()})
+        raise
+    with ACTIVE_MODEL_RESPONSES_LOCK:
+        if run_key:
             ACTIVE_MODEL_RESPONSES[run_key] = response
+        telemetry["status"] = "generating"
+        telemetry["connectedAt"] = utc_now()
+        telemetry["lastActivityAt"] = telemetry["connectedAt"]
     try:
         with response:
             for line in response:
@@ -4584,21 +4927,69 @@ def _run_structured_model(prompt: str, model: str, schema: dict[str, object], ca
                 if not line.strip():
                     continue
                 payload = json.loads(line)
-                parts.append(str(payload.get("message", {}).get("content") or ""))
+                content = str(payload.get("message", {}).get("content") or "")
+                parts.append(content)
+                with ACTIVE_MODEL_RESPONSES_LOCK:
+                    telemetry["lastActivityAt"] = utc_now()
+                    if content:
+                        telemetry["outputCharacters"] = int(telemetry.get("outputCharacters") or 0) + len(content)
+                        telemetry["responseText"] = str(telemetry.get("responseText") or "") + content
+                        telemetry["responseFragments"] = int(telemetry.get("responseFragments") or 0) + 1
+                    for source, target in (
+                        ("prompt_eval_count", "promptTokens"),
+                        ("eval_count", "generatedTokens"),
+                        ("load_duration", "loadDurationNanoseconds"),
+                        ("prompt_eval_duration", "promptDurationNanoseconds"),
+                        ("eval_duration", "generationDurationNanoseconds"),
+                        ("total_duration", "totalDurationNanoseconds"),
+                    ):
+                        if payload.get(source) is not None:
+                            telemetry[target] = payload[source]
+                    if payload.get("done_reason"):
+                        telemetry["doneReason"] = payload["done_reason"]
                 if payload.get("done"):
                     break
-    except (OSError, ValueError):
-        if cancel_event and cancel_event.is_set():
-            raise PipelineCancelled() from None
+    except PipelineCancelled:
+        with ACTIVE_MODEL_RESPONSES_LOCK:
+            telemetry.update({"status": "cancelled", "completedAt": utc_now(), "lastActivityAt": utc_now()})
         raise
+    except (OSError, ValueError, AttributeError) as error:
+        if cancel_event and cancel_event.is_set():
+            with ACTIVE_MODEL_RESPONSES_LOCK:
+                telemetry.update({"status": "cancelled", "completedAt": utc_now(), "lastActivityAt": utc_now()})
+            raise PipelineCancelled() from error
+        stream_error = error
+        with ACTIVE_MODEL_RESPONSES_LOCK:
+            telemetry.update({"status": "failed", "completedAt": utc_now(), "lastActivityAt": utc_now()})
     finally:
         if run_key:
             with ACTIVE_MODEL_RESPONSES_LOCK:
                 if ACTIVE_MODEL_RESPONSES.get(run_key) is response:
                     ACTIVE_MODEL_RESPONSES.pop(run_key, None)
+                if telemetry.get("status") == "generating":
+                    telemetry.update({"status": "complete", "completedAt": utc_now(), "lastActivityAt": utc_now()})
     if cancel_event and cancel_event.is_set():
         raise PipelineCancelled()
     raw_response = "".join(parts)
+    if stream_error is not None:
+        # Closing a streaming HTTPResponse from another thread can race with
+        # BufferedReader.peek(). If Ollama's complete JSON object is already in
+        # hand, preserve the expensive result instead of turning a cleanup
+        # hiccup into a failed chapter. Incomplete content still raises the
+        # original transport exception and remains visibly retryable.
+        try:
+            recovered = json.loads(raw_response)
+        except (json.JSONDecodeError, TypeError):
+            raise stream_error
+        if not isinstance(recovered, dict):
+            raise stream_error
+        with ACTIVE_MODEL_RESPONSES_LOCK:
+            telemetry.update({
+                "status": "complete", "completedAt": utc_now(), "lastActivityAt": utc_now(),
+                "transportRecovered": type(stream_error).__name__,
+                "transportRecoveryMessage": str(stream_error)[:200],
+            })
+        return recovered, raw_response
     try:
         result = json.loads(raw_response)
     except json.JSONDecodeError as error:
@@ -4617,14 +5008,115 @@ def manuscript_location_prompt(item: dict[str, object]) -> str:
     return f"Original PDF pages: {item.get('pageStart')}-{item.get('pageEnd')}"
 
 
+def source_evidence_ref_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "passage_id": {"type": "string", "minLength": 1},
+            "quote": {"type": "string", "minLength": 1},
+            "character_start": {"type": "integer", "minimum": 0},
+            "character_end": {"type": "integer", "minimum": 1},
+        },
+        "required": ["passage_id", "quote", "character_start", "character_end"],
+    }
+
+
+def chapter_summary_schema() -> dict[str, object]:
+    evidence_ref = source_evidence_ref_schema()
+    evidence_claim = {
+        "type": "object",
+        "properties": {
+            "claim": {"type": "string", "minLength": 1},
+            "subject": {"type": "string", "minLength": 1},
+            "evidence_ref": evidence_ref,
+        },
+        "required": ["claim", "subject", "evidence_ref"],
+    }
+    ending_state = {
+        "type": "object",
+        "properties": {"fact": {"type": "string", "minLength": 1}, "evidence_ref": evidence_ref},
+        "required": ["fact", "evidence_ref"],
+    }
+    question_detail = {
+        "type": "object",
+        "properties": {
+            "question": {"type": "string", "minLength": 1},
+            "family": {"type": "string", "enum": list(QUESTION_FAMILIES)},
+            "evidence": {"type": "string"},
+            "evidence_ref": evidence_ref,
+            "why_it_matters": {"type": "string"},
+            "promises_answer": {"type": "boolean"},
+        },
+        "required": ["question", "family", "evidence", "evidence_ref", "why_it_matters", "promises_answer"],
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "minLength": 1},
+            "key_points": {"type": "array", "items": evidence_claim},
+            "ending_state": {"type": "array", "items": ending_state},
+            "new_questions": {"type": "array", "items": {"type": "string"}},
+            "question_details": {"type": "array", "items": question_detail},
+        },
+        "required": ["summary", "key_points", "ending_state", "new_questions", "question_details"],
+    }
+
+
+def chapter_dossier_schema() -> dict[str, object]:
+    evidence_ref = source_evidence_ref_schema()
+    evidence_claim = {
+        "type": "object",
+        "properties": {
+            "claim": {"type": "string", "minLength": 1},
+            "subject": {"type": "string", "minLength": 1},
+            "evidence_ref": evidence_ref,
+        },
+        "required": ["claim", "subject", "evidence_ref"],
+    }
+    promise_claim = {
+        "type": "object",
+        "properties": {**evidence_claim["properties"], "promise_type": {"type": "string", "enum": ["character", "story"]}},
+        "required": ["claim", "subject", "promise_type", "evidence_ref"],
+    }
+    question_detail = {
+        "type": "object",
+        "properties": {
+            "question": {"type": "string", "minLength": 1},
+            "family": {"type": "string", "enum": list(QUESTION_FAMILIES)},
+            "evidence": {"type": "string"},
+            "evidence_ref": evidence_ref,
+            "why_it_matters": {"type": "string"},
+            "promises_answer": {"type": "boolean"},
+        },
+        "required": ["question", "family", "evidence", "evidence_ref", "why_it_matters", "promises_answer"],
+    }
+    claims = {"type": "array", "items": evidence_claim}
+    return {
+        "type": "object",
+        "properties": {
+            "synopsis": {"type": "string", "minLength": 1},
+            "facts": claims, "events": claims, "entities": claims, "locations": claims,
+            "current_times": claims,
+            "questions": {"type": "array", "items": {"type": "string"}},
+            "question_details": {"type": "array", "items": question_detail},
+            "promises": {"type": "array", "items": promise_claim},
+            "timeline_observations": claims,
+            "evidence": {"type": "array", "items": evidence_ref},
+        },
+        "required": ["synopsis", "facts", "events", "entities", "locations", "current_times", "questions", "question_details", "promises", "timeline_observations", "evidence"],
+    }
+
+
 def summarize_chapter(chapter: dict[str, object], model: str, cancel_event: threading.Event | None = None, run_key: str = "") -> dict[str, object]:
     text = str(chapter.get("text") or "")[:60_000]
     material_guidance = front_matter_analysis_guidance("summary") if is_front_matter(chapter) else "This is narrative manuscript material."
     prompt = f"""Read this manuscript chapter and create a compact editorial digest.
-Return JSON only with: summary (string, 2-4 paragraphs), key_points (array of strings), ending_state (array of objects), new_questions (array of strings), and question_details (array of objects).
+Return JSON only with: summary (string, 2-4 paragraphs), key_points (array of evidence-linked claim objects), ending_state (array of objects), new_questions (array of strings), and question_details (array of objects).
 Report what the text establishes; do not invent resolutions or facts. This is a chapter summary, not a critique.
 
-Before drafting the summary, inspect the final source passages closely. ending_state is the literal state of important people, objects, places, and unresolved actions at the chapter boundary. Each object contains fact and evidence_ref. Anchor every fact to an exact source quotation. Preserve grammatical actors and objects: a locked door or room does not mean a person was found locked inside it; a forced entry followed by an empty room means the person is absent, not found. Distinguish what a character observes from what the text establishes. If summary prose conflicts with anchored ending_state, ending_state must be correct.
+Every factual assertion in summary must also appear, in equivalent wording, as a key_points claim with an exact evidence_ref. Treat this as a verification ledger, not an invitation to produce more claims. A key_points object contains claim, subject, and evidence_ref. Copy the grammatical subject carefully. If the source says "my father," that is the narrator's father—not the nearest named character's father. Check negative assertions especially: never write "no," "not," "never," or "without" unless the cited source establishes that polarity. Do not promise to follow these rules in the output; actually verify the claims and return only the requested data.
+
+Before drafting the summary, inspect the final source passages closely. The summary must cover the chapter's full narrative movement, including its final material turn, encounter, decision, discovery, or changed state; do not write a polished summary of only the opening scene. ending_state is the literal state of important people, objects, places, and unresolved actions at the chapter boundary. Each object contains fact and evidence_ref. Anchor every fact to an exact source quotation. Preserve grammatical actors and objects: a locked door or room does not mean a person was found locked inside it; a forced entry followed by an empty room means the person is absent, not found. Distinguish observation, diagnosis, inference, and established cause. If a doctor observes a mark, do not call the mark the cause of symptoms or a diagnosis unless the source explicitly makes that relation. If summary prose conflicts with anchored ending_state, ending_state must be correct.
 
 Questions must be specific editorial leads earned by this chapter. Ask what remains uncertain about a particular choice, avoided action, competing motive, causal bridge, concealed knowledge, relationship change, thematic pressure, reader expectation, setup, or factual continuity. Name the exact action, revelation, contradiction, image, line of dialogue, or change that creates the question. Reject generic discussion prompts that could fit almost any chapter, and reject questions the chapter already answers. Prefer questions a later passage could answer, complicate, transform, or deliberately leave open. Do not force a question when the chapter creates no meaningful unresolved pressure.
 
@@ -4647,10 +5139,7 @@ Viewpoint or section markers: {json.dumps(chapter.get('sectionMarkers') or [], e
 Canonical source passages:
 {evidence_passage_prompt(text)}
 """
-    evidence_ref = {"type": "object", "properties": {"passage_id": {"type": "string", "minLength": 1}, "quote": {"type": "string", "minLength": 1}, "character_start": {"type": "integer", "minimum": 0}, "character_end": {"type": "integer", "minimum": 1}}, "required": ["passage_id", "quote", "character_start", "character_end"]}
-    ending_state = {"type": "object", "properties": {"fact": {"type": "string", "minLength": 1}, "evidence_ref": evidence_ref}, "required": ["fact", "evidence_ref"]}
-    question_detail = {"type": "object", "properties": {"question": {"type": "string", "minLength": 1}, "family": {"type": "string", "enum": list(QUESTION_FAMILIES)}, "evidence": {"type": "string"}, "evidence_ref": evidence_ref, "why_it_matters": {"type": "string"}, "promises_answer": {"type": "boolean"}}, "required": ["question", "family", "evidence", "evidence_ref", "why_it_matters", "promises_answer"]}
-    schema = {"type": "object", "properties": {"summary": {"type": "string", "minLength": 1}, "key_points": {"type": "array", "items": {"type": "string"}}, "ending_state": {"type": "array", "items": ending_state}, "new_questions": {"type": "array", "items": {"type": "string"}}, "question_details": {"type": "array", "items": question_detail}}, "required": ["summary", "key_points", "ending_state", "new_questions", "question_details"]}
+    schema = chapter_summary_schema()
     try:
         result, raw_response = run_structured_model(prompt, model, schema, cancel_event, run_key)
     except json.JSONDecodeError as error:
@@ -4667,6 +5156,15 @@ Canonical source passages:
             normalized["questionDetails"] = []
             normalized["endingState"] = []
             normalized["analysisMode"] = "front-matter-structural"
+        else:
+            coverage = chapter_summary_ending_coverage(normalized.get("summary"), normalized, text)
+            normalized["endingCoverage"] = coverage
+            if not coverage.get("covered"):
+                raise ChapterSummaryError(
+                    "The model summarized an early scene but omitted the chapter's anchored final movement. This chapter remains retryable.",
+                    raw_response,
+                    [str(item) for item in coverage.get("lateFacts", [])],
+                )
         return normalized
     except ChapterSummaryError as error:
         error.raw_response = raw_response
@@ -4688,6 +5186,25 @@ def summarize_chapter_resilient(
             return summarize_chapter(chapter, model, cancel_event, run_key), failures
         except PipelineCancelled:
             raise
+        except ChapterSummaryError as error:
+            failure = {
+                "attempt": attempt,
+                "model": model,
+                "completedAt": utc_now(),
+                "error": str(error),
+                "exceptionType": type(error).__name__,
+                "inputCharacters": len(str(chapter.get("text") or "")),
+            }
+            failures.append(failure)
+            if attempt > len(retry_delays):
+                raise
+            if on_retry:
+                on_retry(attempt, failure)
+            delay = retry_delays[attempt - 1]
+            if cancel_event and cancel_event.wait(delay):
+                raise PipelineCancelled() from None
+            if not cancel_event:
+                time.sleep(delay)
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as error:
             failure = {
                 "attempt": attempt,
@@ -5095,7 +5612,7 @@ def canonical_smell_label(value: object) -> str:
 def source_evidence_passages(text: str) -> list[dict[str, object]]:
     """Make compact, exact source choices the model can cite without recopying prose."""
     passages: list[dict[str, object]] = []
-    for paragraph_match in re.finditer(r"\S(?:.*?\S)?(?=\n\s*\n|\Z)", text, re.S):
+    for paragraph_match in re.finditer(r"\S(?:.*?\S)?(?=\n\s*\n|\s*\Z)", text, re.S):
         paragraph = paragraph_match.group()
         base = paragraph_match.start()
         boundaries = [0]
@@ -5111,6 +5628,91 @@ def source_evidence_passages(text: str) -> list[dict[str, object]]:
             start, end = base + left, base + right
             passages.append({"id": f"P{len(passages) + 1:04d}", "characterStart": start, "characterEnd": end, "text": text[start:end]})
     return passages
+
+
+CHAPTER_ACTION_CUE = re.compile(
+    r"\b(?:"
+    r"start(?:ed|s|ing)?|slip(?:ped|s|ping)?|hid(?:e|den|ing)?|run|ran|running|"
+    r"walk(?:ed|s|ing)?|enter(?:ed|s|ing)?|leav(?:e|es|ing)|left|go|goes|going|gone|went|"
+    r"come|comes|coming|came|stand|stands|standing|stood|sit|sits|sitting|sat|"
+    r"lie|lies|lying|lay|lain|fall|falls|falling|fell|rise|rises|rising|rose|"
+    r"turn(?:ed|s|ing)?|open(?:ed|s|ing)?|clos(?:e|es|ed|ing)|take|takes|taking|took|taken|"
+    r"put|puts|putting|draw|draws|drawing|drew|drawn|carry|carries|carried|carrying|"
+    r"throw|throws|throwing|threw|thrown|strike|strikes|striking|struck|"
+    r"touch(?:ed|es|ing)?|caress(?:ed|es|ing)?|kiss(?:ed|es|ing)?|"
+    r"wake|wakes|waking|woke|woken|waken|wakens|wakened|wakening|sleep|sleeps|sleeping|slept|"
+    r"appear(?:ed|s|ing)?|disappear(?:ed|s|ing)?|vanish(?:ed|es|ing)?|"
+    r"become|becomes|becoming|became|grow|grows|growing|grew|remain(?:ed|s|ing)?|"
+    r"die|dies|died|dying|cry|cries|cried|crying|scream(?:ed|s|ing)?|"
+    r"find|finds|finding|found|search(?:ed|es|ing)?|look(?:ed|s|ing)?|see|sees|seeing|saw|seen"
+    r")\b",
+    re.I,
+)
+
+
+def chapter_action_passages(text: str, limit: int = 16) -> list[dict[str, object]]:
+    """Select exact action-bearing passages as recall hints, never as facts."""
+    candidates: list[dict[str, object]] = []
+    for passage in source_evidence_passages(text):
+        cues = [match.group(0) for match in CHAPTER_ACTION_CUE.finditer(str(passage.get("text") or ""))]
+        if not cues:
+            continue
+        candidates.append({
+            "passage_id": passage["id"],
+            "exact_source": passage["text"],
+            "character_start": passage["characterStart"],
+            "character_end": passage["characterEnd"],
+            "cue_words": cues,
+            "selection_score": len(cues),
+        })
+    selected = sorted(
+        sorted(candidates, key=lambda item: (-int(item["selection_score"]), int(item["character_start"])))[:limit],
+        key=lambda item: int(item["character_start"]),
+    )
+    return selected
+
+
+GLINER_IDENTITY_LABELS = {"person", "named animal", "group", "creature", "supernatural force"}
+
+
+def gliner_identity_candidates(artifact: dict[str, object], text: str) -> list[dict[str, object]]:
+    """Compact raw GLiNER spans into fallible identity hints for Qwen."""
+    raw = artifact.get("raw") if isinstance(artifact.get("raw"), dict) else {}
+    mentions = raw.get("mentions") if isinstance(raw.get("mentions"), dict) else {}
+    entities = mentions.get("entities") if isinstance(mentions.get("entities"), dict) else {}
+    passages = source_evidence_passages(text)
+    grouped: dict[tuple[str, str], dict[str, object]] = {}
+    for label, values in entities.items():
+        if str(label) not in GLINER_IDENTITY_LABELS or not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            mention = str(value.get("text") or "").strip()
+            confidence = float(value.get("confidence") or 0)
+            start, end = int(value.get("start") or 0), int(value.get("end") or 0)
+            if confidence < 0.55 or not mention or re.fullmatch(r"(?:he|she|him|her|they|them|it|we|us|i|me)", mention, re.I):
+                continue
+            passage = next((item for item in passages if int(item["characterStart"]) <= start and int(item["characterEnd"]) >= end), None)
+            if not passage:
+                continue
+            key = (str(label), re.sub(r"^(?:my|the|a|an)\s+", "", mention.casefold()).strip())
+            candidate = grouped.setdefault(key, {
+                "proposed_type": str(label), "exact_mention": mention,
+                "max_confidence": 0.0, "mentions": [],
+            })
+            candidate["max_confidence"] = max(float(candidate["max_confidence"]), confidence)
+            candidate["mentions"].append({
+                "confidence": round(confidence, 4), "character_start": start, "character_end": end,
+                "evidence_ref": {
+                    "passage_id": passage["id"], "quote": passage["text"],
+                    "character_start": passage["characterStart"], "character_end": passage["characterEnd"],
+                },
+            })
+    return [
+        {"candidate_id": f"G{index:03d}", **candidate, "max_confidence": round(float(candidate["max_confidence"]), 4)}
+        for index, candidate in enumerate(grouped.values(), 1)
+    ]
 
 
 def evidence_passage_prompt(text: str) -> str:
@@ -5211,8 +5813,13 @@ def resolve_source_evidence(text: str, evidence: object) -> dict[str, object] | 
     return None
 
 
+def text_masking_quoted_dialogue(text: str) -> str:
+    """Blank quoted spans without changing canonical character offsets."""
+    return re.sub(r"[“\"].*?[”\"]", lambda match: " " * len(match.group()), text, flags=re.S)
+
+
 def narrative_person_metrics(text: str) -> dict[str, object]:
-    narration = re.sub(r"[“\"].*?[”\"]", " ", text, flags=re.S)
+    narration = text_masking_quoted_dialogue(text)
     first = len(re.findall(r"\b(?:I|me|my|mine|myself|we|us|our|ours|ourselves)\b", narration, re.I))
     second = len(re.findall(r"\b(?:you|your|yours|yourself|yourselves)\b", narration, re.I))
     third = len(re.findall(r"\b(?:he|him|his|himself|she|her|hers|herself|they|them|their|theirs|themselves)\b", narration, re.I))
@@ -5227,6 +5834,33 @@ def narrative_person_metrics(text: str) -> dict[str, object]:
     elif third >= 6:
         dominant = "third_person"
     return {"firstPersonPronouns": first, "secondPersonPronouns": second, "thirdPersonPronouns": third, "narrationWordCount": words, "dominantPerson": dominant}
+
+
+def evidence_supports_viewpoint_shift(source_text: str, evidence_items: list[dict[str, object]]) -> bool:
+    """Require before/after narrative evidence rather than pronouns in speech."""
+    if len(evidence_items) < 2:
+        return False
+    masked = text_masking_quoted_dialogue(source_text)
+    persons: set[str] = set()
+    for item in evidence_items:
+        start = max(0, int(item.get("characterStart") or 0))
+        end = min(len(masked), int(item.get("characterEnd") or start))
+        narrative_evidence = masked[start:end]
+        if len(re.findall(r"\b[A-Za-z]+\b", narrative_evidence)) < 8:
+            continue
+        first = len(re.findall(r"\b(?:I|me|my|mine|myself|we|us|our|ours|ourselves)\b", narrative_evidence, re.I))
+        second = len(re.findall(r"\b(?:you|your|yours|yourself|yourselves)\b", narrative_evidence, re.I))
+        third = len(re.findall(r"\b(?:he|him|his|himself|she|her|hers|herself|they|them|their|theirs|themselves)\b", narrative_evidence, re.I))
+        person = "uncertain"
+        if first and first >= second and first >= third:
+            person = "first_person"
+        elif second >= 2 and second > first and second >= third:
+            person = "second_person"
+        elif third >= 2 and third > first and third > second:
+            person = "third_person"
+        if person != "uncertain":
+            persons.add(person)
+    return len(persons) >= 2
 
 
 def evidence_supports_mortality(evidence_items: list[dict[str, object]]) -> bool:
@@ -5261,6 +5895,7 @@ Return only signals that score at least .25. Every returned signal requires at l
 
 Narration measured outside quoted dialogue: {json.dumps(person_metrics, ensure_ascii=False)}. Treat a decisive measured person as a constraint. Do not label first-person narration as third-person merely because the narrator describes other characters.
 Evidence discipline: a first_person signal must cite a passage containing first-person narration (I, me, my, we, or us) outside dialogue. Do not use a neutral descriptive sentence merely because it occurs in a first-person chapter.
+Viewpoint-shift discipline: dialogue never changes the narrative viewpoint. Return viewpoint_shift only with at least two exact evidence references: one establishing the prior narrative person and another establishing sustained narration in a different person. Pronouns spoken by a character, including "you" in dialogue, are not evidence of a viewpoint shift.
 
 Chapter-function discipline: use setup only when this chapter plants a specific later-facing obligation, condition, object, relationship, or expectation that is not already active. Mere orientation, exposition, atmosphere, or continuation of an existing thread is not setup. Prefer the more concrete function when the evidence supports one.
 
@@ -5334,6 +5969,11 @@ Canonical source passages:
             continue
         if signal_id == "mortality" and not evidence_supports_mortality(evidence_items):
             reason = "The model labeled this chapter mortality, but its evidence does not mention death, dying, or credible mortal danger."
+            candidate_signals.append({"label": signal_id, "family": family, "explanation": reason})
+            rejected_signals.append({"id": signal_id, "family": family, "reason": reason})
+            continue
+        if signal_id == "viewpoint_shift" and not evidence_supports_viewpoint_shift(text, evidence_items):
+            reason = "The model labeled a viewpoint shift, but its exact evidence does not establish two different narrative viewpoints outside dialogue."
             candidate_signals.append({"label": signal_id, "family": family, "explanation": reason})
             rejected_signals.append({"id": signal_id, "family": family, "reason": reason})
             continue
@@ -5807,6 +6447,14 @@ def llm_review_result_path(book: dict[str, object], sequence: int) -> Path:
     return BOOKS_ROOT / str(book.get("manuscriptId")) / "llm-review" / "results" / f"{sequence:04d}.json"
 
 
+def chapter_reading_path(book: dict[str, object], sequence: int) -> Path:
+    return BOOKS_ROOT / str(book.get("manuscriptId")) / "chapter-readings" / f"{sequence:04d}.json"
+
+
+def gliner_signals_path(book: dict[str, object], sequence: int) -> Path:
+    return BOOKS_ROOT / str(book.get("manuscriptId")) / "gliner-signals" / f"{sequence:04d}.json"
+
+
 def write_json_artifact(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
@@ -5820,6 +6468,91 @@ def read_json_artifact(path: Path) -> dict[str, object]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def reconcile_completed_chapter_readings(book: dict[str, object], pipeline: dict[str, object]) -> bool:
+    """Rehydrate a completed atomic reading if its final ledger write was lost.
+
+    The chapter-reading artifact is written before pipeline.json. A process
+    interruption—or a rejected stale snapshot—must never force the expensive
+    model call to run again when that durable artifact is already complete.
+    """
+    changed = False
+    stages = {str(stage.get("id") or ""): stage for stage in pipeline.get("stages", [])}
+    for chapter in pipeline.get("chapters", []):
+        try:
+            sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if sequence < 1 or chapter.get("chapterReadingStatus") == "complete":
+            continue
+        artifact = read_json_artifact(chapter_reading_path(book, sequence))
+        normalized = artifact.get("normalized") if isinstance(artifact.get("normalized"), dict) else {}
+        summary = normalized.get("summary") if isinstance(normalized.get("summary"), dict) else {}
+        dossier = normalized.get("dossier") if isinstance(normalized.get("dossier"), dict) else {}
+        review = normalized.get("review") if isinstance(normalized.get("review"), dict) else {}
+        if artifact.get("status") != "complete" or not summary or not dossier:
+            continue
+        completed_at = str(artifact.get("completedAt") or utc_now())
+        duration = float(artifact.get("durationSeconds") or 0)
+        model = str(artifact.get("model") or "")
+        signature = str(artifact.get("inputSignature") or "")
+        chapter.update(copy.deepcopy(summary))
+        chapter.update({
+            "status": "complete", "completedAt": completed_at, "durationSeconds": 0.0,
+            "model": model, "chapterReadingStatus": "complete",
+            "chapterReadingStartedAt": artifact.get("startedAt"),
+            "chapterReadingCompletedAt": completed_at,
+            "chapterReadingDurationSeconds": duration,
+            "chapterReadingPrimaryDurationSeconds": artifact.get("primaryDurationSeconds"),
+            "chapterReadingConsistencyDurationSeconds": artifact.get("consistencyDurationSeconds"),
+            "chapterReadingInputSignature": signature,
+            "chapterReadingPromptVersion": str(artifact.get("schema") or CHAPTER_READING_PROMPT_VERSION),
+            "chapterReadingPhase": "complete",
+            "chapterReadingCast": copy.deepcopy(normalized.get("cast") or []),
+            "chapterReadingConsistency": copy.deepcopy(normalized.get("consistency") or {}),
+        })
+        for key in ("error", "chapterReadingError", "interruptedAt"):
+            chapter.pop(key, None)
+        chunks = [item for item in pipeline.get("chunks", []) if int(item.get("chapterSequence") or 0) == sequence]
+        for index, chunk in enumerate(chunks):
+            shared = {
+                "dossierStatus": "complete", "dossierModel": model,
+                "dossierCompletedAt": completed_at, "dossierDurationSeconds": 0.0,
+                "chapterReadingDurationSeconds": duration,
+                "chapterReadingInputSignature": signature,
+            }
+            if index == 0:
+                shared["dossier"] = copy.deepcopy(dossier)
+            elif chunks:
+                shared["dossierCoveredByChapterReading"] = int(chunks[0].get("sequence") or 0)
+            chunk.update(shared)
+            chunk_artifact = read_json_artifact(chunk_artifacts_path(book) / f"{int(chunk.get('sequence') or index + 1):04d}.json")
+            chunk_artifact.update(shared)
+            write_chunk_artifact(book, int(chunk.get("sequence") or index + 1), chunk_artifact)
+        if review:
+            chapter.update({
+                "llmReviewStatus": "complete", "llmReviewCompletedAt": completed_at,
+                "llmReviewDurationSeconds": 0.0, "llmReviewSharedDurationSeconds": duration,
+                "llmReviewModel": model, "llmReviewInputSignature": signature,
+                "llmReview": copy.deepcopy(review),
+            })
+            chapter.pop("llmReviewError", None)
+        changed = True
+    if changed:
+        chapter_count = len(pipeline.get("chapters", []))
+        summary_complete = sum(chapter.get("status") == "complete" for chapter in pipeline.get("chapters", []))
+        dossier_count = len(pipeline.get("chunks", []))
+        dossier_complete = sum(chunk.get("dossierStatus") == "complete" for chunk in pipeline.get("chunks", []))
+        review_chapters = [chapter for chapter in pipeline.get("chapters", []) if strip_markdown_heading(chapter.get("title")).casefold() != "front matter"]
+        review_complete = sum(chapter.get("llmReviewStatus") == "complete" for chapter in review_chapters)
+        if stage := stages.get("summaries"):
+            stage.update({"status": "complete" if summary_complete == chapter_count else "pending", "detail": f"Completed {summary_complete} of {chapter_count} chapter summaries."})
+        if stage := stages.get("dossiers"):
+            stage.update({"status": "complete" if dossier_complete == dossier_count else "pending", "detail": f"Completed {dossier_complete} of {dossier_count} structured dossiers."})
+        if stage := stages.get("llm-review"):
+            stage.update({"status": "complete" if review_complete == len(review_chapters) else "pending", "detail": f"Saved optional first-reader review for {review_complete} of {len(review_chapters)} chapters."})
+    return changed
 
 
 def optional_analysis_artifact(book: dict[str, object], kind: str, sequence: int) -> dict[str, object]:
@@ -5862,6 +6595,45 @@ def analysis_run_artifact(book: dict[str, object], kind: str, item_id: str) -> d
     """
     if kind in {"context", "llm-review"}:
         return {**optional_analysis_artifact(book, kind, int(item_id)), "inputFidelity": "saved"}
+    if kind == "gliner":
+        sequence = int(item_id)
+        artifact = read_json_artifact(gliner_signals_path(book, sequence))
+        if not artifact:
+            raise LookupError("That GLiNER signals artifact is not available.")
+        return {
+            "kind": kind,
+            "chapterSequence": sequence,
+            "status": artifact.get("status"),
+            "error": artifact.get("error"),
+            "schema": artifact.get("schema"),
+            "model": artifact.get("model") or GLINER_MODEL_ID,
+            "input": artifact.get("input"),
+            "output": {
+                "identityCandidates": artifact.get("identityCandidates", []),
+                "raw": artifact.get("raw", {}),
+                "timing": artifact.get("timing", {}),
+            },
+            "inputFidelity": "saved",
+        }
+    if kind == "chapter-reading":
+        sequence = int(item_id)
+        artifact = read_json_artifact(chapter_reading_path(book, sequence))
+        if not artifact:
+            raise LookupError("That Chapter Reading artifact is not available.")
+        return {
+            "kind": kind,
+            "chapterSequence": sequence,
+            "status": artifact.get("status"),
+            "error": artifact.get("error"),
+            "schema": artifact.get("schema"),
+            "model": artifact.get("model"),
+            "input": artifact.get("input"),
+            "output": {
+                "modelResponse": artifact.get("output"),
+                "normalized": artifact.get("normalized"),
+            },
+            "inputFidelity": "saved",
+        }
 
     pipeline = load_pipeline(book)
     chapters = pipeline.get("chapters", []) if isinstance(pipeline.get("chapters"), list) else []
@@ -6381,7 +7153,10 @@ def reset_analysis_after_sequence(
     summary_fields = (
         "summary", "keyPoints", "endingState", "newQuestions", "questionDetails", "promptVersion",
         "analysisMode", "error", "model", "startedAt", "completedAt",
-        "durationSeconds", "inputCharacters", "summaryRuns",
+        "durationSeconds", "inputCharacters", "summaryRuns", "chapterReadingStatus",
+        "chapterReadingStartedAt", "chapterReadingCompletedAt", "chapterReadingDurationSeconds",
+        "chapterReadingPrimaryDurationSeconds", "chapterReadingModel", "chapterReadingInputSignature",
+        "chapterReadingPromptVersion",
     )
     optional_fields = {
         "context": (
@@ -6392,13 +7167,20 @@ def reset_analysis_after_sequence(
         "llmReview": (
             "llmReview", "llmReviewModel", "llmReviewStartedAt", "llmReviewCompletedAt",
             "llmReviewDurationSeconds", "llmReviewInputSignature", "llmReviewError",
-            "llmReviewRuns",
+            "llmReviewRuns", "llmReviewSharedDurationSeconds",
         ),
     }
     for chapter in pipeline.get("chapters", []):
         chapter_sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
         if chapter_sequence <= sequence:
             continue
+        for key in (
+            "glinerStatus", "glinerModel", "glinerStartedAt", "glinerCompletedAt",
+            "glinerDurationSeconds", "glinerInputCharacters", "glinerCandidateCount", "glinerError",
+        ):
+            chapter.pop(key, None)
+        chapter["glinerStatus"] = "pending"
+        gliner_signals_path(book, chapter_sequence).unlink(missing_ok=True)
         for key in summary_fields:
             chapter.pop(key, None)
         chapter["status"] = "pending"
@@ -6418,12 +7200,14 @@ def reset_analysis_after_sequence(
             cumulative_context_path(book, chapter_sequence),
             llm_review_packet_path(book, chapter_sequence),
             llm_review_result_path(book, chapter_sequence),
+            chapter_reading_path(book, chapter_sequence),
         ):
             path.unlink(missing_ok=True)
 
     dossier_fields = (
         "dossier", "dossierModel", "dossierStartedAt", "dossierCompletedAt",
         "dossierDurationSeconds", "dossierError", "dossierRetryDiagnostics", "dossierRuns",
+        "dossierCoveredByChapterReading", "chapterReadingDurationSeconds", "chapterReadingInputSignature",
     )
     for chunk in pipeline.get("chunks", []):
         if int(chunk.get("chapterSequence") or 0) <= sequence:
@@ -6440,7 +7224,7 @@ def reset_analysis_after_sequence(
             write_chunk_artifact(book, int(chunk.get("sequence") or 0), artifact)
 
     detail = f"Development boundary at {label}; later results were cleared deliberately."
-    for stage_id in ("summaries", "dossiers", "emotions", "tags", "smells", "cumulative-context", "llm-review", "whole-book-llm-review"):
+    for stage_id in ("gliner-signals", "summaries", "dossiers", "emotions", "tags", "smells", "cumulative-context", "llm-review", "whole-book-llm-review"):
         stage = next((item for item in pipeline.get("stages", []) if item.get("id") == stage_id), None)
         if stage:
             stage.update({"status": "pending", "detail": detail})
@@ -6460,6 +7244,7 @@ def reset_analysis_after_sequence(
     })
     for key in ("queuedAction", "completedAt", "stopRequested", "error"):
         pipeline.pop(key, None)
+    pipeline.pop("developmentAnalysisLabel", None)  # Legacy field; the limit label is authoritative.
     write_pipeline(book, pipeline)
     return pipeline
 
@@ -6495,6 +7280,48 @@ def refresh_analysis_result(book: dict[str, object], pipeline: dict[str, object]
             for key in ("model", "startedAt", "completedAt", "durationSeconds", "error"):
                 stage.pop(key, None)
         action = "whole-llm-review"
+    elif kind == "gliner":
+        chapter = next((item for item in pipeline.get("chapters", []) if int(item.get("sequence") or item.get("number") or 0) == sequence), None)
+        if not chapter:
+            raise LookupError("Chapter not found.")
+        was_running = chapter.get("glinerStatus") == "running"
+        for key in (
+            "glinerModel", "glinerStartedAt", "glinerCompletedAt", "glinerDurationSeconds",
+            "glinerInputCharacters", "glinerCandidateCount", "glinerError",
+        ):
+            chapter.pop(key, None)
+        chapter["glinerStatus"] = "pending"
+        gliner_signals_path(book, sequence).unlink(missing_ok=True)
+        invalidate_pipeline_stage(
+            pipeline, "gliner-signals", include_self=True, status="pending",
+            detail=f"Chapter {sequence} is waiting for fresh GLiNER signals.",
+        )
+        # Chapter Reading consumes these candidates, so a refreshed signal set
+        # deliberately invalidates its combined downstream views.
+        if chapter.get("chapterReadingStatus") == "complete":
+            for key in (
+                "summary", "keyPoints", "endingState", "newQuestions", "questionDetails",
+                "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt",
+                "durationSeconds", "inputCharacters", "chapterReadingStartedAt",
+                "chapterReadingCompletedAt", "chapterReadingDurationSeconds",
+                "chapterReadingPrimaryDurationSeconds", "chapterReadingModel",
+                "chapterReadingInputSignature", "chapterReadingPromptVersion",
+            ):
+                chapter.pop(key, None)
+            chapter.update({"status": "pending", "chapterReadingStatus": "pending"})
+            chapter_reading_path(book, sequence).unlink(missing_ok=True)
+            for chunk in pipeline.get("chunks", []):
+                if int(chunk.get("chapterSequence") or 0) != sequence:
+                    continue
+                for key in (
+                    "dossier", "dossierModel", "dossierStartedAt", "dossierCompletedAt",
+                    "dossierDurationSeconds", "dossierError", "dossierRetryDiagnostics",
+                    "dossierCoveredByChapterReading", "chapterReadingDurationSeconds",
+                    "chapterReadingInputSignature",
+                ):
+                    chunk.pop(key, None)
+                chunk["dossierStatus"] = "pending"
+        action = "gliner-signals"
     elif kind == "summary":
         chapter = next((item for item in pipeline.get("chapters", []) if int(item.get("sequence") or item.get("number") or 0) == sequence), None)
         if not chapter:
@@ -6652,6 +7479,16 @@ def retry_failed_analysis(book: dict[str, object], pipeline: dict[str, object]) 
     affected_stages: set[str] = set()
     summary_failed = False
     for chapter in pipeline.get("chapters", []):
+        if chapter.get("glinerStatus") == "failed":
+            for key in (
+                "glinerModel", "glinerStartedAt", "glinerCompletedAt", "glinerDurationSeconds",
+                "glinerInputCharacters", "glinerCandidateCount", "glinerError",
+            ):
+                chapter.pop(key, None)
+            chapter["glinerStatus"] = "pending"
+            gliner_signals_path(book, int(chapter.get("sequence") or chapter.get("number") or 0)).unlink(missing_ok=True)
+            retried += 1
+            affected_stages.add("gliner-signals")
         if chapter.get("status") == "failed":
             if chapter.get("model") or chapter.get("completedAt") or chapter.get("error"):
                 chapter.setdefault("summaryRuns", []).append({
@@ -6751,6 +7588,117 @@ def retry_failed_analysis(book: dict[str, object], pipeline: dict[str, object]) 
     return retried
 
 
+def run_gliner_signal_pipeline(book_id: str, chapter_sequence: int | None = None) -> None:
+    """Run the fast, source-anchored GLiNER pass as its own inspectable task."""
+    book = find_book(book_id)
+    if not book:
+        return
+    pipeline = load_pipeline(book)
+    ensure_signal_stages(pipeline)
+    stages = {stage["id"]: stage for stage in pipeline.get("stages", [])}
+    stage = stages.get("gliner-signals")
+    if not stage:
+        return
+    runtime = ROOT / ".venv-gliner" / "bin" / "python"
+    runner = ROOT / "tools" / "gliner_chapter_spike.py"
+    if not runtime.is_file() or not runner.is_file():
+        detail = "Install the isolated GLiNER runtime before running chapter signals."
+        stage.update({"status": "blocked", "detail": detail, "setupRequired": True})
+        pipeline.update({"status": "blocked", "phase": "gliner-signals-blocked", "message": detail, "updatedAt": utc_now()})
+        write_pipeline(book, pipeline)
+        return
+    cancel_event = PIPELINE_CANCEL_EVENTS.setdefault(book_id, threading.Event())
+    eligible = [
+        chapter for chapter in development_limited_items(pipeline, pipeline.get("chapters", []), "sequence")
+        if not is_front_matter(chapter)
+    ]
+    for chapter in pipeline.get("chapters", []):
+        if is_front_matter(chapter):
+            chapter["glinerStatus"] = "excluded"
+    stage.update({
+        "status": "running", "startedAt": stage.get("startedAt") or utc_now(),
+        "model": GLINER_MODEL_ID, "detail": "Extracting exact entity and classification candidates with GLiNER.",
+    })
+    pipeline.update({"status": "running", "phase": "gliner-signals", "workerPid": os.getpid(), "updatedAt": utc_now()})
+    write_pipeline(book, pipeline)
+    try:
+        for position, chapter in enumerate(eligible, 1):
+            sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
+            if chapter_sequence is not None and sequence != chapter_sequence:
+                continue
+            if chapter.get("glinerStatus") == "complete":
+                continue
+            if cancel_event.is_set():
+                raise PipelineCancelled()
+            source = load_chapter_source(book, sequence)
+            text = str(source.get("text") or "")
+            started_at, started = utc_now(), time.monotonic()
+            chapter.update({
+                "glinerStatus": "running", "glinerModel": GLINER_MODEL_ID,
+                "glinerStartedAt": started_at, "glinerInputCharacters": len(text),
+            })
+            pipeline.update({"message": f"Extracting GLiNER signals for {chapter.get('title')} · chapter {position} of {len(eligible)}.", "updatedAt": utc_now()})
+            write_pipeline(book, pipeline)
+            output_path = gliner_signals_path(book, sequence)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            input_path = output_path.with_suffix(".source.txt")
+            input_path.write_text(text, encoding="utf-8")
+            try:
+                completed = subprocess.run(
+                    [str(runtime), str(runner), str(input_path), "--model", GLINER_MODEL_ID,
+                     "--output", str(output_path), "--skip-events"],
+                    cwd=ROOT, capture_output=True, text=True, timeout=600, check=False,
+                )
+                if cancel_event.is_set():
+                    raise PipelineCancelled()
+                if completed.returncode:
+                    raise RuntimeError((completed.stderr or completed.stdout or "GLiNER failed without diagnostics.")[-1000:])
+                artifact = read_json_artifact(output_path)
+                artifact.update({
+                    "schema": GLINER_SCHEMA_VERSION, "status": "complete",
+                    "chapterSequence": sequence, "startedAt": started_at, "completedAt": utc_now(),
+                    "durationSeconds": round(time.monotonic() - started, 3),
+                    "input": {"chapter": {key: source.get(key) for key in ("sequence", "title", "chapterTitle")}, "text": text},
+                })
+                artifact["identityCandidates"] = gliner_identity_candidates(artifact, text)
+                write_json_artifact(output_path, artifact)
+                chapter.update({
+                    "glinerStatus": "complete", "glinerCompletedAt": artifact["completedAt"],
+                    "glinerDurationSeconds": artifact["durationSeconds"],
+                    "glinerCandidateCount": len(artifact["identityCandidates"]),
+                })
+                chapter.pop("glinerError", None)
+            finally:
+                input_path.unlink(missing_ok=True)
+            write_pipeline(book, pipeline)
+        completed_count = sum(chapter.get("glinerStatus") == "complete" for chapter in eligible)
+        failed_count = sum(chapter.get("glinerStatus") == "failed" for chapter in eligible)
+        remaining = len(eligible) - completed_count - failed_count
+        stage.update({
+            "status": "pending" if remaining else "warning" if failed_count else "complete",
+            "detail": f"Completed {completed_count} of {len(eligible)} manuscript chapter GLiNER signal sets; front matter excluded.",
+        })
+        if not remaining:
+            stage["completedAt"] = utc_now()
+        pipeline.update({"status": "running" if chapter_sequence is not None and remaining else "complete", "phase": "chapter-complete", "message": "GLiNER signals saved; continuing through this book.", "updatedAt": utc_now()})
+    except PipelineCancelled:
+        for chapter in eligible:
+            if chapter.get("glinerStatus") == "running":
+                chapter["glinerStatus"] = "pending"
+        stage.update({"status": "paused", "detail": "GLiNER signals stopped safely."})
+        pipeline.update({"status": "paused", "phase": "gliner-signals-paused", "message": "GLiNER signals stopped; completed results are safe.", "updatedAt": utc_now()})
+    except Exception as error:
+        active = next((chapter for chapter in eligible if chapter.get("glinerStatus") == "running"), None)
+        if active:
+            active.update({"glinerStatus": "failed", "glinerCompletedAt": utc_now(), "glinerError": str(error)[:500]})
+        stage.update({"status": "warning", "detail": "One or more GLiNER signal sets failed."})
+        pipeline.update({"status": "warning", "phase": "chapter-complete", "message": "GLiNER signals need attention.", "updatedAt": utc_now()})
+    finally:
+        write_pipeline(book, pipeline)
+        PIPELINE_THREADS.pop(book_id, None)
+        PIPELINE_CANCEL_EVENTS.pop(book_id, None)
+
+
 def run_chapter_signal_pipeline(book_id: str, kind: str, chapter_sequence: int | None = None) -> None:
     """Run one DRY chapter-signal stage; only the analyzer differs."""
     if kind not in {"emotion", "tag", "smell"}:
@@ -6791,8 +7739,16 @@ def run_chapter_signal_pipeline(book_id: str, kind: str, chapter_sequence: int |
         stages[stage_id].pop("setupRequired", None)
         write_pipeline(book, pipeline)
         eligible: list[tuple[int, dict[str, object], dict[str, object]]] = []
+        visible_by_sequence = {
+            int(chapter.get("sequence") or chapter.get("number") or 0): chapter
+            for chapter in pipeline.get("chapters", [])
+            if isinstance(chapter, dict)
+        }
         for index, source in enumerate(chapters):
-            visible = pipeline["chapters"][index]
+            sequence = int(source.get("sequence") or source.get("number") or index + 1)
+            visible = visible_by_sequence.get(sequence)
+            if visible is None:
+                continue
             if is_front_matter(visible):
                 visible[f"{prefix}Status"] = "excluded"
                 visible[kind] = {
@@ -6940,6 +7896,7 @@ def run_book_chapter_pipeline(
     book_id: str, *, summaries: bool = True, emotions: bool = True,
     tags: bool = True, smells: bool = True, dossiers: bool = True,
     context: bool | None = None, llm_review: bool | None = None,
+    gliner_signals: bool = True,
 ) -> None:
     """Finish one book chapter-by-chapter, respecting per-stage dependencies."""
     book = find_book(book_id)
@@ -6948,12 +7905,29 @@ def run_book_chapter_pipeline(
     initial_pipeline = load_pipeline(book)
     if initial_pipeline.get("chapterMapSuspicious") and not initial_pipeline.get("chapterMapApproved"):
         return
+    # Legacy/synthetic ledgers used by repair tools may not declare this new
+    # stage. Only run it when the migrated pipeline explicitly owns the step.
+    gliner_signals = bool(gliner_signals and any(
+        stage.get("id") == "gliner-signals" for stage in initial_pipeline.get("stages", [])
+        if isinstance(stage, dict)
+    ))
     optional_review = bool(book.get("llmReviewEnabled"))
+    # Keep one cancellation identity for the entire chapter-first pass. Child
+    # runners may remove the public registry entry when they return, but this
+    # local event remains authoritative so Stop cannot cancel one elementary
+    # stage only to have the outer worker create a fresh event and continue.
+    book_cancel_event = BOOK_PIPELINE_CANCEL_EVENTS.get(book_id)
+    if book_cancel_event is None or book_cancel_event.is_set():
+        book_cancel_event = threading.Event()
+        BOOK_PIPELINE_CANCEL_EVENTS[book_id] = book_cancel_event
+    PIPELINE_CANCEL_EVENTS[book_id] = book_cancel_event
     context = optional_review if context is None else context
     llm_review = optional_review if llm_review is None else llm_review
     enabled_stages = {
         stage_id for stage_id, enabled in (("summaries", summaries), ("emotions", emotions), ("tags", tags), ("smells", smells), ("dossiers", dossiers)) if enabled
     }
+    if gliner_signals:
+        enabled_stages.add("gliner-signals")
     if context:
         enabled_stages.add("cumulative-context")
     if llm_review:
@@ -6963,12 +7937,48 @@ def run_book_chapter_pipeline(
     run_ready_stage_rollups(book_id)
 
     def claim_stage_worker() -> None:
-        PIPELINE_CANCEL_EVENTS[book_id] = threading.Event()
+        PIPELINE_CANCEL_EVENTS[book_id] = book_cancel_event
         PIPELINE_THREADS[book_id] = threading.current_thread()
 
     for sequence in ordered_chapter_sequences(load_pipeline(book)):
+        if QUEUE_CANCEL_EVENT.is_set() or book_cancel_event.is_set():
+            return
+        # The normal path reads a fresh chapter once, then projects that one
+        # structured response into Summary, Dossier, and optional LLM Review.
+        # The individual runners remain available as surgical repair actions
+        # for one stale or failed view without spending another complete read.
+        pipeline = load_pipeline(book)
+        chapter = next((item for item in pipeline.get("chapters", []) if int(item.get("sequence") or item.get("number") or 0) == sequence), None)
+        if (
+            gliner_signals and chapter and not is_front_matter(chapter)
+            and chapter.get("glinerStatus") in {None, "pending", "ready", "paused", "running"}
+            and "gliner-signals" not in paused_pipeline_actions(book_id)
+        ):
+            claim_stage_worker()
+            run_gliner_signal_pipeline(book_id, chapter_sequence=sequence)
+            if QUEUE_CANCEL_EVENT.is_set() or book_cancel_event.is_set():
+                return
+            pipeline = load_pipeline(book)
+            chapter = next((item for item in pipeline.get("chapters", []) if int(item.get("sequence") or item.get("number") or 0) == sequence), None)
+            if chapter and chapter.get("glinerStatus") != "complete":
+                return
+        chapter_chunks = [item for item in pipeline.get("chunks", []) if int(item.get("chapterSequence") or 0) == sequence]
+        summary_needs_read = bool(chapter and chapter.get("status") in {None, "pending", "ready", "paused", "running"})
+        dossier_needs_read = bool(chapter_chunks and any(item.get("dossierStatus") in {None, "pending", "ready", "paused", "running"} for item in chapter_chunks))
+        if summaries and dossiers and summary_needs_read and dossier_needs_read:
+            if not ({"summarize", "dossiers"} & paused_pipeline_actions(book_id)):
+                claim_stage_worker()
+                run_chapter_reading_pipeline(
+                    book_id, sequence,
+                    include_review=bool(llm_review and "llm-review" not in paused_pipeline_actions(book_id)),
+                )
+                if QUEUE_CANCEL_EVENT.is_set() or book_cancel_event.is_set():
+                    return
+                if higher_priority_book_waiting(book_id):
+                    return
+                run_ready_stage_rollups(book_id)
         for stage_id in CHAPTER_PIPELINE_STAGE_ORDER:
-            if QUEUE_CANCEL_EVENT.is_set():
+            if QUEUE_CANCEL_EVENT.is_set() or book_cancel_event.is_set():
                 return
             if stage_id not in enabled_stages:
                 continue
@@ -6983,7 +7993,12 @@ def run_book_chapter_pipeline(
                 continue
             if stage.get("status") == "blocked" and stage.get("setupRequired"):
                 continue
-            if stage_id == "summaries":
+            if stage_id == "gliner-signals":
+                chapter = next((item for item in pipeline.get("chapters", []) if int(item.get("sequence") or item.get("number") or 0) == sequence), None)
+                if chapter and not is_front_matter(chapter) and chapter.get("glinerStatus") in {None, "pending", "ready", "paused", "running"}:
+                    claim_stage_worker()
+                    run_gliner_signal_pipeline(book_id, chapter_sequence=sequence)
+            elif stage_id == "summaries":
                 chapter = next((item for item in pipeline.get("chapters", []) if int(item.get("sequence") or item.get("number") or 0) == sequence), None)
                 if chapter and chapter.get("status") in {None, "pending", "ready", "paused", "running"}:
                     claim_stage_worker()
@@ -7009,6 +8024,8 @@ def run_book_chapter_pipeline(
                 if chapter and strip_markdown_heading(chapter.get("title")).casefold() != "front matter" and chapter.get("contextStatus") in {None, "pending", "ready", "paused", "running"}:
                     claim_stage_worker()
                     run_cumulative_context_pipeline(book_id, chapter_sequence=sequence)
+            if QUEUE_CANCEL_EVENT.is_set() or book_cancel_event.is_set():
+                return
             # Priority is a scheduling contract. Finish the active model
             # response safely, then yield before another stage or rollup when a
             # higher-priority book has eligible work.
@@ -7134,6 +8151,14 @@ def run_library_queue() -> None:
                 complete_queue_action(book_id, action)
                 retain_book_for_automatic_followup(processed, book_id)
                 continue
+            if action == "gliner-signals":
+                run_book_chapter_pipeline(
+                    book_id, summaries=False, emotions=False, tags=False, smells=False,
+                    dossiers=False, context=False, llm_review=False, gliner_signals=True,
+                )
+                complete_queue_action(book_id, action)
+                retain_book_for_automatic_followup(processed, book_id)
+                continue
             if action == "cumulative-context":
                 run_book_chapter_pipeline(book_id, summaries=False, emotions=False, tags=False, smells=False, dossiers=False, context=True, llm_review=False)
                 complete_queue_action(book_id, action)
@@ -7178,7 +8203,7 @@ def run_library_queue() -> None:
                 continue
             automatic_action = next_pipeline_action(book, pipeline)
             with QUEUE_LOCK:
-                QUEUE_CURRENT_TASK.update({"action": automatic_action or "chapter-pipeline", "task": {"prepare": "Manuscript map", "summarize": "Chapter summary", "dossiers": "Chapter dossier", "emotions": "Emotion scoring", "tags": "Chapter tags", "smells": "Prose smells", "whole-summary": "Whole-book summary", "whole-dossier": "Whole-book dossier", "questions": "Questions & payoffs", "cumulative-context": "Cumulative context", "llm-review": "LLM Review", "whole-llm-review": "Whole-book LLM Review"}.get(automatic_action, "Next chapter-step")})
+                QUEUE_CURRENT_TASK.update({"action": automatic_action or "chapter-pipeline", "task": {"prepare": "Manuscript map", "gliner-signals": "GLiNER signals", "summarize": "Chapter summary", "dossiers": "Chapter dossier", "emotions": "Emotion scoring", "tags": "Chapter tags", "smells": "Prose smells", "whole-summary": "Whole-book summary", "whole-dossier": "Whole-book dossier", "questions": "Questions & payoffs", "cumulative-context": "Cumulative context", "llm-review": "LLM Review", "whole-llm-review": "Whole-book LLM Review"}.get(automatic_action, "Next chapter-step")})
             if automatic_action == "prepare":
                 PIPELINE_CANCEL_EVENTS[book_id] = threading.Event()
                 PIPELINE_THREADS[book_id] = threading.current_thread()
@@ -7187,7 +8212,7 @@ def run_library_queue() -> None:
                 if pipeline_is_enabled() and not QUEUE_CANCEL_EVENT.is_set() and prepared.get("chapters"):
                     run_book_chapter_pipeline(book_id)
                 continue
-            if automatic_action in {"summarize", "dossiers", "emotions", "tags", "smells", "cumulative-context", "llm-review"}:
+            if automatic_action in {"gliner-signals", "summarize", "dossiers", "emotions", "tags", "smells", "cumulative-context", "llm-review"}:
                 # Automatic work is chapter-first, not stage-first. Once the
                 # structural inputs exist, run every eligible pass for one
                 # chapter before advancing to the next chapter. Explicit UI
@@ -7269,6 +8294,9 @@ def prioritize_pipeline_action(book_id: str, action: str) -> dict[str, object]:
     book = find_book(book_id)
     if not book or action not in EXPLICIT_QUEUE_ACTIONS:
         raise ValueError("Choose a valid book and pipeline action.")
+    # An explicit Continue/Prioritize request is the authority to revoke a
+    # prior per-book Stop and create a fresh chapter-pass cancellation token.
+    BOOK_PIPELINE_CANCEL_EVENTS.pop(book_id, None)
     base_action = {"restart": "summarize", "dossier-restart": "dossiers", "emotion-restart": "emotions", "tag-restart": "tags", "smell-restart": "smells"}.get(action, action)
     if base_action in paused_pipeline_actions(book_id):
         set_pipeline_action_paused(book_id, base_action, False)
@@ -7589,77 +8617,144 @@ def build_cumulative_context(
     *, previous: dict[str, object], evidence: list[dict[str, object]], through_chapter: object,
     model: str, rebased: bool, cancel_event: threading.Event, run_key: str,
 ) -> dict[str, object]:
-    through_label = f"authored chapter {through_chapter}" if isinstance(through_chapter, int) else str(through_chapter)
-    prompt = f"""Maintain a compact but comprehensive, evidence-respecting memory of a manuscript through {through_label}.
-This is {'a five-chapter rebase' if rebased else 'an incremental update'}. Preserve facts from the prior checkpoint unless the supplied chapter evidence corrects or resolves them. Distinguish character knowledge from objective fact. Retain uncertainty. Do not predict later events or invent connective tissue.
+    """Build cumulative memory by indexing evidence, never by rewriting it.
 
-Return a concise story_so_far plus comprehensive arrays for key_events, established_facts, entities_and_significance, character_states, relationship_states, knowledge_states, locations_and_timeline, open_threads, resolved_threads, retired_threads, reader_promises, themes_and_motifs, and voice_and_form. Also return thread_updates with exactly one disposition for every open thread in the prior checkpoint: copy the previous wording, mark it open, resolved, or retired, and give its current wording. Never silently drop an earlier open thread: resolved means the text supplied an answer; retired means the old entry was malformed, non-specific, duplicative, already answered when created, or merely asked what happened rather than identifying a durable uncertainty.
+    `previous`, `model`, `rebased`, `cancel_event`, and `run_key` remain in the
+    signature so saved jobs and focused tests can cross the architecture change
+    without a second control path. The ledger is rebuilt from the supplied
+    chapter evidence; this is cheap enough to be deterministic and complete.
+    """
+    del previous, model, rebased, cancel_event, run_key
+    through_label = f"Chapter {through_chapter}" if isinstance(through_chapter, int) else str(through_chapter)
+    latest_index = max(0, len(evidence) - 1)
+    records_by_key: dict[tuple[str, str], dict[str, object]] = {}
+    chapter_digests: list[dict[str, object]] = []
+    retired_threads: list[str] = []
 
-This memory will be the only prior-book context available to a later editorial reader. Compress wording, not distinct durable information. Preserve every named character, group, institution, location, object, event, causal link, revelation, promise, uncertainty, and state change that could matter to continuity, motivation, comprehension, payoff, or later interpretation. Do not impose an arbitrary item limit. Omit only scene texture that has no plausible future consequence. Use the authored chapter numbers in the supplied evidence, never source sequence numbers.
+    def remember(
+        kind: str, claim: object, chapter: dict[str, object], *, subject: object = "",
+        evidence_text: object = "", evidence_anchor: object = None, status: str = "active",
+    ) -> None:
+        value = re.sub(r"\s+", " ", str(claim or "")).strip()
+        if not value:
+            return
+        if kind == "open_thread" and not context_thread_is_actionable(value):
+            if value not in retired_threads:
+                retired_threads.append(value)
+            return
+        key = (kind, normalize_lexical_key(value))
+        chapter_index = int(chapter.get("ledgerIndex") or 0)
+        chapter_label = str(chapter.get("chapter") or f"Section {chapter_index + 1}")
+        source_sequence = int(chapter.get("sourceSequence") or 0)
+        provenance = {
+            "chapter": chapter_label,
+            "sourceSequence": source_sequence,
+            "evidence": str(evidence_text or "").strip(),
+        }
+        if isinstance(evidence_anchor, dict):
+            provenance["evidenceAnchor"] = dict(evidence_anchor)
+        existing = records_by_key.get(key)
+        if existing:
+            existing.update({
+                "lastConfirmedChapter": chapter_label,
+                "lastConfirmedSequence": source_sequence,
+                "chaptersAgo": latest_index - chapter_index,
+            })
+            if provenance not in existing["provenance"]:
+                existing["provenance"].append(provenance)
+            return
+        record_id = hashlib.sha256(f"{kind}:{key[1]}".encode("utf-8")).hexdigest()[:16]
+        records_by_key[key] = {
+            "id": record_id,
+            "kind": kind,
+            "claim": value,
+            "subject": str(subject or "").strip(),
+            "status": status,
+            "introducedChapter": chapter_label,
+            "introducedSequence": source_sequence,
+            "lastConfirmedChapter": chapter_label,
+            "lastConfirmedSequence": source_sequence,
+            "chaptersAgo": latest_index - chapter_index,
+            "provenance": [provenance],
+        }
 
-Apply these editorial distinctions carefully:
-- open_threads are live narrative uncertainties with plausible later consequence, not every unanswered curiosity, historical aside, or detail the prose simply has not elaborated.
-- reader_promises are expectations the manuscript creates for a later development, explanation, confrontation, or payoff. Do not record ordinary promises made between characters merely because the word "promise" applies.
-- resolved_threads should retire earlier uncertainty explicitly; do not keep a resolved item active in open_threads.
-- Retire bookkeeping questions such as "What happens next?", "What event occurs at the end of the chapter?", and generic questions already answered by the evidence. Do not preserve a question merely because an earlier model emitted it.
-- Every character_states, knowledge_states, and relationship_states item must begin with the explicit subject's name. Verify who actually knows, refuses, suspects, or acts. Never turn the narrator's lack of knowledge into another character's refusal unless the evidence explicitly shows that refusal.
-- Paratext, framing apparatus, and editorial provenance belong in story memory only when they materially govern how the reader interprets the continuing narrative.
-- Prefer durable, specific state over speculative significance. Preserve uncertainty instead of upgrading a possibility into fact.
-- Treat anchored endingState facts in the saved evidence as authoritative chapter-boundary state. Prefer them over free summary prose if they conflict. Preserve grammatical actors and objects: a locked door or room does not make a person locked inside; forced entry followed by an empty room establishes absence, not discovery of the person.
-- story_so_far must end with a precise account of the latest chapter's actual outcome. Reconcile superseded state rather than appending another near-duplicate. Keep the prose orientation compact; the arrays are the detailed ledger.
-
-Prior checkpoint:
-{json.dumps(previous, ensure_ascii=False)[:30_000] if previous else 'None; begin the manuscript memory.'}
-
-Saved chapter evidence:
-{json.dumps(evidence, ensure_ascii=False)[:65_000]}
-"""
-    result, _ = run_structured_model(prompt, model, cumulative_context_schema(), cancel_event, run_key)
-    normalized = {
-        "storySoFar": str(result.get("story_so_far") or "").strip(),
-        **{
-            destination: [str(item).strip() for item in result.get(source, []) if str(item).strip()]
-            for source, destination in (
-                ("key_events", "keyEvents"), ("established_facts", "establishedFacts"),
-                ("entities_and_significance", "entitiesAndSignificance"), ("character_states", "characterStates"),
-                ("relationship_states", "relationshipStates"), ("knowledge_states", "knowledgeStates"),
-                ("locations_and_timeline", "locationsAndTimeline"), ("open_threads", "openThreads"),
-                ("resolved_threads", "resolvedThreads"), ("retired_threads", "retiredThreads"), ("reader_promises", "readerPromises"),
-                ("themes_and_motifs", "themesAndMotifs"),
-                ("voice_and_form", "voiceAndForm"),
-            )
-        },
+    dossier_kind_map = {
+        "facts": "fact", "events": "event", "entities": "entity", "locations": "location",
+        "current_times": "current_time", "promises": "reader_promise", "timeline_observations": "timeline",
     }
-    previous_open = [str(item).strip() for item in (previous.get("openThreads") or previous.get("open_threads") or []) if str(item).strip()]
-    updates = result.get("thread_updates") if isinstance(result.get("thread_updates"), list) else []
-    disposition_by_key = {
-        normalize_lexical_key(item.get("previous_thread")): item
-        for item in updates if isinstance(item, dict) and normalize_lexical_key(item.get("previous_thread"))
+    for chapter_index, raw_chapter in enumerate(evidence):
+        chapter = {**raw_chapter, "ledgerIndex": chapter_index}
+        chapter_label = str(chapter.get("chapter") or f"Section {chapter_index + 1}")
+        chapter_digests.append({
+            "chapter": chapter_label,
+            "sourceSequence": int(chapter.get("sourceSequence") or 0),
+            "title": str(chapter.get("title") or "").strip(),
+            "chaptersAgo": latest_index - chapter_index,
+        })
+        key_point_details = chapter.get("keyPointDetails") if isinstance(chapter.get("keyPointDetails"), list) else []
+        if key_point_details:
+            for item in key_point_details:
+                if isinstance(item, dict):
+                    remember("fact", item.get("claim"), chapter, subject=item.get("subject"), evidence_text=item.get("evidence"), evidence_anchor=item.get("evidenceAnchor"))
+        for item in chapter.get("endingState", []) if isinstance(chapter.get("endingState"), list) else []:
+            if isinstance(item, dict):
+                remember("ending_state", item.get("fact"), chapter, evidence_text=item.get("evidence"), evidence_anchor=item.get("evidenceAnchor"))
+        for item in chapter.get("questions", []) if isinstance(chapter.get("questions"), list) else []:
+            if isinstance(item, dict):
+                remember("open_thread", item.get("question"), chapter, evidence_text=item.get("evidence"), evidence_anchor=item.get("evidenceAnchor"))
+        for dossier in chapter.get("dossiers", []) if isinstance(chapter.get("dossiers"), list) else []:
+            if not isinstance(dossier, dict):
+                continue
+            claim_records = dossier.get("claimRecords") if isinstance(dossier.get("claimRecords"), list) else []
+            if claim_records:
+                for item in claim_records:
+                    if not isinstance(item, dict):
+                        continue
+                    remember(
+                        dossier_kind_map.get(str(item.get("kind") or ""), str(item.get("kind") or "fact")),
+                        item.get("claim"), chapter, subject=item.get("subject"),
+                        evidence_text=item.get("evidence"), evidence_anchor=item.get("evidenceAnchor"),
+                    )
+            for item in dossier.get("questionDetails", []) if isinstance(dossier.get("questionDetails"), list) else []:
+                if isinstance(item, dict):
+                    remember("open_thread", item.get("question"), chapter, evidence_text=item.get("evidence"), evidence_anchor=item.get("evidenceAnchor"))
+
+    records = list(records_by_key.values())
+    records.sort(key=lambda item: (int(item.get("chaptersAgo") or 0), str(item.get("kind") or ""), str(item.get("claim") or "").casefold()))
+
+    def claims(*kinds: str) -> list[str]:
+        accepted = set(kinds)
+        return [str(item["claim"]) for item in records if item.get("kind") in accepted and item.get("status") == "active"]
+
+    counts = Counter(str(item.get("kind") or "unknown") for item in records)
+    orientation = (
+        f"Evidence ledger through {through_label}: "
+        f"{counts.get('fact', 0)} facts, {counts.get('event', 0)} events, "
+        f"{counts.get('ending_state', 0)} ending states, and {counts.get('open_thread', 0)} open questions. "
+        "Each retained entry remains linked to its source passage; chapter summaries are not used as cumulative memory."
+    )
+    return {
+        "schema": CUMULATIVE_CONTEXT_PROMPT_VERSION,
+        "throughChapter": through_label,
+        "storySoFar": orientation,
+        "chapterDigests": chapter_digests,
+        "records": records,
+        "recordCounts": dict(counts),
+        "keyEvents": claims("event"),
+        "establishedFacts": claims("fact", "ending_state"),
+        "entitiesAndSignificance": claims("entity"),
+        "characterStates": [],
+        "relationshipStates": [],
+        "knowledgeStates": [],
+        "locationsAndTimeline": claims("location", "current_time", "timeline"),
+        "openThreads": claims("open_thread"),
+        "resolvedThreads": [],
+        "retiredThreads": retired_threads,
+        "threadUpdates": [],
+        "readerPromises": claims("reader_promise"),
+        "themesAndMotifs": [],
+        "voiceAndForm": [],
     }
-    open_threads = list(normalized["openThreads"])
-    resolved_threads = list(normalized["resolvedThreads"])
-    retired_threads = list(normalized["retiredThreads"])
-    for previous_thread in previous_open:
-        update = disposition_by_key.get(normalize_lexical_key(previous_thread))
-        # A missing disposition is model uncertainty, not evidence that the
-        # narrative thread vanished. Preserve it until a later pass resolves it.
-        if not update:
-            if context_thread_is_actionable(previous_thread) and previous_thread not in open_threads:
-                open_threads.append(previous_thread)
-            elif previous_thread not in retired_threads:
-                retired_threads.append(previous_thread)
-            continue
-        wording = str(update.get("current_wording") or previous_thread).strip()
-        target = resolved_threads if update.get("status") == "resolved" else retired_threads if update.get("status") == "retired" else open_threads
-        if wording and wording not in target:
-            target.append(wording)
-    resolved_keys = {normalize_lexical_key(item) for item in resolved_threads}
-    retired_keys = {normalize_lexical_key(item) for item in retired_threads}
-    normalized["openThreads"] = [item for item in open_threads if context_thread_is_actionable(item) and normalize_lexical_key(item) not in resolved_keys | retired_keys]
-    normalized["resolvedThreads"] = resolved_threads
-    normalized["retiredThreads"] = retired_threads
-    normalized["threadUpdates"] = [dict(item) for item in updates if isinstance(item, dict)]
-    return normalized
 
 
 def authored_chapter_label(chapter: dict[str, object], authored_index: int) -> str:
@@ -7671,6 +8766,30 @@ def authored_chapter_label(chapter: dict[str, object], authored_index: int) -> s
         return title or role.title()
     match = re.match(r"^(?:chapter\s+)?([ivxlcdm]+|\d+)\b", title, re.I)
     return f"Chapter {match.group(1)}" if match else f"Chapter {authored_index}"
+
+
+def cumulative_context_evidence(
+    pipeline: dict[str, object], chapters: list[dict[str, object]], stop_index: int,
+) -> list[dict[str, object]]:
+    """Collect saved evidence through one authored chapter without prose rewriting."""
+    labels = {
+        int(chapter.get("sequence") or chapter.get("number") or index + 1): authored_chapter_label(chapter, index + 1)
+        for index, chapter in enumerate(chapters)
+    }
+    evidence: list[dict[str, object]] = []
+    for source_chapter in chapters[:stop_index + 1]:
+        source_sequence = int(source_chapter.get("sequence") or source_chapter.get("number") or 0)
+        evidence.append({
+            "chapter": labels.get(source_sequence, f"Chapter {source_sequence}"),
+            "sourceSequence": source_sequence,
+            "title": strip_markdown_heading(source_chapter.get("title")),
+            "keyPoints": source_chapter.get("keyPoints", []),
+            "keyPointDetails": source_chapter.get("keyPointDetails", []),
+            "endingState": source_chapter.get("endingState", []),
+            "questions": source_chapter.get("questionDetails") or source_chapter.get("newQuestions", []),
+            "dossiers": chapter_dossier_payloads(pipeline, source_sequence),
+        })
+    return evidence
 
 
 def run_cumulative_context_pipeline(book_id: str, chapter_sequence: int | None = None) -> None:
@@ -7686,14 +8805,7 @@ def run_cumulative_context_pipeline(book_id: str, chapter_sequence: int | None =
         stage.update({"status": "blocked", "dependsOn": dependencies, "detail": "Waiting for chapter summaries and chunk dossiers."})
         write_pipeline(book, pipeline)
         return
-    settings = load_settings()
-    available = ollama_status()
-    models = available["models"] if available["running"] else []
-    model = effective_primary_model(models, settings)
-    if not model:
-        stage.update({"status": "blocked", "setupRequired": True, "detail": "Assign or install the primary reader before building cumulative context."})
-        write_pipeline(book, pipeline)
-        return
+    model = "Bookinator deterministic ledger"
     cancel_event = PIPELINE_CANCEL_EVENTS.setdefault(book_id, threading.Event())
     chapters = [chapter for chapter in pipeline.get("chapters", []) if strip_markdown_heading(chapter.get("title")).casefold() != "front matter"]
     authored_numbers = {
@@ -7704,8 +8816,9 @@ def run_cumulative_context_pipeline(book_id: str, chapter_sequence: int | None =
         int(chapter.get("sequence") or chapter.get("number") or index + 1): authored_chapter_label(chapter, index + 1)
         for index, chapter in enumerate(chapters)
     }
-    stage.update({"status": "running", "model": model, "startedAt": stage.get("startedAt") or utc_now(), "dependsOn": dependencies, "detail": "Building evidence-linked story memory chapter by chapter; rebasing every five chapters."})
-    pipeline.update({"status": "running", "phase": "cumulative-context", "message": "Building cumulative manuscript context…", "updatedAt": utc_now()})
+    stage.update({"status": "running", "model": model, "startedAt": stage.get("startedAt") or utc_now(), "dependsOn": dependencies, "detail": "Indexing evidence-linked story memory chapter by chapter."})
+    stage.pop("setupRequired", None)
+    pipeline.update({"status": "running", "phase": "cumulative-context", "message": "Indexing cumulative manuscript context…", "updatedAt": utc_now()})
     write_pipeline(book, pipeline)
     try:
         for index, chapter in enumerate(chapters):
@@ -7721,28 +8834,11 @@ def run_cumulative_context_pipeline(book_id: str, chapter_sequence: int | None =
                     stage.update({"status": "pending", "dependsOn": dependencies, "detail": f"Chapter {authored_number} context is waiting for its summary and chunk dossiers."})
                     write_pipeline(book, pipeline)
                 continue
-            rebased = (index + 1) % CUMULATIVE_CONTEXT_REBASE_INTERVAL == 0
-            window_start = max(0, index - CUMULATIVE_CONTEXT_REBASE_INTERVAL + 1) if rebased else index
-            base_index = window_start - 1
-            previous = read_json_artifact(cumulative_context_path(book, int(chapters[base_index].get("sequence") or base_index + 1))).get("context", {}) if base_index >= 0 else {}
-            evidence = []
-            for source_chapter in chapters[window_start:index + 1]:
-                source_sequence = int(source_chapter.get("sequence") or source_chapter.get("number") or 0)
-                evidence.append({
-                    "chapter": authored_labels.get(source_sequence, f"Chapter {authored_numbers.get(source_sequence, source_sequence)}"),
-                    "sourceSequence": source_sequence,
-                    "title": strip_markdown_heading(source_chapter.get("title")),
-                    "summary": source_chapter.get("summary"),
-                    "keyPoints": source_chapter.get("keyPoints", []),
-                    "endingState": source_chapter.get("endingState", []),
-                    "questions": source_chapter.get("questionDetails") or source_chapter.get("newQuestions", []),
-                    "dossiers": chapter_dossier_payloads(pipeline, source_sequence),
-                })
-            if not rebased and index > 0:
-                previous_sequence = int(chapters[index - 1].get("sequence") or index)
-                previous = read_json_artifact(cumulative_context_path(book, previous_sequence)).get("context", {})
+            rebased = False
+            previous: dict[str, object] = {}
+            evidence = cumulative_context_evidence(pipeline, chapters, index)
             authored_label = authored_labels.get(sequence, f"Chapter {authored_number}")
-            signature = llm_review_input_signature({"version": CUMULATIVE_CONTEXT_PROMPT_VERSION, "base": previous, "evidence": evidence, "rebased": rebased, "authoredLabel": authored_label})
+            signature = llm_review_input_signature({"version": CUMULATIVE_CONTEXT_PROMPT_VERSION, "evidence": evidence, "authoredLabel": authored_label})
             existing = read_json_artifact(cumulative_context_path(book, sequence))
             if existing.get("inputSignature") == signature and existing.get("status") == "complete":
                 saved_context = existing.get("context") if isinstance(existing.get("context"), dict) else {}
@@ -7752,7 +8848,7 @@ def run_cumulative_context_pipeline(book_id: str, chapter_sequence: int | None =
             started = time.monotonic()
             chapter.update({"contextStatus": "running", "contextStartedAt": started_at})
             write_pipeline(book, pipeline)
-            artifact = {"schema": CUMULATIVE_CONTEXT_PROMPT_VERSION, "status": "running", "chapterSequence": sequence, "throughChapter": authored_label, "rebased": rebased, "rebaseInterval": CUMULATIVE_CONTEXT_REBASE_INTERVAL, "model": model, "startedAt": started_at, "inputSignature": signature, "input": {"previousContext": previous, "chapterEvidence": evidence, "authoredChapter": authored_label, "rebased": rebased}, "previousRuns": list(existing.get("previousRuns") or []) if isinstance(existing.get("previousRuns"), list) else []}
+            artifact = {"schema": CUMULATIVE_CONTEXT_PROMPT_VERSION, "status": "running", "chapterSequence": sequence, "throughChapter": authored_label, "rebased": False, "model": model, "startedAt": started_at, "inputSignature": signature, "input": {"chapterEvidence": evidence, "authoredChapter": authored_label, "generator": "deterministic-evidence-ledger"}, "previousRuns": list(existing.get("previousRuns") or []) if isinstance(existing.get("previousRuns"), list) else []}
             write_json_artifact(cumulative_context_path(book, sequence), artifact)
             context = build_cumulative_context(previous=previous, evidence=evidence, through_chapter=authored_label, model=model, rebased=rebased, cancel_event=cancel_event, run_key=book_id)
             completed_at = utc_now()
@@ -7762,7 +8858,7 @@ def run_cumulative_context_pipeline(book_id: str, chapter_sequence: int | None =
             write_pipeline(book, pipeline)
         completed = sum(chapter.get("contextStatus") == "complete" for chapter in chapters)
         if completed == len(chapters):
-            stage.update({"status": "complete", "model": model, "completedAt": utc_now(), "detail": f"Saved {len(chapters)} cumulative checkpoints; rebased every {CUMULATIVE_CONTEXT_REBASE_INTERVAL} chapters."})
+            stage.update({"status": "complete", "model": model, "completedAt": utc_now(), "detail": f"Saved {len(chapters)} deterministic cumulative checkpoints."})
             pipeline.update({"status": "complete", "phase": "complete", "message": "Cumulative manuscript context is ready.", "updatedAt": utc_now()})
         else:
             stage.update({"status": "pending", "model": model, "detail": f"Saved {completed} of {len(chapters)} cumulative checkpoints."})
@@ -7870,6 +8966,121 @@ def llm_editorial_adjudication_schema() -> dict[str, object]:
     }
 
 
+def context_for_review(context: dict[str, object], max_characters: int = 24_000) -> dict[str, object]:
+    """Build conservative model memory from source-linked records, not summaries.
+
+    Prose chapter summaries are useful navigation but unsafe recursive input: a
+    fluent mistake can become inherited story truth. The reader receives only
+    compact records with exact source provenance, balanced by kind and age.
+    """
+    if not context:
+        return {}
+    records = context.get("records") if isinstance(context.get("records"), list) else []
+    if not records:
+        return {"schema": CUMULATIVE_CONTEXT_PROMPT_VERSION, "throughChapter": context.get("throughChapter"), "records": [], "selectionNote": "Legacy cumulative prose was excluded because it has no source-linked record boundary."}
+
+    selected: dict[str, object] = {
+        "schema": CUMULATIVE_CONTEXT_PROMPT_VERSION,
+        "throughChapter": context.get("throughChapter"),
+        "records": [],
+        "recordCounts": context.get("recordCounts") or {},
+        "selectionNote": "Chapter summaries are excluded. Every supplied memory record carries a short exact source quotation.",
+    }
+    # Roles, inferred clock time, broad location summaries, and model-authored
+    # promises are disproportionately prone to unsupported elaboration. The
+    # current chapter can establish those afresh; prior memory stays narrower.
+    allowed_kinds = {"ending_state", "fact", "event", "open_thread"}
+    kind_order = ("ending_state", "event", "fact", "open_thread")
+    priority = {kind: index for index, kind in enumerate(kind_order)}
+    active = sorted(
+        (item for item in records if isinstance(item, dict) and item.get("status") == "active" and item.get("kind") in allowed_kinds),
+        key=lambda item: (int(item.get("chaptersAgo") or 0), priority.get(str(item.get("kind") or ""), 99)),
+    )
+    buckets: dict[str, list[dict[str, object]]] = {}
+    duplicate_count = 0
+    unsupported_count = 0
+    seen_claims: set[str] = set()
+    seen_evidence: set[str] = set()
+    for item in active:
+        kind = str(item.get("kind") or "other")
+        claim_key = normalize_lexical_key(item.get("claim") or item.get("question") or item.get("text") or item.get("id") or "")
+        provenance = item.get("provenance") if isinstance(item.get("provenance"), list) else []
+        source = next((entry for entry in reversed(provenance) if isinstance(entry, dict) and str(entry.get("evidence") or "").strip()), None)
+        anchor = source.get("evidenceAnchor") if isinstance(source, dict) and isinstance(source.get("evidenceAnchor"), dict) else {}
+        try:
+            match_score = float(anchor.get("matchScore") or 0)
+        except (TypeError, ValueError):
+            match_score = 0.0
+        exact = str(anchor.get("matchMethod") or "").casefold() == "exact" or match_score >= .98
+        if not source or not exact:
+            unsupported_count += 1
+            continue
+        if claim_key and claim_key in seen_claims:
+            duplicate_count += 1
+            continue
+        seen_claims.add(claim_key)
+        evidence_key = normalize_lexical_key(source.get("evidence"))
+        if kind != "open_thread" and evidence_key and evidence_key in seen_evidence:
+            duplicate_count += 1
+            continue
+        if kind != "open_thread" and evidence_key:
+            seen_evidence.add(evidence_key)
+        compact = {
+            "kind": kind,
+            "claim": str(item.get("claim") or "").strip(),
+            "subject": str(item.get("subject") or "").strip(),
+            "chapter": str(source.get("chapter") or item.get("lastConfirmedChapter") or ""),
+            "chaptersAgo": int(item.get("chaptersAgo") or 0),
+            "evidence": str(source.get("evidence") or "").strip()[:600],
+        }
+        buckets.setdefault(kind, []).append(compact)
+
+    # Preserve both immediate continuity and older orientation. Pure recency
+    # would let a verbose chapter crowd the beginning of a book entirely out
+    # of memory; keeping everything makes the prompt repetitive and brittle.
+    kind_limits = {"ending_state": 8, "event": 12, "fact": 16, "open_thread": 12}
+    for kind, items in list(buckets.items()):
+        limit = kind_limits.get(kind, 12)
+        if len(items) <= limit:
+            continue
+        recent_count = max(1, limit // 2)
+        recent = items[:recent_count]
+        older = items[recent_count:]
+        older_slots = limit - len(recent)
+        sampled = [older[min(len(older) - 1, int(index * len(older) / older_slots))] for index in range(older_slots)]
+        buckets[kind] = recent + sampled
+
+    indices = {kind: 0 for kind in buckets}
+    schedule = list(kind_order) + sorted(kind for kind in buckets if kind not in kind_order)
+    while any(indices[kind] < len(items) for kind, items in buckets.items()):
+        made_progress = False
+        for kind in schedule:
+            items = buckets.get(kind, [])
+            index = indices.get(kind, 0)
+            if index >= len(items):
+                continue
+            item = items[index]
+            indices[kind] = index + 1
+            made_progress = True
+            candidate = {**selected, "records": [*selected["records"], item]}
+            if len(json.dumps(candidate, ensure_ascii=False)) <= max_characters:
+                selected["records"].append(item)
+        if not made_progress:
+            break
+    def finalize_selection_metadata() -> None:
+        selected["selectedRecordCount"] = len(selected["records"])
+        selected["selectedRecordCounts"] = dict(Counter(str(item.get("kind") or "other") for item in selected["records"]))
+        selected["duplicateRecordCount"] = duplicate_count
+        selected["unsupportedRecordCount"] = unsupported_count
+        selected["omittedRecordCount"] = max(0, len(active) - duplicate_count - unsupported_count - len(selected["records"]))
+
+    finalize_selection_metadata()
+    while selected["records"] and len(json.dumps(selected, ensure_ascii=False)) > max_characters:
+        selected["records"].pop()
+        finalize_selection_metadata()
+    return selected
+
+
 def build_llm_review_packet(book: dict[str, object], pipeline: dict[str, object], chapter: dict[str, object], source: dict[str, object], prior_context: dict[str, object]) -> dict[str, object]:
     sequence = int(chapter.get("sequence") or chapter.get("number") or 0)
     authored_chapters = [
@@ -7885,7 +9096,7 @@ def build_llm_review_packet(book: dict[str, object], pipeline: dict[str, object]
         "schema": "bookinator-editorial-context-packet-v3",
         "book": {"title": book.get("title"), "author": book.get("author")},
         "chapter": {"number": authored_number, "authoredLabel": authored_chapter_label(chapter, authored_number), "sourceSequence": sequence, "title": source.get("title"), "chapterTitle": source.get("chapterTitle"), "pageStart": source.get("pageStart"), "pageEnd": source.get("pageEnd"), "text": source.get("text")},
-        "priorContext": prior_context,
+        "priorContext": context_for_review(prior_context),
         "specialistLens": {"id": specialist_id, "description": specialist_description},
     }
     packet["inputSignature"] = llm_review_input_signature({"version": LLM_REVIEW_PROMPT_VERSION, **packet})
@@ -7900,7 +9111,7 @@ def run_llm_review_structured_step(
     failures: list[dict[str, object]] = []
     for attempt in range(1, max(1, attempts) + 1):
         try:
-            result, _ = run_structured_model(prompt, model, schema, cancel_event, run_key)
+            result, _ = run_structured_model(prompt, model, schema, cancel_event, run_key, activity=step)
             if failures and trace is not None:
                 trace.setdefault("recoveredFailures", []).extend(failures)
             return result
@@ -7957,9 +9168,32 @@ def normalize_assessment_evidence(chapter_text: str, values: object, limit: int 
     return normalized
 
 
+def deterministic_review_defect(candidate: dict[str, object], local_before: str, local_continuation: str) -> dict[str, str] | None:
+    """Catch narrow proposal mistakes that do not require another model opinion."""
+    quote = str(candidate.get("quote") or "")
+    proposal_text = " ".join(str(candidate.get(field) or "") for field in ("comment", "reader_effect", "intentionality_check", "revision_goal")).casefold()
+    observation_window = f"{local_before[-240:]} {quote}"
+    if re.search(r"\b(?:viewpoint|point of view|pov|omniscien|interior(?:ity| thought)|inside (?:his|her|their) (?:head|mind))\b", proposal_text):
+        if re.search(r"\bI\s+(?:saw|see|noticed|notice|heard|hear|watched|watch|observed|observe)\b", observation_window, re.I):
+            return {
+                "proposal_defect": "factually_mistaken",
+                "reason": "The passage explicitly frames the detail as the first-person narrator's direct observation, not access to another character's interior state.",
+            }
+    if "?" in quote and re.search(r"\b(?:unanswered|answer|explain|clarif|continuity|confus|missing information|not addressed)\b", proposal_text):
+        continuation = local_continuation.strip()
+        if continuation and (re.search(r"\b(?:said|replied|answered|responded|returned|asked)\b", continuation[:700], re.I) or re.search(r"[\"“‘]", continuation[:300])):
+            return {
+                "proposal_defect": "resolved_in_local_continuation",
+                "reason": "The anchor is a character's spoken question and the nearby continuation immediately engages it; the question itself is not a continuity failure.",
+            }
+    return None
+
+
 def review_context_packet(
     packet: dict[str, object], model: str, cancel_event: threading.Event, run_key: str,
     trace: dict[str, object] | None = None,
+    precomputed_editorial: dict[str, object] | None = None,
+    precomputed_assessment: dict[str, object] | None = None,
 ) -> dict[str, object]:
     rubric = {
         "narrative_engagement": "moment-to-moment interest and desire to continue",
@@ -7980,11 +9214,12 @@ def review_context_packet(
         "book": packet.get("book"),
         "chapter": chapter_metadata,
     }
-    # Budget each section independently. A long chapter must never crowd the
-    # prior-story state or its evidence out of the actual model request.
-    prior_context_json = json.dumps(packet.get("priorContext") or {}, ensure_ascii=False)[:30_000]
+    # Context has already been selected at whole-record boundaries. Never slice
+    # serialized JSON: doing so used to hide late fields and could hand the
+    # reader a syntactically incomplete memory once a book grew past 30k chars.
+    prior_context_json = json.dumps(packet.get("priorContext") or {}, ensure_ascii=False)
     chapter_identity_json = json.dumps(chapter_identity, ensure_ascii=False)[:8_000]
-    current_chapter_text = chapter_text[:68_000]
+    current_chapter_text = chapter_text if precomputed_editorial is not None else chapter_text[:68_000]
     shared_inputs = f"""Prior cumulative story state:
 {prior_context_json}
 
@@ -8018,6 +9253,8 @@ Return a proposal only when all of these are true:
 
 Do not restate deterministic Smells unless their narrative consequence matters. Do not report generic advice, plot summary, mild stylistic preference, or a concern already resolved by the supplied context. A strength is allowed only when it teaches the author something specific worth preserving. When uncertain, omit the proposal.
 
+Preserve the manuscript's epistemic and causal boundaries in proposals, verdict_basis, and strengths. Observation is not diagnosis; sequence or proximity is not causation; a tense scene does not make every arriving person an external threat; and a character's reaction is not evidence of concealed conflict when the local text gives another explanation. Do not say a detail proves, validates, confirms, causes, diagnoses, or threatens unless the current source or prior context explicitly establishes that relation. State warranted interpretations as interpretations, not facts.
+
 Distinguish present-scene clarity from intentionally withheld story knowledge. A reader may understand what is happening, what a character experiences, and why the moment matters while not yet knowing the concealed cause, identity, mechanism, cure, or final explanation. Do not propose that a Gothic, mystery, suspense, or revelation-driven manuscript answer such a live question early merely because the answer is not yet available. Only flag withholding when the present action itself becomes incoherent, the text contradicts what the reader already knows, or the delay creates a concrete reader-facing cost worth discussing.
 
 {shared_inputs}
@@ -8031,9 +9268,11 @@ First decide whether each dimension meaningfully applies to this chapter. When i
 
 For saleability, discuss audience clarity, genre promise, positioning, accessibility, and revision readiness. Never predict sales, invent market data, or treat conventionality as quality. Likability means reader investment, including compellingly difficult characters. Relatability means emotional intelligibility, not demographic similarity.
 
+Preserve the manuscript's epistemic and causal boundaries in every rationale, strength, and risk. Observation is not diagnosis; sequence or proximity is not causation; a tense scene does not make every arriving person a threat; and a reaction does not prove hidden conflict when nearby text supplies another explanation. Do not say a detail proves, validates, confirms, causes, diagnoses, or threatens unless the supplied source explicitly establishes that relation. Label interpretation as interpretation.
+
 {shared_inputs}
 """
-    editorial_result = run_llm_review_structured_step("editorial review", editorial_prompt, model, llm_editorial_schema(), cancel_event, run_key, trace)
+    editorial_result = precomputed_editorial or run_llm_review_structured_step("editorial review", editorial_prompt, model, llm_editorial_schema(), cancel_event, run_key, trace)
     if trace is not None:
         trace["editorial"] = editorial_result
     raw_candidates = []
@@ -8059,16 +9298,23 @@ For saleability, discuss audience clarity, genre promise, positioning, accessibi
             break
 
     adjudication = {"decisions": []}
+    deterministic_defects: dict[int, dict[str, str]] = {}
     if raw_candidates:
         skeptical_candidates = []
         for candidate in raw_candidates:
             start = int(candidate["character_start"])
             end = int(candidate["character_end"])
+            local_before = chapter_text[max(0, start - 1200):start]
+            local_continuation = chapter_text[end:min(len(chapter_text), end + 1200)]
+            gate = deterministic_review_defect(candidate, local_before, local_continuation)
+            if gate:
+                deterministic_defects[int(candidate["candidate_number"])] = gate
             skeptical_candidates.append({
                 **candidate,
-                "local_before": chapter_text[max(0, start - 1200):start],
+                "local_before": local_before,
                 "anchored_passage": chapter_text[start:end],
-                "local_continuation": chapter_text[end:min(len(chapter_text), end + 1200)],
+                "local_continuation": local_continuation,
+                "deterministic_check": gate or {"proposal_defect": "none"},
             })
         adjudication_prompt = f"""Be a fair senior editor calibrating another model's proposed annotations. Preserve useful uncertainty instead of forcing every candidate into a yes/no decision.
 
@@ -8081,6 +9327,8 @@ For significant or soft, set concrete_source_problem=true and use source_observa
 
 Before assigning a verdict, read both local_before and local_continuation. Set already_answered_nearby=true when either side supplies the clarification, recognition, causal bridge, or explanation the proposal requests. In that case verdict must be reject. Use proposal_defect=resolved_in_local_lead_in when the answer precedes the anchor, or resolved_in_local_continuation when it follows. A proposal cannot be significant merely because its isolated anchor looks confusing after the model ignores nearby setup or a deliberately timed answer.
 
+Two calibration examples are rules, not optional suggestions. "I saw her glance toward him" reports visible behavior through first-person observation; it is not omniscient viewpoint drift or access to her thoughts. A character asking a question is not itself a continuity defect; read the following dialogue, and reject the proposal when the scene immediately engages or answers that question. If deterministic_check names one of these defects, verdict must be reject with that defect.
+
 For each candidate, explicitly decide whether it concerns withheld_information, whether the present_scene_comprehensible without that answer, and whether the withholding_is_functional for mystery, suspense, dread, viewpoint limitation, or a later revelation. When all three are true, reject with proposal_defect=misreads_deliberate_technique. Asking the author to explain a concealed cause, supernatural mechanism, diagnosis, identity, or protection rule before the story chooses to reveal it is not a clarity repair when the immediate action and reader effect remain legible. A real tradeoff in pacing, trust, or emotional access may still be soft—but name that concrete cost instead of treating unanswered information itself as the defect.
 
 Consult the prior story state's open_threads and reader_promises. If the candidate merely demands an answer to an uncertainty the manuscript is actively carrying, reject it as misreads_deliberate_technique unless the present scene cannot be understood without the answer.
@@ -8090,7 +9338,7 @@ For every decision choose one proposal_defect. Use none only for significant or 
 Subjectivity or uncertainty alone is not grounds for rejection; use soft. Deliberate technique is grounds for rejection only when the candidate has misunderstood that technique rather than identified a real tradeoff. Do not improve or replace weak candidates. It is acceptable for every candidate to be significant, soft, or rejected, but explain the actual evidence for each decision.
 
 Prior story state:
-{prior_context_json[:20_000]}
+{prior_context_json}
 
 Current chapter identity:
 {chapter_identity_json}
@@ -8101,7 +9349,7 @@ Candidates with local source context:
         adjudication = run_llm_review_structured_step("skeptical adjudication", adjudication_prompt, model, llm_editorial_adjudication_schema(), cancel_event, run_key, trace)
         if trace is not None:
             trace["adjudication"] = adjudication
-    assessment_result = run_llm_review_structured_step("chapter assessment", assessment_prompt, model, llm_assessment_schema(), cancel_event, run_key, trace)
+    assessment_result = precomputed_assessment or run_llm_review_structured_step("chapter assessment", assessment_prompt, model, llm_assessment_schema(), cancel_event, run_key, trace)
     if trace is not None:
         trace["assessment"] = assessment_result
     dimensions = {}
@@ -8130,7 +9378,15 @@ Candidates with local source context:
         decision = decisions.get(int(item["candidate_number"]), {})
         verdict = str(decision.get("verdict") or "soft")
         concrete_source_problem = decision.get("concrete_source_problem")
-        if (
+        deterministic_defect = deterministic_defects.get(int(item["candidate_number"]))
+        if deterministic_defect:
+            verdict = "reject"
+            decision = {
+                **decision,
+                **deterministic_defect,
+                "concrete_source_problem": False,
+            }
+        if not deterministic_defect and (
             bool(decision.get("withheld_information"))
             and bool(decision.get("present_scene_comprehensible"))
             and bool(decision.get("withholding_is_functional"))
@@ -8231,6 +9487,811 @@ Candidates with local source context:
     }
 
 
+def chapter_reading_schema(include_review: bool) -> dict[str, object]:
+    cast_entry = {
+        "type": "object",
+        "properties": {
+            "entity_id": {"type": "string", "minLength": 1},
+            "canonical_name": {"type": "string", "minLength": 1},
+            "aliases": {"type": "array", "items": {"type": "string"}},
+            "role": {"type": "string", "minLength": 1},
+            "evidence_ref": source_evidence_ref_schema(),
+        },
+        "required": ["entity_id", "canonical_name", "aliases", "role", "evidence_ref"],
+    }
+    properties: dict[str, object] = {
+        "cast": {"type": "array", "items": cast_entry},
+        "action_audit": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "passage_id": {"type": "string", "minLength": 1},
+                    "verdict": {"type": "string", "enum": ["material_action", "background_or_description"]},
+                    "actor_entity_id": {"type": "string"},
+                    "literal_action": {"type": "string", "minLength": 1},
+                    "resulting_state": {"type": "string", "minLength": 1},
+                    "epistemic_status": {"type": "string", "minLength": 1},
+                    "reason": {"type": "string", "minLength": 1},
+                    "evidence_ref": source_evidence_ref_schema(),
+                },
+                "required": [
+                    "passage_id", "verdict", "actor_entity_id", "literal_action",
+                    "resulting_state", "epistemic_status", "reason", "evidence_ref",
+                ],
+            },
+        },
+        "summary": chapter_summary_schema(),
+        "dossier": chapter_dossier_schema(),
+    }
+    required = ["cast", "action_audit", "summary", "dossier"]
+    if include_review:
+        properties.update({"editorial": llm_editorial_schema(), "assessment": llm_assessment_schema()})
+        required.extend(("editorial", "assessment"))
+    return {"type": "object", "properties": properties, "required": required}
+
+
+def normalize_chapter_reading_cast(value: object, source_text: str) -> list[dict[str, object]]:
+    """Canonicalize the model's identity ledger and discard unsupported entries."""
+    if not isinstance(value, list):
+        return []
+    cast: list[dict[str, object]] = []
+    used_ids: set[str] = set()
+    used_aliases: dict[str, str] = {}
+    for index, item in enumerate(value, 1):
+        if not isinstance(item, dict):
+            continue
+        canonical_name = re.sub(r"\s+", " ", str(item.get("canonical_name") or "")).strip()
+        role = re.sub(r"\s+", " ", str(item.get("role") or "")).strip()
+        anchor = resolve_source_evidence(source_text, item.get("evidence_ref"))
+        if not canonical_name or not role or not anchor:
+            continue
+        requested_id = re.sub(r"[^a-z0-9_-]+", "-", str(item.get("entity_id") or "").casefold()).strip("-")
+        entity_id = requested_id or f"entity-{index}"
+        if entity_id in used_ids:
+            suffix = 2
+            while f"{entity_id}-{suffix}" in used_ids:
+                suffix += 1
+            entity_id = f"{entity_id}-{suffix}"
+        aliases = [canonical_name]
+        for alias in item.get("aliases", []) if isinstance(item.get("aliases"), list) else []:
+            cleaned = re.sub(r"\s+", " ", str(alias or "")).strip()
+            if cleaned and cleaned.casefold() not in {known.casefold() for known in aliases}:
+                aliases.append(cleaned)
+        unique_aliases: list[str] = []
+        for alias in aliases:
+            alias_key = re.sub(r"[^a-z0-9]+", " ", alias.casefold()).strip()
+            if not alias_key or (alias_key in used_aliases and used_aliases[alias_key] != entity_id):
+                continue
+            used_aliases[alias_key] = entity_id
+            unique_aliases.append(alias)
+        used_ids.add(entity_id)
+        cast.append({
+            "entityId": entity_id,
+            "canonicalName": canonical_name,
+            "aliases": unique_aliases,
+            "role": role,
+            "evidence": anchor["quote"],
+            "evidenceAnchor": anchor,
+        })
+    return cast
+
+
+def chapter_reading_consistency_candidates(raw: dict[str, object], source_text: str) -> list[dict[str, object]]:
+    """Build a compact, source-local audit packet rather than rereading the chapter."""
+    candidates: list[dict[str, object]] = []
+    for index, item in enumerate(raw.get("cast", []) if isinstance(raw.get("cast"), list) else []):
+        if not isinstance(item, dict):
+            continue
+        anchor = resolve_source_evidence(source_text, item.get("evidence_ref"))
+        if not anchor:
+            continue
+        aliases = ", ".join(str(alias) for alias in item.get("aliases", []) if str(alias).strip())
+        candidates.append({
+            "candidateId": f"cast:{index}",
+            "path": "cast",
+            "subject": str(item.get("entity_id") or ""),
+            "claim": f"{item.get('canonical_name')}: {item.get('role')}" + (f"; aliases: {aliases}" if aliases else ""),
+            "evidence": anchor["quote"],
+            "characterStart": int(anchor["characterStart"]),
+            "characterEnd": int(anchor["characterEnd"]),
+        })
+    collections = [
+        ("summary.key_points", raw.get("summary", {}).get("key_points") if isinstance(raw.get("summary"), dict) else []),
+        ("summary.ending_state", raw.get("summary", {}).get("ending_state") if isinstance(raw.get("summary"), dict) else []),
+    ]
+    collections.extend(
+        (f"dossier.{field}", raw.get("dossier", {}).get(field) if isinstance(raw.get("dossier"), dict) else [])
+        for field in ("facts", "events", "entities", "locations", "current_times", "promises", "timeline_observations")
+    )
+    collections.append((
+        "editorial.editorial_proposals",
+        raw.get("editorial", {}).get("editorial_proposals") if isinstance(raw.get("editorial"), dict) else [],
+    ))
+    for path, values in collections:
+        for index, item in enumerate(values if isinstance(values, list) else []):
+            if not isinstance(item, dict):
+                continue
+            evidence_value = item.get("evidence_ref") or ({"quote": item.get("quote")} if item.get("quote") else None)
+            anchor = resolve_source_evidence(source_text, evidence_value)
+            if not anchor:
+                continue
+            candidates.append({
+                "candidateId": f"{path}:{index}",
+                "path": path,
+                "subject": str(item.get("subject") or ""),
+                "claim": str(item.get("claim") or item.get("fact") or item.get("comment") or ""),
+                "evidence": anchor["quote"],
+                "characterStart": int(anchor["characterStart"]),
+                "characterEnd": int(anchor["characterEnd"]),
+            })
+    assessment = raw.get("assessment") if isinstance(raw.get("assessment"), dict) else {}
+    dimensions = assessment.get("dimensions") if isinstance(assessment.get("dimensions"), dict) else {}
+    for dimension, item in dimensions.items():
+        if not isinstance(item, dict):
+            continue
+        anchor = next((
+            resolve_source_evidence(source_text, {"quote": evidence})
+            for evidence in item.get("evidence", []) if str(evidence).strip()
+            if resolve_source_evidence(source_text, {"quote": evidence})
+        ), None) if isinstance(item.get("evidence"), list) else None
+        if not anchor:
+            continue
+        candidates.append({
+            "candidateId": f"assessment.dimensions:{dimension}",
+            "path": "assessment.dimensions",
+            "subject": str(dimension),
+            "claim": str(item.get("rationale") or ""),
+            "evidence": anchor["quote"],
+            "characterStart": int(anchor["characterStart"]),
+            "characterEnd": int(anchor["characterEnd"]),
+        })
+    return candidates
+
+
+def chapter_action_coverage_gaps(raw: dict[str, object], source_text: str) -> list[dict[str, object]]:
+    """Find audited material actions absent from Summary or Dossier evidence."""
+    represented: dict[str, set[str]] = {"summary_key_point": set(), "dossier_event": set()}
+    owners = (
+        ("summary_key_point", raw.get("summary", {}).get("key_points") if isinstance(raw.get("summary"), dict) else []),
+        ("dossier_event", raw.get("dossier", {}).get("events") if isinstance(raw.get("dossier"), dict) else []),
+    )
+    for target, values in owners:
+        for item in values if isinstance(values, list) else []:
+            if not isinstance(item, dict):
+                continue
+            anchor = resolve_source_evidence(source_text, item.get("evidence_ref"))
+            if anchor and anchor.get("passageId"):
+                represented[target].add(str(anchor["passageId"]))
+
+    gaps: list[dict[str, object]] = []
+    for action in raw.get("action_audit", []) if isinstance(raw.get("action_audit"), list) else []:
+        if not isinstance(action, dict) or action.get("verdict") != "material_action":
+            continue
+        anchor = resolve_source_evidence(source_text, action.get("evidence_ref"))
+        passage_id = str(action.get("passage_id") or (anchor or {}).get("passageId") or "")
+        if not anchor or not passage_id:
+            continue
+        for target in ("summary_key_point", "dossier_event"):
+            if passage_id not in represented[target]:
+                gaps.append({
+                    "passage_id": passage_id,
+                    "target": target,
+                    "audited_actor": str(action.get("actor_entity_id") or ""),
+                    "audited_action": str(action.get("literal_action") or ""),
+                    "audited_resulting_state": str(action.get("resulting_state") or ""),
+                    "epistemic_status": str(action.get("epistemic_status") or ""),
+                    "evidence_ref": {
+                        "passage_id": anchor["passageId"], "quote": anchor["quote"],
+                        "character_start": anchor["characterStart"], "character_end": anchor["characterEnd"],
+                    },
+                })
+    return gaps
+
+
+def identity_sensitive_source_excerpts(source_text: str, cast: list[dict[str, object]]) -> list[str]:
+    """Expose compact source passages where names and relationship labels coexist.
+
+    These are deliberately source-derived rather than model-derived. They give
+    the verifier a chance to notice constructions such as "Millarca joined my
+    ward", which prove that two labels cannot name the same participant.
+    """
+    relationship = re.compile(
+        r"\b(?:ward|daughter|son|child|niece|nephew|mother|father|sister|brother|wife|husband|friend|companion|chaperon(?:e)?)\b",
+        re.I,
+    )
+    names = {
+        str(value).strip()
+        for item in cast
+        for value in (item.get("canonicalName"), *(item.get("aliases") or []))
+        if len(str(value).strip()) >= 3
+    }
+    paragraphs = [re.sub(r"\s+", " ", part).strip() for part in re.split(r"\n\s*\n", source_text) if part.strip()]
+    excerpts: list[str] = []
+    for paragraph in paragraphs:
+        mentioned = [name for name in names if re.search(rf"\b{re.escape(name)}\b", paragraph, re.I)]
+        if relationship.search(paragraph) and mentioned:
+            excerpts.append(paragraph[:1800])
+        elif len(mentioned) >= 2:
+            excerpts.append(paragraph[:1800])
+        if len(excerpts) >= 16:
+            break
+    return excerpts
+
+
+def chapter_reading_consistency_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "corrected_summary": {"type": "string"},
+            "corrected_dossier_synopsis": {"type": "string"},
+            "cast_corrections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_id": {"type": "string", "minLength": 1},
+                        "canonical_name": {"type": "string", "minLength": 1},
+                        "aliases": {"type": "array", "items": {"type": "string"}},
+                        "role": {"type": "string", "minLength": 1},
+                        "evidence_ref": source_evidence_ref_schema(),
+                        "reason": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["candidate_id", "canonical_name", "aliases", "role", "evidence_ref", "reason"],
+                },
+            },
+            "decisions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_id": {"type": "string", "minLength": 1},
+                        "verdict": {"type": "string", "enum": ["keep", "reject"]},
+                        "reason": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["candidate_id", "verdict", "reason"],
+                },
+            },
+            "coverage_decisions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "passage_id": {"type": "string", "minLength": 1},
+                        "target": {"type": "string", "enum": ["summary_key_point", "dossier_event"]},
+                        "verdict": {"type": "string", "enum": ["add", "omit_as_immaterial"]},
+                        "claim": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "evidence_ref": source_evidence_ref_schema(),
+                        "reason": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["passage_id", "target", "verdict", "claim", "subject", "evidence_ref", "reason"],
+                },
+            },
+            "issues": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["corrected_summary", "corrected_dossier_synopsis", "cast_corrections", "decisions", "coverage_decisions", "issues"],
+    }
+
+
+EPISTEMIC_SOURCE_MARKER = re.compile(
+    r"\b(?:as\s+i\s+(?:thought|supposed|believed)|seem(?:ed|s)?|appear(?:ed|s)?|"
+    r"apparently|perhaps|possibly|probably|may|might|could|i\s+(?:thought|supposed|believed))\b",
+    re.I,
+)
+EPISTEMIC_CLAIM_MARKER = re.compile(
+    r"\b(?:thought|supposed|believed|perceived|seem(?:ed|s)?|appear(?:ed|s)?|"
+    r"apparently|perhaps|possibly|probably|may|might|could|according\s+to)\b",
+    re.I,
+)
+
+
+def preserves_epistemic_boundary(claim: object, quotation: object) -> bool:
+    """Do not let a repair silently turn perception or uncertainty into fact."""
+    source = str(quotation or "")
+    return not EPISTEMIC_SOURCE_MARKER.search(source) or bool(EPISTEMIC_CLAIM_MARKER.search(str(claim or "")))
+
+
+def apply_chapter_reading_consistency(
+    raw: dict[str, object], audit: dict[str, object], candidate_ids: set[str],
+    coverage_gaps: list[dict[str, object]] | None = None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Apply only explicit, addressable audit decisions; retain everything else."""
+    cleaned = copy.deepcopy(raw)
+    cast_corrections: list[dict[str, str]] = []
+    cast_values = cleaned.get("cast") if isinstance(cleaned.get("cast"), list) else []
+    for correction in audit.get("cast_corrections", []) if isinstance(audit.get("cast_corrections"), list) else []:
+        if not isinstance(correction, dict):
+            continue
+        candidate_id = str(correction.get("candidate_id") or "")
+        path, _, index_value = candidate_id.rpartition(":")
+        if candidate_id not in candidate_ids or path != "cast" or not index_value.isdigit():
+            continue
+        index = int(index_value)
+        if index >= len(cast_values) or not isinstance(cast_values[index], dict):
+            continue
+        updated = dict(cast_values[index])
+        updated.update({
+            "canonical_name": str(correction.get("canonical_name") or "").strip(),
+            "aliases": [str(item).strip() for item in correction.get("aliases", []) if str(item).strip()],
+            "role": str(correction.get("role") or "").strip(),
+            "evidence_ref": correction.get("evidence_ref"),
+        })
+        cast_values[index] = updated
+        cast_corrections.append({
+            "candidateId": candidate_id,
+            "canonicalName": updated["canonical_name"],
+            "role": updated["role"],
+            "reason": str(correction.get("reason") or "").strip(),
+        })
+    rejected: dict[str, str] = {}
+    decisions: list[dict[str, str]] = []
+    for decision in audit.get("decisions", []) if isinstance(audit.get("decisions"), list) else []:
+        if not isinstance(decision, dict):
+            continue
+        candidate_id = str(decision.get("candidate_id") or "")
+        verdict = str(decision.get("verdict") or "").casefold()
+        reason = str(decision.get("reason") or "").strip()
+        if candidate_id not in candidate_ids or verdict not in {"keep", "reject"}:
+            continue
+        decisions.append({"candidateId": candidate_id, "verdict": verdict, "reason": reason})
+        if verdict == "reject":
+            rejected[candidate_id] = reason
+    grouped: dict[str, set[int]] = {}
+    for candidate_id in rejected:
+        path, _, index_value = candidate_id.rpartition(":")
+        if index_value.isdigit():
+            grouped.setdefault(path, set()).add(int(index_value))
+        elif path == "assessment.dimensions":
+            assessment = cleaned.get("assessment") if isinstance(cleaned.get("assessment"), dict) else {}
+            dimensions = assessment.get("dimensions") if isinstance(assessment.get("dimensions"), dict) else {}
+            if index_value in dimensions:
+                dimensions[index_value] = {
+                    "applicable": False,
+                    "score": 0,
+                    "confidence": "low",
+                    "rationale": "Withheld because the identity and boundary audit found a source conflict.",
+                    "evidence": [],
+                }
+    for path, indices in grouped.items():
+        owner: object = cleaned
+        parts = path.split(".")
+        for part in parts[:-1]:
+            owner = owner.get(part) if isinstance(owner, dict) else None
+        values = owner.get(parts[-1]) if isinstance(owner, dict) else None
+        if isinstance(values, list):
+            owner[parts[-1]] = [item for index, item in enumerate(values) if index not in indices]
+    summary = cleaned.get("summary") if isinstance(cleaned.get("summary"), dict) else None
+    corrected_summary = str(audit.get("corrected_summary") or "").strip()
+    if summary is not None and corrected_summary:
+        summary["summary"] = corrected_summary
+    dossier = cleaned.get("dossier") if isinstance(cleaned.get("dossier"), dict) else None
+    corrected_synopsis = str(audit.get("corrected_dossier_synopsis") or "").strip()
+    if dossier is not None and corrected_synopsis:
+        dossier["synopsis"] = corrected_synopsis
+    allowed_gaps = {
+        (str(item.get("passage_id") or ""), str(item.get("target") or "")): item
+        for item in (coverage_gaps or []) if isinstance(item, dict)
+    }
+    coverage_decisions: list[dict[str, object]] = []
+    coverage_additions = 0
+    unsafe_coverage_additions = 0
+    for decision in audit.get("coverage_decisions", []) if isinstance(audit.get("coverage_decisions"), list) else []:
+        if not isinstance(decision, dict):
+            continue
+        passage_id = str(decision.get("passage_id") or "")
+        target = str(decision.get("target") or "")
+        verdict = str(decision.get("verdict") or "")
+        gap = allowed_gaps.get((passage_id, target))
+        if not gap or verdict not in {"add", "omit_as_immaterial"}:
+            continue
+        record = {
+            "passageId": passage_id, "target": target, "verdict": verdict,
+            "reason": str(decision.get("reason") or "").strip(),
+        }
+        if verdict == "add":
+            claim = str(decision.get("claim") or "").strip()
+            subject = str(decision.get("subject") or "").strip()
+            evidence = gap.get("evidence_ref") if isinstance(gap.get("evidence_ref"), dict) else {}
+            if not claim or not subject or not preserves_epistemic_boundary(claim, evidence.get("quote")):
+                record["verdict"] = "rejected_unsafe_addition"
+                unsafe_coverage_additions += 1
+            else:
+                addition = {"claim": claim, "subject": subject, "evidence_ref": copy.deepcopy(evidence)}
+                if target == "summary_key_point" and summary is not None:
+                    summary.setdefault("key_points", []).append(addition)
+                    coverage_additions += 1
+                elif target == "dossier_event" and dossier is not None:
+                    dossier.setdefault("events", []).append(addition)
+                    coverage_additions += 1
+        coverage_decisions.append(record)
+    report = {
+        "schema": CHAPTER_READING_CONSISTENCY_VERSION,
+        "issues": [str(item).strip() for item in audit.get("issues", []) if str(item).strip()] if isinstance(audit.get("issues"), list) else [],
+        "decisions": decisions,
+        "rejectedCandidateCount": len(rejected),
+        "castCorrections": cast_corrections,
+        "castCorrectionCount": len(cast_corrections),
+        "coverageDecisions": coverage_decisions,
+        "coverageAdditionCount": coverage_additions,
+        "unsafeCoverageAdditionCount": unsafe_coverage_additions,
+    }
+    return cleaned, report
+
+
+def replace_cast_ids_with_names(raw: dict[str, object], cast: list[dict[str, object]]) -> dict[str, object]:
+    """Keep stable IDs inside the model contract but expose readable subjects downstream."""
+    cleaned = copy.deepcopy(raw)
+    names = {
+        str(item.get("entityId") or ""): str(item.get("canonicalName") or "")
+        for item in cast if item.get("entityId") and item.get("canonicalName")
+    }
+    for owner_name in ("summary", "dossier"):
+        owner = cleaned.get(owner_name)
+        if not isinstance(owner, dict):
+            continue
+        for values in owner.values():
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if isinstance(item, dict) and str(item.get("subject") or "") in names:
+                    item["subject"] = names[str(item["subject"])]
+    return cleaned
+
+
+def audit_chapter_reading_consistency(
+    raw: dict[str, object], cast: list[dict[str, object]], source_text: str, model: str,
+    cancel_event: threading.Event, run_key: str, trace: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object], list[dict[str, object]]]:
+    candidates = chapter_reading_consistency_candidates(raw, source_text)
+    coverage_gaps = chapter_action_coverage_gaps(raw, source_text)
+    summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+    dossier = raw.get("dossier") if isinstance(raw.get("dossier"), dict) else {}
+    prompt = f"""Audit this chapter reading for IDENTITY, CLAIM/EVIDENCE ENTAILMENT, and CHAPTER-BOUNDARY consistency. This is a short verification pass, not another chapter analysis.
+
+THE CANONICAL SOURCE IS THE ONLY IDENTITY AUTHORITY. The proposed cast is a hypothesis to audit, not a fact source. Correct a cast entry when its canonical name, aliases, role, or relationship conflicts with the source. In particular, if a sentence places a named person alongside "my ward", "her daughter", or another description, those labels identify different participants unless the source explicitly says otherwise. Preserve an entity_id when correcting its label or role.
+
+For every non-cast candidate, ask whether the cited evidence and its local source actually entail the claim. An exact quotation proves location, not truth. Reject a claim when it changes the grammatical actor or object; invents a role or relationship; upgrades proximity or sequence into causation; supplies a location, clock time, chronology, number, polarity, motive, or diagnosis the source does not establish; or states an incorrect chapter-ending condition. For example, a father standing near a carriage is not necessarily its driver, "by this time" does not establish daytime, and a conversation does not by itself establish friendship or guardianship.
+
+KEEP IS THE DEFAULT only when the claim is genuinely supported. Do not reject for style, harmless incompleteness, or a qualified interpretation that the cited passage reasonably supports. A name and its true alias are one participant; two separately introduced or co-present people remain distinct. Do not delete a plausible cast alias merely because it is absent from this chapter; correct it only when this chapter's source conflicts with it.
+
+Review every ACTION COVERAGE GAP exactly once. Use add only when that exact action is materially necessary in the named target; otherwise use omit_as_immaterial. An addition must preserve the grammatical actor, literal action, resulting state, and epistemic status. Perception, uncertainty, reported belief, and phrases such as "as I thought" are facts about the observer—not permission to turn the perceived event into objective fact. Copy the supplied exact evidence_ref. Return an empty claim and subject for an omission.
+
+Before auditing individual candidates, compare CURRENT SUMMARY and CURRENT DOSSIER SYNOPSIS with the final 20 percent of CANONICAL SOURCE. They must include the last material action, revelation, arrival, departure, decision, or change actually reached by the chapter. If either stops early, return a minimally corrected replacement even when no individual candidate is rejected. This boundary check is mandatory.
+
+Return cast_corrections ONLY for cast entries that need correction, using exact source evidence. Return decisions ONLY for other candidates that must be rejected; omit keep decisions. Return an empty corrected_summary or corrected_dossier_synopsis when that prose is already sound. When either contains a rejected factual assertion, identity error, or boundary error, return a minimally corrected version that removes it without adding facts.
+
+CAST LEDGER
+{json.dumps(cast, ensure_ascii=False)}
+
+CANDIDATES WITH EXACT QUOTES AND CANONICAL OFFSETS
+{json.dumps(candidates, ensure_ascii=False)}
+
+ACTION COVERAGE GAPS
+{json.dumps(coverage_gaps, ensure_ascii=False)}
+
+CURRENT SUMMARY
+{str(summary.get('summary') or '')}
+
+CURRENT DOSSIER SYNOPSIS
+{str(dossier.get('synopsis') or '')}
+
+CANONICAL SOURCE — supplied once; use candidate offsets to inspect local context
+{source_text}
+"""
+    audit = run_llm_review_structured_step(
+        "chapter reading consistency", prompt, model, chapter_reading_consistency_schema(),
+        cancel_event, run_key, trace, attempts=2,
+    )
+    trace["result"] = audit
+    cleaned, report = apply_chapter_reading_consistency(
+        raw, audit, {str(item["candidateId"]) for item in candidates}, coverage_gaps,
+    )
+    verified_cast = normalize_chapter_reading_cast(cleaned.get("cast"), source_text)
+    return replace_cast_ids_with_names(cleaned, verified_cast), report, verified_cast
+
+
+def chapter_reading_prompt(
+    book: dict[str, object], chapter: dict[str, object], source: dict[str, object],
+    prior_context: dict[str, object], include_review: bool,
+    specialist_signals: dict[str, object] | None = None,
+) -> str:
+    """Ask the primary reader to create every semantic view during one read."""
+    text = str(source.get("text") or "")
+    action_passages = [] if is_front_matter(chapter) else chapter_action_passages(text)
+    identity_candidates = specialist_signals.get("identityCandidates", []) if isinstance(specialist_signals, dict) else []
+    front_matter = is_front_matter(chapter)
+    material_guidance = front_matter_analysis_guidance("summary and dossier") if front_matter else "This is narrative manuscript material."
+    review_instructions = ""
+    if include_review:
+        specialist_index = max(0, int(chapter.get("sequence") or chapter.get("number") or 1) - 1) % len(LLM_REVIEW_SPECIALIST_LENSES)
+        specialist_id, specialist_description = LLM_REVIEW_SPECIALIST_LENSES[specialist_index]
+        review_instructions = f"""
+EDITORIAL AND ASSESSMENT VIEW
+Act as a rigorous first reader whose output is a proposal for a human, never a reviewer decision. NO ISSUE IS THE DEFAULT. Return at most three editorial proposals, and only when an exact source passage supports a material reader effect, context and deliberate technique do not already explain it, confidence is at least 0.75, and a professional editor would probably interrupt the author. Put praise only in strengths. The specialist lens is {specialist_id}: {specialist_description}.
+
+If there are no proposals, editorial_verdict must be no_material_concerns and editorial_summary exactly "No material editorial concerns found." Otherwise use material_concerns_found and state the number and nature directly. Every proposal must contain its passage ID, printed offsets, exact copied quotation, reader effect, intentionality check, and concrete revision goal.
+
+Assess all ten rubric dimensions using their schema. Mark a dimension applicable=false with score 0 when it genuinely does not apply; otherwise score 1-5. Evidence must be one to three short verbatim quotations, not passage IDs or paraphrase. Likability means reader investment rather than moral goodness. Relatability means emotional intelligibility. Saleability concerns audience clarity, positioning, accessibility, and readiness—not predicted sales.
+"""
+    return f"""Read this canonical manuscript chapter ONCE and return all requested editorial views in one JSON object. The nested cast, summary, dossier, editorial, and assessment objects are different projections of the same reading, not separate passes. Actually fill every requested field; never narrate or promise that you will follow the instructions.
+
+IDENTITY LEDGER — DO THIS FIRST
+- Before writing any other field, build cast for every person, creature, organization, or identity-sensitive entity used by the other views.
+- Give each one a short stable entity_id, its canonical_name, every name or description that refers to the SAME entity, its role in this chapter, and exact evidence_ref.
+- Do not borrow a nearby proper name for an unnamed person. If the text calls someone only "the General's ward," keep that descriptive canonical name until the text itself identifies them.
+- A name and its alias are one entity, never two participants. Conversely, two people introduced separately remain two entities even when they occupy similar roles.
+- When a summary or dossier claim concerns a cast member, put that entity_id in the claim's subject field. The prose may use the canonical name, but must preserve the ledger's identity distinctions.
+- Audit every supplied GLiNER identity candidate as a fallible attention signal. It proves only that an exact source span resembled a requested label; it does not establish canonical identity, role, relationship, action, or story fact.
+
+SOURCE DISCIPLINE
+- The canonical text is authoritative. Copy exact evidence quotations and the supplied passage ID and printed character offsets. Bookinator will triangulate them.
+- Preserve grammatical actors: "my father" belongs to the narrator, not the nearest named character.
+- Observation is not diagnosis; proximity or sequence is not causation; reaction is not proof; unease is not hostility. Use qualified language for inference.
+- Never assert no, not, never, or without unless the cited words establish that polarity.
+- Intentionally withheld story knowledge is not present-scene confusion when the action and reader effect remain legible.
+- Preserve epistemic qualifiers everywhere they travel. "As I thought," "seemed," "perhaps," reported belief, dreams, and perceptions describe the observer's knowledge; never flatten them into objective fact in Summary, Dossier, Editorial, or Assessment.
+
+ACTION RECALL AUDIT
+- Audit every supplied action passage exactly once in action_audit. The deterministic selector is a fallible attention aid; a cue word is not proof of a material action.
+- For a material action, record its grammatical actor, literal action, resulting state, and epistemic status. For background or description, say why it is not a material action.
+- Then cross-check Summary and Dossier against the completed audit. Material actions may be omitted only deliberately; they must not silently disappear or be replaced by a contradictory generic paraphrase.
+
+SUMMARY VIEW
+Write a compact 2-4 paragraph digest covering the chapter's complete movement, especially its final material turn. Every factual summary assertion must have an equivalent evidence-linked key_points claim. ending_state records the literal boundary state of important people, objects, places, and unresolved actions. Questions must name a concrete choice, causal bridge, concealed knowledge, relationship change, thematic pressure, reader expectation, setup, or continuity issue earned here; do not manufacture generic prompts or repeat answered questions.
+
+DOSSIER VIEW
+Build an evidence-preserving ledger of facts, events, entities, locations, current scene times, promises, and timeline observations. A character promise requires an actual commitment; a story promise requires a concrete setup or withheld answer. Keep current scene time distinct from remembered events and chronology. The synopsis follows the same source discipline. Dossier questions use the same specificity standard as summary questions.
+{review_instructions}
+MATERIAL GUIDANCE
+{material_guidance}
+
+BOOK AND PRIOR READER KNOWLEDGE
+{json.dumps({"title": book.get("title"), "author": book.get("author"), "priorContext": prior_context}, ensure_ascii=False)}
+
+PRIOR-CONTEXT SAFETY
+Prior reader knowledge is fallible orientation, never source authority. The canonical chapter text overrides it. Do not copy an identity, relationship, causality, or chapter-boundary claim from prior context unless this chapter independently supports using it. When prior context and the chapter disagree, follow the chapter and preserve the disagreement for the human rather than harmonizing them.
+
+CHAPTER
+{json.dumps({key: source.get(key) for key in ("sequence", "title", "chapterTitle", "sectionMarkers", "pageStart", "pageEnd", "sourcePagination")}, ensure_ascii=False)}
+
+DETERMINISTIC ACTION-PASSAGE CANDIDATES
+{json.dumps(action_passages, ensure_ascii=False)}
+
+GLINER IDENTITY CANDIDATES
+{json.dumps(identity_candidates, ensure_ascii=False)}
+
+CANONICAL SOURCE PASSAGES
+{evidence_passage_prompt(text)}
+"""
+
+
+def prior_context_for_chapter(
+    book: dict[str, object], pipeline: dict[str, object], chapters: list[dict[str, object]],
+    chapter_index: int, cancel_event: threading.Event,
+) -> dict[str, object]:
+    if chapter_index <= 0:
+        return {}
+    previous = chapters[chapter_index - 1]
+    previous_sequence = int(previous.get("sequence") or previous.get("number") or chapter_index)
+    artifact = read_json_artifact(cumulative_context_path(book, previous_sequence))
+    if artifact.get("schema") == CUMULATIVE_CONTEXT_PROMPT_VERSION and isinstance(artifact.get("context"), dict):
+        return artifact["context"]
+    evidence = cumulative_context_evidence(pipeline, chapters, chapter_index - 1)
+    return build_cumulative_context(
+        previous={}, evidence=evidence,
+        through_chapter=authored_chapter_label(previous, chapter_index),
+        model="", rebased=False, cancel_event=cancel_event, run_key=str(book.get("id") or ""),
+    )
+
+
+def run_chapter_reading_pipeline(book_id: str, chapter_sequence: int, include_review: bool | None = None) -> None:
+    """Produce Summary, Dossier, and optional first-reader analysis from one model read."""
+    book = find_book(book_id)
+    if not book:
+        return
+    pipeline = add_pipeline_progress(load_pipeline(book))
+    ensure_llm_review_stages(book, pipeline)
+    stages = {stage["id"]: stage for stage in pipeline.get("stages", [])}
+    chapters = list(pipeline.get("chapters", []))
+    chapter_index = next((index for index, item in enumerate(chapters) if int(item.get("sequence") or item.get("number") or 0) == chapter_sequence), -1)
+    if chapter_index < 0:
+        return
+    chapter = chapters[chapter_index]
+    source = load_chapter_source(book, chapter_sequence)
+    if not source:
+        raise ValueError(f"Canonical source for chapter {chapter_sequence} is missing.")
+    text = str(source.get("text") or "")
+    cancel_event = PIPELINE_CANCEL_EVENTS.setdefault(book_id, threading.Event())
+    settings = load_settings()
+    available = ollama_status()
+    models = available["models"] if available["running"] else []
+    model = effective_primary_model(models, settings)
+    if not model:
+        raise ValueError("Assign or install the primary reader before starting Chapter Reading.")
+    include_review = bool(book.get("llmReviewEnabled")) if include_review is None else bool(include_review)
+    include_review = include_review and strip_markdown_heading(chapter.get("title")).casefold() != "front matter"
+    review_chapters = [item for item in chapters if strip_markdown_heading(item.get("title")).casefold() != "front matter"]
+    review_index = review_chapters.index(chapter) if chapter in review_chapters else -1
+    prior_context = prior_context_for_chapter(book, pipeline, review_chapters, review_index, cancel_event) if include_review else {}
+    packet = build_llm_review_packet(book, pipeline, chapter, source, prior_context) if include_review else {}
+    # The deterministic ledger is deliberately exhaustive; the reader gets
+    # the balanced, record-safe selection already prepared for LLM Review.
+    # Feeding the raw ledger here would erase much of the single-read speedup.
+    reading_context = packet.get("priorContext") if include_review and isinstance(packet.get("priorContext"), dict) else {}
+    specialist_signals = read_json_artifact(gliner_signals_path(book, chapter_sequence))
+    if not is_front_matter(chapter) and specialist_signals.get("status") != "complete":
+        raise ValueError("Run the visible GLiNER signals step before Chapter Reading.")
+    prompt = chapter_reading_prompt(book, chapter, source, reading_context, include_review, specialist_signals)
+    signature = llm_review_input_signature({
+        "version": CHAPTER_READING_PROMPT_VERSION, "model": model,
+        "chapter": {key: source.get(key) for key in ("sequence", "title", "chapterTitle")},
+        "source": text, "priorContext": reading_context, "includeReview": include_review,
+        "glinerSignals": specialist_signals.get("identityCandidates", []),
+    })
+    started_at = utc_now()
+    started = time.monotonic()
+    chapter.update({
+        "status": "running", "llmReviewStatus": "running" if include_review else chapter.get("llmReviewStatus"),
+        "chapterReadingStatus": "running", "chapterReadingStartedAt": started_at,
+        "chapterReadingModel": model, "chapterReadingInputSignature": signature,
+    })
+    chunks = [item for item in pipeline.get("chunks", []) if int(item.get("chapterSequence") or 0) == chapter_sequence]
+    for chunk in chunks:
+        chunk.update({"dossierStatus": "running", "dossierModel": model, "dossierStartedAt": started_at})
+    for stage_id in ("summaries", "dossiers", "llm-review"):
+        if stage_id == "llm-review" and not include_review:
+            continue
+        stages[stage_id].update({"status": "running", "model": model, "startedAt": stages[stage_id].get("startedAt") or started_at, "detail": f"Chapter Reading is producing the {stage_id.replace('-', ' ')} view."})
+    pipeline.update({"status": "running", "phase": "chapter-reading", "message": f"Reading {chapter.get('title') or source.get('title')} once for Summary, Dossier, and LLM Review…", "workerPid": os.getpid(), "updatedAt": utc_now()})
+    write_pipeline(book, pipeline)
+    artifact = {
+        "schema": CHAPTER_READING_PROMPT_VERSION, "status": "running", "chapterSequence": chapter_sequence,
+        "model": model, "startedAt": started_at, "inputSignature": signature,
+        "input": {"book": {"title": book.get("title"), "author": book.get("author")}, "chapter": source, "priorContext": reading_context, "includeReview": include_review, "glinerSignals": specialist_signals},
+    }
+    write_json_artifact(chapter_reading_path(book, chapter_sequence), artifact)
+    try:
+        primary_raw = run_llm_review_structured_step(
+            "chapter reading", prompt, model, chapter_reading_schema(include_review),
+            cancel_event, book_id, artifact, attempts=2,
+        )
+        primary_duration = round(time.monotonic() - started, 1)
+        cast = normalize_chapter_reading_cast(primary_raw.get("cast"), text)
+        chapter["chapterReadingPhase"] = "consistency"
+        pipeline.update({
+            "phase": "chapter-reading-consistency",
+            "message": f"Checking identities and the ending of {chapter.get('title') or source.get('title')}…",
+            "updatedAt": utc_now(),
+        })
+        artifact.update({"phase": "consistency", "primaryDurationSeconds": primary_duration, "primaryResponse": primary_raw})
+        write_json_artifact(chapter_reading_path(book, chapter_sequence), artifact)
+        write_pipeline(book, pipeline)
+        consistency_trace: dict[str, object] = {}
+        raw, consistency_report, cast = audit_chapter_reading_consistency(
+            primary_raw, cast, text, model, cancel_event, book_id, consistency_trace,
+        )
+        summary = normalize_chapter_summary(raw.get("summary") if isinstance(raw.get("summary"), dict) else {}, text)
+        summary.setdefault("questionDetails", [])
+        summary.setdefault("endingState", [])
+        summary["promptVersion"] = SUMMARY_PROMPT_VERSION
+        if is_front_matter(chapter):
+            summary.update({"newQuestions": [], "questionDetails": [], "endingState": [], "analysisMode": "front-matter-structural"})
+        else:
+            summary["endingCoverage"] = chapter_summary_ending_coverage(summary.get("summary"), summary, text)
+        dossier_source = {
+            **source, "text": text,
+            "chapterLabel": chapter.get("title") or source.get("title"),
+            "chapterTitle": chapter.get("chapterTitle") or source.get("chapterTitle"),
+        }
+        dossier = analyze_chunk_dossier(
+            dossier_source, model, cancel_event, book_id, canonical_chapter_text=text,
+            precomputed_result=raw.get("dossier") if isinstance(raw.get("dossier"), dict) else {},
+        )
+        completed_at = utc_now()
+        duration = round(time.monotonic() - started, 1)
+        chapter.update(summary)
+        chapter.update({
+            "status": "complete", "completedAt": completed_at, "durationSeconds": 0.0,
+            "model": model, "chapterReadingStatus": "complete", "chapterReadingCompletedAt": completed_at,
+            "chapterReadingDurationSeconds": duration, "chapterReadingPromptVersion": CHAPTER_READING_PROMPT_VERSION,
+            "chapterReadingPhase": "complete", "chapterReadingCast": cast, "chapterReadingConsistency": consistency_report,
+        })
+        for chunk_index, chunk in enumerate(chunks):
+            chunk_artifact = read_json_artifact(chunk_artifacts_path(book) / f"{int(chunk.get('sequence') or chunk_index + 1):04d}.json")
+            shared = {
+                "dossierStatus": "complete", "dossierModel": model, "dossierCompletedAt": completed_at,
+                "dossierDurationSeconds": 0.0, "chapterReadingDurationSeconds": duration,
+                "chapterReadingInputSignature": signature,
+            }
+            if chunk_index == 0:
+                shared["dossier"] = dossier
+            else:
+                shared["dossierCoveredByChapterReading"] = int(chunks[0].get("sequence") or 0) if chunks else 0
+                chunk_artifact.pop("dossier", None)
+                chunk.pop("dossier", None)
+            chunk.update(shared)
+            chunk_artifact.update(shared)
+            write_chunk_artifact(book, int(chunk.get("sequence") or chunk_index + 1), chunk_artifact)
+        review_result: dict[str, object] = {}
+        if include_review:
+            packet["inputSignature"] = signature
+            write_json_artifact(llm_review_packet_path(book, chapter_sequence), packet)
+            review_trace: dict[str, object] = {"chapterReading": raw, "chapterReadingConsistency": consistency_trace}
+            review_result = review_context_packet(
+                packet, model, cancel_event, book_id, review_trace,
+                precomputed_editorial=raw.get("editorial") if isinstance(raw.get("editorial"), dict) else {},
+                precomputed_assessment=raw.get("assessment") if isinstance(raw.get("assessment"), dict) else {},
+            )
+            review_artifact = {
+                "schema": LLM_REVIEW_PROMPT_VERSION, "sourceSchema": CHAPTER_READING_PROMPT_VERSION,
+                "status": "complete", "chapterSequence": chapter_sequence, "model": model,
+                "startedAt": started_at, "completedAt": utc_now(), "durationSeconds": 0.0,
+                "chapterReadingDurationSeconds": duration, "inputSignature": signature,
+                "modelOutput": review_trace, "result": review_result,
+            }
+            write_json_artifact(llm_review_result_path(book, chapter_sequence), review_artifact)
+            chapter.update({
+                "llmReviewStatus": "complete", "llmReviewCompletedAt": review_artifact["completedAt"],
+                "llmReviewDurationSeconds": 0.0, "llmReviewSharedDurationSeconds": duration,
+                "llmReviewModel": model, "llmReviewInputSignature": signature, "llmReview": review_result,
+            })
+        total_duration = round(time.monotonic() - started, 1)
+        chapter.update({
+            "chapterReadingPrimaryDurationSeconds": primary_duration,
+            "chapterReadingConsistencyDurationSeconds": round(max(0.0, duration - primary_duration), 1),
+            "chapterReadingDurationSeconds": total_duration,
+        })
+        if include_review:
+            chapter["llmReviewSharedDurationSeconds"] = total_duration
+        for chunk in chunks:
+            chunk["chapterReadingDurationSeconds"] = total_duration
+            chunk_artifact = read_json_artifact(chunk_artifacts_path(book) / f"{int(chunk.get('sequence') or 0):04d}.json")
+            chunk_artifact["chapterReadingDurationSeconds"] = total_duration
+            write_chunk_artifact(book, int(chunk.get("sequence") or 0), chunk_artifact)
+        artifact.update({
+            "status": "complete", "completedAt": utc_now(), "durationSeconds": total_duration,
+            "primaryDurationSeconds": primary_duration,
+            "consistencyDurationSeconds": round(max(0.0, duration - primary_duration), 1),
+            "output": {"primaryResponse": primary_raw, "consistencyAudit": consistency_trace, "acceptedResponse": raw},
+            "normalized": {"cast": cast, "consistency": consistency_report, "summary": summary, "dossier": dossier, **({"review": review_result} if include_review else {})},
+        })
+        write_json_artifact(chapter_reading_path(book, chapter_sequence), artifact)
+        summary_complete = sum(item.get("status") == "complete" for item in chapters)
+        dossier_complete = sum(item.get("dossierStatus") == "complete" for item in pipeline.get("chunks", []))
+        stages["summaries"].update({"status": "complete" if summary_complete == len(chapters) else "pending", "detail": f"Completed {summary_complete} of {len(chapters)} chapter summaries."})
+        stages["dossiers"].update({"status": "complete" if dossier_complete == len(pipeline.get("chunks", [])) else "pending", "detail": f"Completed {dossier_complete} of {len(pipeline.get('chunks', []))} structured dossiers."})
+        if include_review:
+            review_complete = sum(item.get("llmReviewStatus") == "complete" for item in review_chapters)
+            stages["llm-review"].update({"status": "complete" if review_complete == len(review_chapters) else "pending", "detail": f"Saved optional first-reader review for {review_complete} of {len(review_chapters)} chapters."})
+        pipeline.update({"status": "running", "phase": "chapter-complete", "message": f"Chapter Reading saved for {chapter.get('title') or chapter_sequence}; continuing through this book.", "updatedAt": utc_now()})
+    except PipelineCancelled:
+        duration = round(time.monotonic() - started, 1)
+        chapter.update({
+            "status": "pending", "chapterReadingStatus": "pending",
+            "chapterReadingDurationSeconds": duration, "interruptedAt": utc_now(),
+        })
+        if include_review:
+            chapter["llmReviewStatus"] = "pending"
+        for chunk in chunks:
+            chunk.update({"dossierStatus": "pending", "dossierError": "Stopped before completion."})
+        artifact.update({"status": "pending", "interruptedAt": utc_now(), "durationSeconds": duration})
+        write_json_artifact(chapter_reading_path(book, chapter_sequence), artifact)
+        raise
+    except Exception as error:
+        duration = round(time.monotonic() - started, 1)
+        chapter.update({"status": "failed", "chapterReadingStatus": "failed", "chapterReadingCompletedAt": utc_now(), "chapterReadingDurationSeconds": duration, "error": str(error)[:500]})
+        if include_review:
+            chapter.update({"llmReviewStatus": "failed", "llmReviewError": str(error)[:500]})
+        for chunk in chunks:
+            chunk.update({"dossierStatus": "failed", "dossierError": str(error)[:500], "dossierCompletedAt": utc_now()})
+        artifact.update({"status": "failed", "completedAt": utc_now(), "durationSeconds": duration, "error": str(error)[:500]})
+        write_json_artifact(chapter_reading_path(book, chapter_sequence), artifact)
+        raise
+    finally:
+        write_pipeline(book, pipeline)
+
+
 def run_llm_review_pipeline(book_id: str, chapter_sequence: int | None = None) -> None:
     book = find_book(book_id)
     if not book or not book.get("llmReviewEnabled"):
@@ -8270,7 +10331,22 @@ def run_llm_review_pipeline(book_id: str, chapter_sequence: int | None = None) -
             source = load_chapter_source(book, sequence)
             if not source:
                 raise ValueError(f"Canonical source for chapter {sequence} is missing.")
-            prior_context = read_json_artifact(cumulative_context_path(book, int(chapters[index - 1].get("sequence") or index))).get("context", {}) if index else {}
+            prior_context: dict[str, object] = {}
+            if index:
+                previous_sequence = int(chapters[index - 1].get("sequence") or index)
+                prior_artifact = read_json_artifact(cumulative_context_path(book, previous_sequence))
+                if prior_artifact.get("schema") == CUMULATIVE_CONTEXT_PROMPT_VERSION and isinstance(prior_artifact.get("context"), dict):
+                    prior_context = prior_artifact["context"]
+                else:
+                    # A bounded regression may deliberately preserve older
+                    # artifacts. Re-index their saved evidence instantly so a
+                    # new review never consumes the obsolete LLM rewrite.
+                    prior_evidence = cumulative_context_evidence(pipeline, chapters, index - 1)
+                    prior_context = build_cumulative_context(
+                        previous={}, evidence=prior_evidence,
+                        through_chapter=authored_chapter_label(chapters[index - 1], index),
+                        model="", rebased=False, cancel_event=cancel_event, run_key=book_id,
+                    )
             packet = build_llm_review_packet(book, pipeline, chapter, source, prior_context)
             signature = str(packet["inputSignature"])
             existing = read_json_artifact(llm_review_result_path(book, sequence))
@@ -8557,18 +10633,30 @@ def dossier_question_is_specific(value: object) -> bool:
     ))
 
 
+def character_promise_is_supported(evidence: object) -> bool:
+    """Require an actual commitment in the cited words, not a schema-filling guess."""
+    return bool(re.search(
+        r"\b(?:promise(?:d|s)?|swear|swore|vow(?:ed|s)?|pledge(?:d|s)?|shall|will|would|intend(?:ed|s)?\s+to|mean(?:t|s)?\s+to|going\s+to)\b",
+        str(evidence or ""), re.I,
+    ))
+
+
 def analyze_chunk_dossier(
     chunk: dict[str, object], model: str, cancel_event: threading.Event | None = None,
     run_key: str = "", canonical_chapter_text: str = "",
+    precomputed_result: dict[str, object] | None = None,
 ) -> dict[str, object]:
     front_matter = is_front_matter(chunk, "chapterLabel")
     material_guidance = front_matter_analysis_guidance("dossier") if front_matter else "This is narrative manuscript material; apply the dossier fields normally."
-    text = str(chunk.get("text") or "")[:45_000]
+    text = str(chunk.get("text") or "")
+    if precomputed_result is None:
+        text = text[:45_000]
     prompt = f"""Build an evidence-preserving editorial dossier for this manuscript excerpt.
-Return JSON with: synopsis (non-empty string), facts, events, entities, locations, current_times, questions, promises, timeline_observations, and evidence (arrays of strings), plus question_details (an array of objects).
+Return JSON with: synopsis (non-empty string); facts, events, entities, locations, current_times, promises, and timeline_observations (arrays of evidence-linked claim objects); questions (an array of strings); evidence (an array of evidence references); and question_details (an array of objects).
+Every claim object contains claim, subject, and evidence_ref. Copy a short exact source quotation into evidence_ref and use the grammatical actor as subject. If a first-person narrator says "my father," the subject is the narrator's father—not another named character's father. Do not turn a character's speculation into objective fact. Preserve the source's relation strength: observation is not diagnosis; proximity or sequence is not causation; unease is not proof of hostility; an arrival is not an external threat merely because the chapter is tense; and a character's reaction is not hidden conflict when nearby text supplies a benign explanation. Use "suggests" or "the character believes" for warranted inference and reserve cause, source, diagnosis, proves, validates, confirms, threat, and motive for relations the quoted words establish. Apply this discipline to the synopsis as well as the claim arrays. Check negative assertions especially: never write "no," "not," "never," or "without" unless the cited source establishes that polarity. Do not announce that you will follow these instructions or promise to ask questions later; actually fill the evidence-linked form.
 Entities should name people, organizations, creatures, significant objects, and concepts. Locations should separately name every physical place or setting present or explicitly discussed. Current_times should describe when the scene itself occurs, including date, season, time of day, elapsed-story time, or relation to earlier events when stated or strongly supported.
 Timeline_observations should capture temporal evidence that connects this excerpt to events elsewhere: event order, elapsed durations, deadlines, flashbacks, remembered events, simultaneity, contradictions, and uncertainty. Keep these distinct from current_times, which describe the excerpt's present scene.
-Promises must include both explicit commitments made by characters and narrative promises made by the story to its reader: planted questions, withheld identities, foreshadowed disclosures, setups that imply a later payoff, and mysteries the narration invites the reader to expect will be resolved. Begin each promise with "Character promise:" or "Story promise:" and identify the promiser or implied reader agreement when the excerpt supports it.
+Promise objects additionally contain promise_type, exactly "character" or "story". A character promise requires an actual commitment in the quoted source—such as promises, will, shall, vows, or intends—not merely an action the model thinks would be useful. A story promise requires a concrete setup or withheld answer in the source. Identify the promiser or the story/narration as subject.
 Evidence entries must include one supplied passage ID, the printed character start and end, and a short exact quote copied from that passage. These redundant coordinates are triangulated against the canonical source; unanchorable evidence is discarded. Do not invent facts or resolve uncertainty.
 
 Questions must be concrete enough to track later. Include unresolved motivation, causal bridges, concealed knowledge, conflicting goals, relationship consequences, moral or thematic pressure, implied promises, and ambiguities that materially change how the scene can be understood. Every question must name the exact action, revelation, contradiction, image, dialogue, or change that earned it. Reject generic discussion prompts and questions already answered in this excerpt. Do not manufacture questions merely to fill categories.
@@ -8587,11 +10675,9 @@ Chapter title: {chunk.get('chapterTitle') or 'Not stated'}
 Canonical source passages:
 {evidence_passage_prompt(text)}
 """
-    array = {"type": "array", "items": {"type": "string"}}
-    evidence_ref = {"type": "object", "properties": {"passage_id": {"type": "string", "minLength": 1}, "quote": {"type": "string", "minLength": 1}, "character_start": {"type": "integer", "minimum": 0}, "character_end": {"type": "integer", "minimum": 1}}, "required": ["passage_id", "quote", "character_start", "character_end"]}
-    question_detail = {"type": "object", "properties": {"question": {"type": "string", "minLength": 1}, "family": {"type": "string", "enum": list(QUESTION_FAMILIES)}, "evidence": {"type": "string"}, "evidence_ref": evidence_ref, "why_it_matters": {"type": "string"}, "promises_answer": {"type": "boolean"}}, "required": ["question", "family", "evidence", "evidence_ref", "why_it_matters", "promises_answer"]}
-    schema = {"type": "object", "properties": {"synopsis": {"type": "string", "minLength": 1}, "facts": array, "events": array, "entities": array, "locations": array, "current_times": array, "questions": array, "question_details": {"type": "array", "items": question_detail}, "promises": array, "timeline_observations": array, "evidence": {"type": "array", "items": evidence_ref}}, "required": ["synopsis", "facts", "events", "entities", "locations", "current_times", "questions", "question_details", "promises", "timeline_observations", "evidence"]}
-    result, _ = run_structured_model(prompt, model, schema, cancel_event, run_key)
+    result = precomputed_result
+    if result is None:
+        result, _ = run_structured_model(prompt, model, chapter_dossier_schema(), cancel_event, run_key)
     synopsis = str(result.get("synopsis") or "").strip()
     if not synopsis:
         raise ValueError("The model returned a dossier without a synopsis.")
@@ -8614,7 +10700,34 @@ Canonical source passages:
         return chapter_anchor
 
     evidence_anchors = [anchor for item in result.get("evidence", []) if (anchor := canonical_anchor(item))] if isinstance(result.get("evidence"), list) else []
-    normalized = {"synopsis": synopsis, **{key: [str(item).strip() for item in result.get(key, []) if str(item).strip()] if isinstance(result.get(key), list) else [] for key in ("facts", "events", "entities", "locations", "current_times", "questions", "promises", "timeline_observations")}, "evidence": [str(item["quote"]) for item in evidence_anchors], "evidenceAnchors": evidence_anchors}
+    normalized = {"synopsis": synopsis, "questions": [str(item).strip() for item in result.get("questions", []) if str(item).strip()] if isinstance(result.get("questions"), list) else [], "evidence": [str(item["quote"]) for item in evidence_anchors], "evidenceAnchors": evidence_anchors}
+    claim_records: list[dict[str, object]] = []
+    for kind in ("facts", "events", "entities", "locations", "current_times", "promises", "timeline_observations"):
+        values: list[str] = []
+        for item in result.get(kind, []) if isinstance(result.get(kind), list) else []:
+            if isinstance(item, str):
+                # Compatibility with older saved/model fixtures. New schema
+                # responses must use the evidence-linked object form.
+                if item.strip():
+                    values.append(item.strip())
+                continue
+            if not isinstance(item, dict):
+                continue
+            claim = str(normalized_model_field(item, "claim", "fact", "text") or "").strip()
+            subject = str(normalized_model_field(item, "subject", "actor", "entity") or "").strip()
+            anchor = canonical_anchor(normalized_model_field(item, "evidence ref", "evidence_ref", "evidence"))
+            promise_type = str(normalized_model_field(item, "promise type", "promise_type") or "").strip().casefold()
+            if not claim or not subject or not anchor or not claim_polarity_is_supported(claim, anchor.get("quote")) or not claim_relation_is_supported(claim, anchor.get("quote")):
+                continue
+            if kind == "promises" and promise_type == "character" and not character_promise_is_supported(anchor.get("quote")):
+                continue
+            record = {"kind": kind, "claim": claim, "subject": subject, "evidence": anchor["quote"], "evidenceAnchor": anchor}
+            if kind == "promises":
+                record["promiseType"] = promise_type if promise_type in {"character", "story"} else "story"
+            claim_records.append(record)
+            values.append(claim)
+        normalized[kind] = values
+    normalized["claimRecords"] = claim_records
     normalized["questions"] = [item for item in normalized["questions"] if dossier_question_is_specific(item)]
     if "question_details" in result:
         raw_details = {str(item.get("question") or ""): item for item in result.get("question_details", []) if isinstance(item, dict)}
@@ -8881,7 +10994,7 @@ def machine_readiness(ollama: dict[str, object] | None = None) -> dict[str, obje
 
 
 def recommended_roles(memory_gib: float) -> dict[str, str]:
-    primary = "qwen3.5:122b" if memory_gib >= 128 else "qwen3.5:35b" if memory_gib >= 48 else "qwen3.5:9b"
+    primary = "qwen3.5:122b" if memory_gib >= 128 else "qwen3.8:27b" if memory_gib >= 48 else "qwen3.5:9b"
     return {
         "primary": primary,
         "fast": "qwen3.5:9b",
@@ -9391,6 +11504,11 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
             candidate = (DOCS_ROOT / relative).resolve()
             if candidate == DOCS_ROOT.resolve() or DOCS_ROOT.resolve() in candidate.parents:
                 return str(candidate)
+        if route_path == "/commons/@inator/ui" or route_path.startswith("/commons/@inator/ui/"):
+            relative = route_path.removeprefix("/commons/@inator/ui").lstrip("/") or "index.js"
+            candidate = (COMMONS_UI_ROOT / relative).resolve()
+            if candidate.suffix in {".css", ".js"} and COMMONS_UI_ROOT.resolve() in candidate.parents:
+                return str(candidate)
         return super().translate_path(path)
 
     def send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -9432,6 +11550,14 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
             # Workspace polling needs queue truth, not every book record and
             # its embedded cover image. Keep this response deliberately small.
             self.send_json({"pipeline": global_pipeline_state()})
+            return
+        telemetry_match = re.fullmatch(r"/api/books/([A-Za-z0-9_-]{8,80})/model-telemetry", route.path)
+        if telemetry_match:
+            book_id = telemetry_match.group(1)
+            if not find_book(book_id):
+                self.send_json({"error": "Book not found."}, HTTPStatus.NOT_FOUND)
+                return
+            self.send_json({"telemetry": model_response_telemetry(book_id)})
             return
         icon_match = re.fullmatch(r"/api/books/([A-Za-z0-9_-]{8,80})/icon", route.path)
         if icon_match:
@@ -9501,7 +11627,7 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
                 return
             self.send_json({"reviewerSignoff": load_reviewer_signoff(book)})
             return
-        analysis_artifact_match = re.fullmatch(r"/api/books/([A-Za-z0-9_-]{8,80})/analysis/(summary|dossier|emotion|tag|smell|context|llm-review|whole-summary|whole-dossier|whole-llm-review|stage)/([A-Za-z0-9_-]{1,80})/artifact", route.path)
+        analysis_artifact_match = re.fullmatch(r"/api/books/([A-Za-z0-9_-]{8,80})/analysis/(chapter-reading|gliner|summary|dossier|emotion|tag|smell|context|llm-review|whole-summary|whole-dossier|whole-llm-review|stage)/([A-Za-z0-9_-]{1,80})/artifact", route.path)
         if analysis_artifact_match:
             book_id, kind, item_id = analysis_artifact_match.groups()
             book = find_book(book_id)
@@ -9970,7 +12096,7 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
                     for chapter in pipeline.get("chapters", []):
                         if chapter.get("status") == "running":
                             chapter.update({"status": "pending", "interruptedAt": utc_now(), "error": "Stopped before completion. Resume retries this chapter."})
-                        for prefix in ("emotion", "tag", "smell"):
+                        for prefix in ("gliner", "emotion", "tag", "smell"):
                             if chapter.get(f"{prefix}Status") == "running":
                                 chapter.update({f"{prefix}Status": "pending", f"{prefix}Error": "Stopped before completion. Resume retries this chapter."})
                     for chunk in pipeline.get("chunks", []):
@@ -10060,7 +12186,7 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "Choose a valid analysis result to refresh."}, HTTPStatus.BAD_REQUEST)
                 return
             whole_kind = kind in {"whole-summary", "whole-llm-review"}
-            if not book or kind not in {"summary", "dossier", "emotion", "tag", "smell", "context", "llm-review", "whole-summary", "whole-llm-review"} or (not whole_kind and sequence < 1):
+            if not book or kind not in {"gliner", "summary", "dossier", "emotion", "tag", "smell", "context", "llm-review", "whole-summary", "whole-llm-review"} or (not whole_kind and sequence < 1):
                 self.send_json({"error": "That analysis result is not refreshable."}, HTTPStatus.BAD_REQUEST)
                 return
             pipeline = load_pipeline(book)
@@ -10214,18 +12340,30 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
         if stop_match:
             book_id = stop_match.group(1)
             book = find_book(book_id)
-            event = PIPELINE_CANCEL_EVENTS.get(book_id)
+            event = BOOK_PIPELINE_CANCEL_EVENTS.get(book_id) or PIPELINE_CANCEL_EVENTS.get(book_id)
             running = PIPELINE_THREADS.get(book_id)
             if not book or not event or not running or not running.is_alive():
                 self.send_json({"error": "No analysis task is currently running for this book."}, HTTPStatus.CONFLICT)
                 return
             event.set()
             cancel_active_model_response(book_id)
+            # Do not race the worker's final cancellation checkpoint. The old
+            # implementation wrote "paused" immediately; the worker then
+            # overwrote it from stale in-memory state and began another stage.
+            deadline = time.monotonic() + 8.0
+            while time.monotonic() < deadline and pipeline_worker_is_alive(book_id, load_pipeline(book)):
+                time.sleep(0.05)
+            if pipeline_worker_is_alive(book_id, load_pipeline(book)):
+                self.send_json({
+                    "stopping": True, "stopped": False,
+                    "message": "The active response is closing. No later chapter stage will begin.",
+                }, HTTPStatus.ACCEPTED)
+                return
             pipeline = load_pipeline(book)
             for chapter in pipeline.get("chapters", []):
                 if chapter.get("status") == "running":
                     chapter.update({"status": "pending", "interruptedAt": utc_now(), "error": "Stopped before completion. Resume retries this chapter."})
-                for prefix in ("emotion", "tag", "smell"):
+                for prefix in ("gliner", "emotion", "tag", "smell"):
                     if chapter.get(f"{prefix}Status") == "running":
                         chapter.update({f"{prefix}Status": "pending", f"{prefix}Error": "Stopped before completion. Resume retries this chapter."})
                 if chapter.get("contextStatus") == "running":
@@ -10241,7 +12379,12 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
                         write_chunk_artifact(book, int(chunk.get("sequence")), artifact)
                     except (OSError, ValueError, TypeError, json.JSONDecodeError):
                         pass
+            for stage in pipeline.get("stages", []):
+                if stage.get("status") == "running":
+                    stage.update({"status": "pending", "detail": "Stopped safely; Resume retries the interrupted work."})
             pipeline.update({"status": "paused", "phase": "paused", "stopRequested": False, "message": "Reader stopped. Completed chapters are safe; Resume retries the interrupted chapter.", "updatedAt": utc_now()})
+            for key in ("workerPid", "queuedAction"):
+                pipeline.pop(key, None)
             write_pipeline(book, pipeline)
             self.send_json({"stopping": False, "stopped": True, "pipeline": add_pipeline_progress(pipeline)}, HTTPStatus.OK)
             return
@@ -10518,7 +12661,8 @@ def start_background_services() -> threading.Thread:
 
     def wake_pipeline() -> None:
         try:
-            start_global_pipeline()
+            if pipeline_is_enabled():
+                start_global_pipeline()
         except Exception as error:
             print(f"[Bookinator]: Could not restore the analysis queue: {error}", file=sys.stderr)
 

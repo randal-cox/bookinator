@@ -8,6 +8,38 @@ evidence-anchored editorial first pass all serve the same center of gravity:
 giving a human reviewer useful proposals, durable judgment, and an attributable
 author-facing handoff.
 
+### Closeout boundary
+
+Reviewer Tools is now a **closing release candidate**, not an open-ended model
+research program. Package the useful pipeline that exists, document its warts,
+and stop making better Qwen behavior a prerequisite for adopting Commons.
+
+The remaining 0.2.0 release blockers are deliberately narrow:
+
+- Source text, reviewer annotations, accepted/rejected proposals, and saved
+  analysis survive reload, backup, restore, and export without loss or silent
+  reassignment.
+- Queue state is truthful and recoverable: completed work stays complete,
+  interrupted work does not masquerade as running, and a failed component can
+  be inspected and retried without erasing unrelated results.
+- Chapter-map approval cannot outrun unfinished map construction, evidence
+  links resolve to canonical text, and human sign-off remains distinct from
+  model output.
+- One short chaptered smoke book completes on the final code, while the saved
+  Carmilla runs supply the expensive end-to-end and ambiguity evidence. Inspect
+  HTML/PDF output and a collision-safe `.bookinator` restore before tagging the
+  release.
+- Publish a candid known-limitations note covering local runtime, probabilistic
+  omissions and factual slips, taxonomy noise, and the still-experimental
+  structured reader. Keep
+  [`KNOWN-LIMITATIONS-0.2.0.md`](KNOWN-LIMITATIONS-0.2.0.md) current through the
+  release tag.
+
+Do **not** require another complete Carmilla run merely to tune prompts. Tags,
+Smells, Dossiers, summaries, and LLM Review may be uneven while remaining useful
+machine proposals. A defect blocks 0.2.0 only when it breaks data integrity,
+workflow truth, evidence inspection, human judgment, or portable handoff.
+
 Make Bookinator ask specific, editorially useful questions in chapter summaries
 and dossiers, then give a human reviewer the smallest real workflow needed to
 answer the machine back. Questions should identify their editorial family,
@@ -19,8 +51,9 @@ The proto-Reviewer is deliberately narrower than the eventual editing suite:
 read canonical chapter text, select an exact passage, attach a categorized and
 prioritized comment, reopen it later, resolve it, or permanently delete a
 debugging mistake. Keep human judgment visually and structurally distinct from model
-output. Use **Frankenstein** as the first clean-book stress test for both the
-new prompt contract and the annotation anchors.
+output. **Frankenstein** remains a useful broader clean-book stress test for the
+prompt contract and annotation anchors, but another full deep-model run is not a
+0.2.0 release prerequisite.
 
 Close this milestone with deterministic whole-book rollups for **Tags** and
 **Smells**. Tags summarize frequency, strength, family, and chapter coverage;
@@ -42,13 +75,13 @@ follow-through. It should let one capable Bookinator machine produce an
 analysis that authors and editors can inspect and annotate later without local
 models or expensive hardware.
 
-### Carmilla release audit
+### Carmilla audit record
 
 The September 27 full run completed every chapter-scoped pass and all three
 model rollups across the Prologue and sixteen numbered chapters. Its saved
 evidence anchors are healthy: every reported Smell and every rejected LLM
-Review candidate resolves to exact chapter text. The run also exposed the
-remaining release work rather than silently qualifying as a pass:
+Review candidate resolves to exact chapter text. The run exposed the following
+closeout checks and later quality work:
 
 - Questions & Payoffs was interrupted after it entered `running`; retry it and
   verify that both the inference row and overall pipeline settle honestly.
@@ -70,6 +103,11 @@ remaining release work rather than silently qualifying as a pass:
 - Complete the human portion of the release gate: add a real Carmilla
   annotation, sign off as the reviewer, export and inspect HTML and PDF, then
   test a `.bookinator` backup and collision-safe restore.
+
+Re-check interrupted-state recovery, extraction boundaries, and portable
+handoff if they remain reproducible; those are 0.2.0 concerns. Narrative-person
+coverage, skeptical-pass calibration, and further taxonomy quality belong to
+Reanimator unless they prevent evidence inspection or corrupt saved work.
 
 ### Near-term responsiveness and regression loop
 
@@ -148,19 +186,107 @@ human decisions, and exported advice remain separately attributable.
 - Extend the new full-library progress view with per-pass ETA learning and a more detailed inspectable ordering forecast. High, Normal, and Low books auto-run; Shelved books remain browseable but stay out of the automatic queue.
 - Instrument manuscript preparation and chapter-map construction with high-resolution elapsed timing. Preserve sub-second precision (for example, 1.2 ms) in the saved pipeline ledger and timing charts rather than rounding fast structural work to zero.
 
-## Almost urgent: GLiNER Entity Signals
+## Planned 0.3.0 — Common Ground
 
-Do not bury GLiNER inside the later attention-router experiment. Prototype it
-as a useful pipeline in its own right as soon as the Reviewer Tools release gate
-is clean. A fast, source-anchored entity inventory has immediate value even
+Finish Bookinator's conversion to the installable Inator Commons architecture
+before resuming reader research. Replace the temporary neighboring-source
+launcher dependency with versioned public packages and thin product adapters.
+Adopt shared lifecycle, backup, diagnostics, navigation, dialogs, releases,
+help, and machine conventions while keeping manuscript processing, analysis,
+editorial state, and saved-book compatibility owned by Bookinator.
+
+Freeze analysis semantics during this milestone. Common Ground is complete when
+a clean checkout can install, diagnose, launch, stop, back up, and reopen
+Bookinator through supported Commons contracts without a sibling Commons source
+tree. Do not fold GLiNER experiments, prompt changes, or the independent-worker
+refactor into this migration merely because they touch nearby code.
+
+## Planned 0.4.0 — Reanimator: structured chapter reading
+
+Do not promote the experimental combined Chapter Reading pass until it has a
+trustworthy correction boundary. This work no longer blocks Reviewer Tools or
+the Common Ground migration. The Carmilla experiments proved that the
+primary read is broadly useful, but also that a verifier can notice a real
+mistake without repairing the saved Summary or Dossier.
+
+- Make the consistency audit compact, schema-bound, and mechanically
+  actionable. Validate every returned candidate ID against the supplied
+  candidate set; an explanation that discusses one candidate but rejects
+  another is an invalid result, not editorial judgment.
+- When the audit rejects a factual assertion, identity, relationship, action,
+  or chapter-ending claim, require corrected prose or remove the rejected claim
+  deterministically. Never retain a known-bad assertion because the model left
+  `corrected_summary` blank.
+- Give the verifier source-linked prior facts as prior evidence. Absence from
+  the current chapter is not evidence that an already-established role or
+  relationship is false. Preserve provenance and allow explicit supersession.
+- Block unsupported upstream claims before they enter cumulative Context. A
+  claim whose attached quotation contradicts it must not become durable story
+  memory merely because the quotation itself exists.
+- Retain the three-way skeptical-review outcome, but calibrate it against real
+  human judgments. Four consecutive chapters with no material concerns is a
+  warning signal, not proof of exceptional prose.
+
+### Semantic-fork checkpoint before the road-trip pause
+
+The Carmilla experiments proved that Ollama can reuse a byte-identical chapter
+prefix across focused requests: later branches reused roughly 98% of a 27K-token
+prompt. Keep that architecture, but do not promote the experimental runner into
+the production pipeline yet. Prefix reuse reduces repeated reading; it does not
+make excessive output cheap.
+
+- Resolve the GLiNER cast separately, then audit only ambiguous identities and
+  aliases. Generic descriptions such as “Madame” and “the young lady” are not
+  durable aliases when more than one character can satisfy them.
+- Rank action passages by multi-action structure, actor changes, state changes,
+  causality, and epistemic qualifiers. Audit them in small cached batches so one
+  malformed response cannot discard a whole chapter.
+- Keep Summary and Dossier selective. Dossier is durable later-chapter memory,
+  not an exhaustive transcript: cap the number of consequential facts, events,
+  entities, promises, questions, and chronology records before prompting.
+- Run deterministic validation first: exact quotation and offset resolution,
+  alias collisions, missing high-risk action audits, unsupported polarity or
+  relation language, exact assessment evidence, and required rubric dimensions.
+  Invoke semantic reconciliation only for the resulting concrete issues.
+- Reconciliation returns surgical claim replacements, never rewritten essays or
+  hidden deliberation. Preserve its findings separately until deterministic
+  application and provenance are proven.
+- Do not use a low `num_predict` ceiling to control cost for structured output;
+  it can truncate otherwise valid JSON. Bound work by input selection and schema
+  cardinality. If a user explicitly requests a wall-clock ceiling, retain partial
+  diagnostics and mark the component budget-exceeded without invalidating other
+  completed components.
+- Component failures are isolated and inspectable. Summary, Dossier, editorial,
+  and assessment branches may continue after one focused branch fails; the
+  chapter finishes “with attention” rather than losing every usable result.
+- The next experiment remains an isolated, apples-to-apples Carmilla Chapter II
+  run. Do not launch it automatically during the road-trip pause, and do not let
+  the ordinary pipeline UI imply that an isolated experiment is production work.
+
+## Planned 0.4.0 — Reanimator: GLiNER2.5 Chapter Signals
+
+Do not bury GLiNER inside the attention-router experiment. Resume it after the
+Common Ground migration as a useful pipeline in its own right. A fast,
+source-anchored entity inventory has immediate value even
 before Qwen consumes it, and it can become common evidence for dossiers,
 Connections, continuity, character work, questions, and LLM Review.
 
-- Start with Apache-2.0 `urchade/gliner_small-v2.1` for English manuscripts and
-  bake it off against `gliner_medium-v2.1`. Prefer the small model if entity
-  recall is acceptably close; the point of this pass is cheap, early evidence.
-  Evaluate the supported ONNX CPU path on Apple Silicon as well as ordinary
-  PyTorch before choosing the runtime.
+- Start with Apache-2.0 `fastino/gliner2.5-small-v1` (74M parameters) for
+  English manuscripts and bake it off against
+  `fastino/gliner2.5-base-v1` (194M). GLiNER2.5 can combine entities,
+  classifications, structured records, relations, span attributes, and exact
+  source offsets in one encoder pass. Prefer Small if downstream Qwen quality
+  remains close; the point is cheap, early evidence. Keep the runtime isolated
+  behind an optional Python 3.12 worker because the main development virtual
+  environment may be newer than the model library's supported Python range.
+- Treat **mention extraction**, **chapter classification**, and **event/state
+  scaffolding** as separate scored experiments even if one model call produces
+  all three. Person/place/object spans are a natural fit; genre, theme, mood,
+  causality, and narrative importance are hypotheses that require calibration.
+- Prototype a source-linked event record with actor, action or state,
+  target/object, location, temporal cue, and exact evidence span. This is the
+  structure most likely to prevent errors such as changing “slipped under the
+  bed” into “vanished.” Do not claim success from entity recall alone.
 - Make **Entity Signals** an inspectable per-chapter Analysis stage with a
   deterministic whole-book rollup. Save every mention's canonical text span,
   chapter, character offsets, original pages when available, requested label,
@@ -175,11 +301,22 @@ Connections, continuity, character work, questions, and LLM Review.
   source span. Clearly call these **mentions**, not canonical characters or
   facts. Surface overlapping or competing labels rather than pretending the
   model settled them.
-- Feed the evidence spans into chapter dossiers immediately, but ask Qwen to
-  perform the harder work: aliases, pronouns, identity, merge/split decisions,
-  relationships, chronology, narrative importance, and fact reconciliation.
-  Compare dossier completeness, hallucinated entities, prompt size, and elapsed
-  time with and without the Entity Signals packet.
+- Feed the evidence spans and event scaffold into Chapter Reading, but require
+  Qwen to audit rather than silently consume them. Preserve the raw specialist
+  result, then append `entity_audit` and `event_audit` records containing
+  keep/correct/reject, corrected value, exact evidence, and correction reason.
+  Qwen must additionally produce a per-entity chapter ledger: state on entry,
+  actions, relationships affected, knowledge gained or lost, material changes,
+  and state on exit. The audit may add an entity missed by GLiNER, but must say
+  that it did so.
+- Use stable IDs so raw extraction, Qwen correction, cumulative Context, and
+  later human adjudication remain distinguishable. Never overwrite GLiNER's
+  evidence with Qwen's interpretation.
+- Ask Qwen to perform the harder work: aliases, pronouns, identity, merge/split
+  decisions, relationships, chronology, narrative importance, and fact
+  reconciliation. Compare dossier completeness, false action/state claims,
+  prompt size, model-call time, and total chapter time with and without the
+  Chapter Signals packet.
 - Add a later whole-book reconciliation step that proposes canonical entities
   from the mentions without destroying the underlying spans. Human merge,
   split, rename, and ignore decisions must survive reruns and become
@@ -192,13 +329,12 @@ Connections, continuity, character work, questions, and LLM Review.
   entities, duplicate surface forms, runtime, and downstream dossier value—not
   generic NER benchmark accuracy.
 
-## Future-enabling refactor: replaceable compute workers
+## Planned 0.5.0 — The Engine Room: replaceable compute workers
 
-This is the planned **0.3.0 — The Engine Room** milestone. Finish and release
-Reviewer Tools first, then separate the worker process, durable control plane,
-and web controller before extracting any pipeline implementation into Inator.
-Bookinator must prove the process boundary and reconnect behavior; Inator gets
-the resulting contract, not the current server-owned thread machinery.
+Finish Common Ground and Reanimator first, then separate the worker process,
+durable control plane, and web controller. Bookinator must prove the process
+boundary and reconnect behavior before any Bookinator-specific pipeline
+implementation is proposed as a shared Inator contract.
 
 Bookinator is local-first today, but its useful audience is artificially limited
 by the cost and speed of local model inference. Preserve local processing as the
@@ -402,13 +538,14 @@ startup overhead, failure rates, and cost.
   parallelism, rerun cost after revisions, and which analyses deserve premium
   compute at all.
 
-## Planned 0.4.0 milestone: Look Here
+## Planned 0.4.0 — Reanimator: editorial attention routing
 
-Finish **0.3.0 — The Engine Room** first. Its independent worker and durable
-control protocol are prerequisites for safely managing another local model.
-Then add an **editorial attention router**: a small, replaceable decision model
-that tells Qwen where to look. It produces ranked candidate evidence, never an
-editorial conclusion.
+Finish **0.3.0 — Common Ground** first. Then add an **editorial attention
+router**: a small, replaceable decision model that tells Qwen where to look. It
+produces ranked candidate evidence, never an editorial conclusion. Reanimator
+runs these models serially through the existing pipeline; its saved job and
+provenance contracts should remain compatible with the later Engine Room
+process boundary.
 
 ### Decision contract and first engine
 
@@ -439,8 +576,9 @@ editorial conclusion.
   passage by passage. Claim a coherent batch, load the router once, score the
   entire book or stage, persist a resumable candidate ledger, unload the
   router, then load Qwen once to consume the ranked work.
-- Make router batches ordinary Engine Room work with queue priority, pause,
-  cancellation, retries, timing, stale-input invalidation, and standard
+- Make router batches ordinary pipeline work, designed to become Engine Room
+  jobs later, with queue priority, pause, cancellation, retries, timing,
+  stale-input invalidation, and standard
   input/output inspection. Record load and unload time separately so apparent
   savings do not hide model-thrashing costs.
 - If the router is absent, failed, uncalibrated, or sees an unsupported input,
@@ -462,10 +600,11 @@ editorial conclusion.
    only for plausible or uncertain tags; retain Qwen 32B as the deep path. A
    router may suppress an implausible taxonomy hypothesis, but it must never
    manufacture the evidence-bearing tag artifact itself.
-3. **Entity Signals and dossier feedstock.** Promote the near-term GLiNER pilot
-   into an Engine Room batch with durable model lifecycle, standard inspection,
-   and measured dossier improvements. Preserve its standalone entity report;
-   the output is useful even when Qwen never consumes it.
+3. **Entity Signals and dossier feedstock.** Promote the GLiNER pilot into a
+   durable pipeline batch with standard inspection and measured dossier
+   improvements. Preserve its standalone entity report; the output is useful
+   even when Qwen never consumes it. Keep the contract ready for later Engine
+   Room execution.
 4. **LLM Review attention routing.** Evaluate passage windows against narrow
    lenses such as causality, continuity, motivation, emotional logic,
    confusion, scene purpose, engagement, and payoff. Initially rank the packet
@@ -478,8 +617,9 @@ editorial conclusion.
 
 - Build versioned gold cases from multiple genres and structures, with separate
   train/tuning and held-out books. Include Shadow, The Dunwich Horror,
-  Frankenstein, Carmilla, and at least one book where the present detector or
-  reviewer produced substantial false positives.
+  Frankenstein, Carmilla, Lovecraft's short six-part *Herbert West–Reanimator*,
+  and at least one book where the present detector or reviewer produced
+  substantial false positives.
 - Measure candidate recall, precision at each threshold, false-negative type,
   Qwen input tokens, passages sent to Qwen, model-load overhead, wall-clock
   time, and reviewer keep/dismiss outcomes. Report focus improvement even when
@@ -1018,6 +1158,43 @@ the original string artifacts as prior run history during that migration.
   producing tokens is not stalled merely because it crossed a wall-clock limit.
 
 ## Ingestion quality and regression fixtures
+
+### Near-term: narrative-role routing
+
+Replace the current front-matter-versus-chapter shortcut with a cheap,
+inspectable classification of each manuscript division's **narrative
+function**. Structural position is useful evidence, not the answer: a prologue
+may be story, an introduction may be an essay, acknowledgments are authored
+prose but not story, and a substantive appendix may be half reference work and
+half essential world-building.
+
+- Run deterministic structural rules first, followed by a small Jev-like or
+  encoder classifier only for ambiguous divisions. Save the proposed role,
+  confidence, competing roles, evidence, classifier version, and any human
+  override. Do not spend a primary-model call merely to decide whether a
+  section participates in the story.
+- Begin with analysis roles such as **narrative**, **narrative-adjacent**,
+  **authorial paratext**, **reference/back matter**, and **boilerplate**. Keep a
+  separate participation value—full, supplemental, or none—so a Tolkien-like
+  appendix is not forced into a false binary.
+- Keep universal textual analysis available for authored prose regardless of
+  story participation: measurements, readability, and applicable Smells still
+  matter in an introduction, acknowledgments, craft essay, or appendix.
+- Route narrative divisions through the ordinary chapter Summary, Dossier,
+  cumulative story Context, Questions/Payoffs, and LLM Review machinery.
+  Route authorial paratext through an expository summary/dossier schema that
+  does not invent character states, story questions, or plot movement.
+- Let supplemental appendices contribute separately attributed facts,
+  entities, chronology, terminology, or world knowledge without pretending
+  that the reader encountered them in the main narrative sequence. Plot arcs,
+  emotional continuity, chapter propulsion, and similar story-only passes
+  should normally exclude them.
+- Make the proposed role visible and editable in the chapter map. Changing it
+  should invalidate only role-dependent artifacts, not extraction, word
+  counts, universal Smells, or human annotations.
+- Build regression fixtures for story prologues, editorial introductions,
+  acknowledgments, afterwords, glossaries, dramatis personae, timelines,
+  scholarly notes, and hybrid appendices before enabling automatic routing.
 
 - Treat chapter-map consistency as an editorial warning, not a compute gate.
   When labels break an established heading family, list every suspicious label,

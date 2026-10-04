@@ -1,4 +1,8 @@
 import { articlePages, roadmapItems } from "./pages.js";
+import { createProductHistoryView, mountProductShell } from "/commons/@inator/ui/index.js";
+import { bookinatorProductHistory } from "./product-history.js";
+import { bookinatorFooterLinks, createBookinatorAboutPage } from "./product-information.js";
+import { createBookinatorDocsFlow } from "./product-docs.js";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
 import { isTemporalDossierObservation } from "./dossier-index.js";
 import { auditPortableReport, buildPortableReportHtml, buildPortableReportManifest, reportExportFilename } from "./portable-report.js?v=queue-order-166";
@@ -11,6 +15,7 @@ const introKey = "bookinator.intro.seen";
 const currentBookKey = "bookinator.current-book.v1";
 const analysisTabsKey = "bookinator.analysis-tabs.v1";
 const workspaceGroupsKey = "bookinator.workspace-groups.v1";
+const pipelineDisclosuresKey = "bookinator.pipeline-disclosures.v1";
 const chapterFontScaleKey = "bookinator.chapter-font-scale.v1";
 const sourceAnalysisKey = "bookinator.source-analysis.v1";
 const smellSortKey = "bookinator.smell-sort.v1";
@@ -20,6 +25,22 @@ const pipelinePageSizeKey = "bookinator.pipeline-page-size.v1";
 // release build can turn them off without changing the analysis toolbars.
 const developmentControlsEnabled = true;
 const pipelinePageSizes = [5, 10, 25, 50, "all"];
+
+mountProductShell({
+  footerMount: document.querySelector("[data-inator-product-footer]"),
+  brand: { href: "#books", label: "Bookinator" },
+  footer: {
+    links: bookinatorFooterLinks
+  }
+});
+
+function updateFooterRoute(active = "") {
+  document.querySelectorAll("[data-inator-product-footer] a").forEach((link) => {
+    const route = link.dataset.route || new URL(link.href, location.href).hash.replace(/^#/, "").split("/")[0];
+    if (route === active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
 const sourceAnalysisDefaults = {emotion: {enabled: true, threshold: 10, neutral: true}, tag: {enabled: true, threshold: 25}, comments: {mode: "all"}};
 let sourceAnalysisPreferences = structuredClone(sourceAnalysisDefaults);
 let smellSortMode = localStorage.getItem(smellSortKey) === "type" ? "type" : "position";
@@ -30,6 +51,7 @@ if (!pipelinePageSizes.includes(pipelinePageSize)) pipelinePageSize = 10;
 let pipelinePage = 1;
 let rememberedAnalysisTabs = {};
 let rememberedWorkspaceGroups = {};
+let rememberedPipelineDisclosures = {};
 let rememberedLibraryView = {query: "", filter: "all", sort: {key: "title", direction: "asc"}};
 try {
   const saved = JSON.parse(localStorage.getItem(sourceAnalysisKey) || "{}");
@@ -44,6 +66,9 @@ try {
 } catch {}
 try {
   rememberedWorkspaceGroups = JSON.parse(localStorage.getItem(workspaceGroupsKey) || "{}") || {};
+} catch {}
+try {
+  rememberedPipelineDisclosures = JSON.parse(localStorage.getItem(pipelineDisclosuresKey) || "{}") || {};
 } catch {}
 try {
   const saved = JSON.parse(localStorage.getItem(libraryViewKey) || "{}") || {};
@@ -82,6 +107,20 @@ function rememberWorkspaceGroupState(bookId, group, changes) {
     [group]: {...workspaceGroupState(bookId, group), ...changes},
   };
   localStorage.setItem(workspaceGroupsKey, JSON.stringify(rememberedWorkspaceGroups));
+}
+
+function pipelineDisclosureOpen(bookId, key, fallback = true) {
+  const remembered = rememberedPipelineDisclosures[bookId]?.[key];
+  return typeof remembered === "boolean" ? remembered : fallback;
+}
+
+function rememberPipelineDisclosure(bookId, key, open) {
+  if (!bookId || !key) return;
+  rememberedPipelineDisclosures[bookId] = {
+    ...(rememberedPipelineDisclosures[bookId] || {}),
+    [key]: Boolean(open),
+  };
+  localStorage.setItem(pipelineDisclosuresKey, JSON.stringify(rememberedPipelineDisclosures));
 }
 
 function saveSourceAnalysisPreferences() {
@@ -589,7 +628,8 @@ function render() {
   const visibleIds = new Set(books.map((book) => book.id));
   for (const id of state.selection) if (!visibleIds.has(id)) state.selection.delete(id);
   state.rememberedSelection = state.rememberedSelection.filter((id) => visibleIds.has(id));
-  document.querySelector("#library-count").textContent = `${state.books.length} ${state.books.length === 1 ? "book" : "books"} on this computer`;
+  const libraryCount = document.querySelector("#library-count");
+  if (libraryCount) libraryCount.textContent = `${state.books.length} ${state.books.length === 1 ? "book" : "books"} on this computer`;
   updateAnalysisNavigation();
   updateGlobalPipelineStatus();
   renderPipelineQueue();
@@ -720,6 +760,10 @@ function showDialog(id) {
 function closeDialog(id) {
   const dialog = document.querySelector(`#${id}`);
   if (!dialog) return;
+  if (id === "reading-details-dialog") {
+    clearInterval(readingDetailsClock);
+    clearTimeout(readingDetailsTelemetryTimer);
+  }
   if (dialog.dataset.ephemeralDialog === "true") dialog.remove();
   else dialog.hidden = true;
 }
@@ -1958,7 +2002,7 @@ async function openSystemPanel(panelName) {
   document.querySelector("#machine-page").hidden = false;
   document.querySelector("#welcome-dialog").hidden = true;
   document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.toggle("active", item.dataset.page === "machine"));
-  document.querySelectorAll(".footer-links a").forEach((link) => link.removeAttribute("aria-current"));
+  updateFooterRoute();
   const machinePanel = document.querySelector("#machine-panel");
   const modelsPanel = document.querySelector("#models-panel");
   const modelsSelected = panelName === "models";
@@ -2191,7 +2235,7 @@ function showBooksPage() {
   document.querySelector("#book-page").hidden = true;
   document.querySelector("#machine-page").hidden = true;
   document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.toggle("active", item.dataset.page === "books"));
-  document.querySelectorAll(".footer-links a").forEach((link) => link.removeAttribute("aria-current"));
+  updateFooterRoute();
   document.title = "Books · Bookinator";
 }
 
@@ -2204,7 +2248,7 @@ function showPipelinePage() {
   document.querySelector("#machine-page").hidden = true;
   document.querySelector("#welcome-dialog").hidden = true;
   document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.toggle("active", item.dataset.page === "pipeline"));
-  document.querySelectorAll(".footer-links a").forEach((link) => link.removeAttribute("aria-current"));
+  updateFooterRoute();
   renderPipelineQueue();
   renderPipelineDiagnostics();
   updateGlobalPipelineStatus();
@@ -2224,19 +2268,37 @@ function showArticlePage(collection, requestedTab) {
   document.querySelector("#welcome-dialog").hidden = true;
   document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.remove("active"));
   const hero = document.querySelector("#article-hero");
+  hero.hidden = collection === "about";
   hero.classList.toggle("has-mark", Boolean(page.mark));
   hero.innerHTML = `${page.mark ? '<img src="/assets/bookinator.svg" alt="">' : ""}<p class="context">${page.kicker}</p><h1>${page.title}</h1><p>${page.intro}</p>`;
   const tabs = document.querySelector("#article-tabs");
+  tabs.hidden = collection === "about";
   tabs.innerHTML = Object.entries(page.tabs).map(([key, [label]]) => `<button type="button" data-article-tab="${key}"${key === activeTab ? ' aria-current="page"' : ""}>${label}</button>`).join("");
-  document.querySelector("#article-body").innerHTML = page.tabs[activeTab][1];
-  if (collection === "roadmap") installRoadmapLedger();
+  const articleBody = document.querySelector("#article-body");
+  const productHistoryMode = collection === "releases" ? "releases" : collection === "roadmap" ? "roadmap" : "";
+  if (collection !== "about") articleBody.classList.remove("inator-information-page", "inator-about-page");
+  articleBody.classList.toggle("shared-product-docs", collection === "docs" || collection === "about");
+  articleBody.innerHTML = productHistoryMode
+    ? `<section class="shared-product-history" aria-label="Bookinator ${productHistoryMode}"><div data-product-history="${productHistoryMode}"></div></section>`
+    : "";
+  if (!productHistoryMode) {
+    if (collection === "about") createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
+    else if (collection === "docs") articleBody.append(createBookinatorDocsFlow({ tab: activeTab, markup: page.tabs[activeTab][1] }));
+    else articleBody.innerHTML = page.tabs[activeTab][1];
+  }
+  const productHistoryMount = document.querySelector("[data-product-history]");
+  if (productHistoryMount) {
+    createProductHistoryView({
+      mount: productHistoryMount,
+      history: bookinatorProductHistory,
+      mode: productHistoryMount.dataset.productHistory
+    });
+  }
+  if (collection === "roadmap" && !productHistoryMode) installRoadmapLedger();
   tabs.querySelectorAll("[data-article-tab]").forEach((button) => button.addEventListener("click", () => {
     location.hash = `${collection}/${button.dataset.articleTab}`;
   }));
-  document.querySelectorAll(".footer-links a").forEach((link) => {
-    if (link.dataset.page === collection) link.setAttribute("aria-current", "page");
-    else link.removeAttribute("aria-current");
-  });
+  updateFooterRoute(collection);
   document.title = `${page.title} · Bookinator`;
   scrollTo({top: 0, behavior: "auto"});
 }
@@ -2381,6 +2443,9 @@ function liveDurationMarkup({startedAt = "", completedAt = "", duration = null, 
 }
 
 let readingDetailsClock = null;
+let readingDetailsTelemetryTimer = null;
+let readingDetailsTelemetryRefreshPending = false;
+const readingDetailsTelemetryHistory = new Map();
 function startReadingDetailsClock() {
   clearInterval(readingDetailsClock);
   const update = () => document.querySelectorAll("#reading-details-dialog [data-live-duration]").forEach((item) => {
@@ -2389,6 +2454,170 @@ function startReadingDetailsClock() {
   });
   update();
   readingDetailsClock = setInterval(update, 1000);
+}
+
+function liveModelTelemetryValues(telemetry) {
+  const phase = telemetry.activity ? signalLabel(telemetry.activity) : "Local model";
+  const stateLabel = telemetry.status === "connecting" ? "Loading model and prompt" : telemetry.active ? "Generating structured response" : telemetry.status === "complete" ? "Response complete" : signalLabel(telemetry.status || "waiting");
+  const status = `${phase} · ${stateLabel}`;
+  const lastActivity = telemetry.lastActivityAt ? Math.max(0, Math.round((Date.now() - new Date(telemetry.lastActivityAt).valueOf()) / 1000)) : null;
+  const elapsed = telemetry.startedAt ? Math.max(0, (Date.now() - new Date(telemetry.startedAt).valueOf()) / 1000) : null;
+  const generated = Number(telemetry.outputCharacters || 0);
+  const fragments = Number(telemetry.responseFragments || 0);
+  const tokenDetail = Number(telemetry.generatedTokens || 0) ? `${Number(telemetry.generatedTokens).toLocaleString()} tokens` : fragments ? `${fragments.toLocaleString()} streamed fragments` : "Waiting for the first response fragment";
+  const previous = telemetry.previousCall || {};
+  return {
+    status,
+    model: telemetry.model || "Local model",
+    prompt: `${Number(telemetry.inputCharacters || 0).toLocaleString()} characters${Number(telemetry.promptTokens || 0) ? ` · ${Number(telemetry.promptTokens).toLocaleString()} tokens` : ""}`,
+    response: `${generated.toLocaleString()} characters · ${tokenDetail}`,
+    previous: previous.outputCharacters != null ? `${signalLabel(previous.activity || "Model response")} completed · ${Number(previous.outputCharacters || 0).toLocaleString()} characters` : "",
+    lastActivity: lastActivity == null ? "Waiting for connection" : lastActivity < 2 ? "Just now" : `${lastActivity.toLocaleString()} seconds ago`,
+    elapsed: elapsed == null ? "Not started" : formatRunDuration(elapsed, telemetry.active ? "running" : "complete"),
+  };
+}
+
+function updateLiveModelTelemetry(panel, telemetry) {
+  if (!panel.dataset.telemetryMounted) {
+    panel.innerHTML = `<header><span><i aria-hidden="true"></i><strong data-telemetry-status></strong></span><small data-telemetry-model></small></header><dl><dt>Prompt</dt><dd data-telemetry-prompt></dd><dt>Current response</dt><dd data-telemetry-response></dd><dt data-telemetry-previous-label hidden>Previous call</dt><dd data-telemetry-previous hidden></dd><dt>Last activity</dt><dd data-telemetry-last-activity></dd><dt>Elapsed</dt><dd data-telemetry-elapsed></dd></dl><div class="model-telemetry-track" aria-hidden="true"><span></span></div><p>Each model call starts its own response count. A verifier or later batch may begin at zero after an earlier call completes. This is stream activity, not a completion percentage.</p>`;
+    panel.dataset.telemetryMounted = "true";
+  }
+  const values = liveModelTelemetryValues(telemetry);
+  for (const [field, value] of Object.entries(values)) {
+    const attribute = field.replace(/[A-Z]/g, (letter) => `-${letter.toLocaleLowerCase()}`);
+    const node = panel.querySelector(`[data-telemetry-${attribute}]`);
+    if (node && node.textContent !== value) node.textContent = value;
+  }
+  const previousLabel = panel.querySelector("[data-telemetry-previous-label]");
+  const previousValue = panel.querySelector("[data-telemetry-previous]");
+  if (previousLabel) previousLabel.hidden = !values.previous;
+  if (previousValue) previousValue.hidden = !values.previous;
+}
+
+function formatStreamingJson(raw) {
+  let output = "";
+  let indent = 0;
+  let inString = false;
+  let escaped = false;
+  for (const character of String(raw || "")) {
+    if (inString) {
+      output += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; output += character; continue; }
+    if (character === "{" || character === "[") {
+      indent += 1;
+      output += `${character}\n${"  ".repeat(indent)}`;
+    } else if (character === "}" || character === "]") {
+      indent = Math.max(0, indent - 1);
+      output = `${output.trimEnd()}\n${"  ".repeat(indent)}${character}`;
+    } else if (character === ",") {
+      output += `,\n${"  ".repeat(indent)}`;
+    } else if (character === ":") {
+      output += ": ";
+    } else if (!/\s/.test(character)) {
+      output += character;
+    }
+  }
+  return output;
+}
+
+function updateLiveOutputInspector(telemetry) {
+  const dialog = document.querySelector("#reading-details-dialog");
+  const selected = dialog?.querySelector('[data-run-inspector-view="output"][aria-selected="true"]');
+  const jsonView = document.querySelector("#reading-details-json");
+  if (!selected || !jsonView || typeof telemetry.responseText !== "string") return;
+  const raw = telemetry.responseText;
+  if (jsonView.dataset.liveResponse === raw) return;
+  const priorScroller = jsonView.querySelector("pre");
+  const followEnd = !priorScroller || priorScroller.scrollHeight - priorScroller.scrollTop - priorScroller.clientHeight < 30;
+  jsonView.dataset.liveResponse = raw;
+  if (!jsonView.querySelector(".live-output")) {
+    jsonView.innerHTML = '<section class="artifact-inspector live-output"><header><span>Streaming response · incomplete JSON is formatted provisionally</span><span data-live-output-count></span></header><pre tabindex="0"><code data-live-output-text></code></pre></section>';
+  }
+  jsonView.querySelector("[data-live-output-count]").textContent = `${Number(telemetry.outputCharacters || raw.length).toLocaleString()} characters`;
+  jsonView.querySelector("[data-live-output-text]").textContent = formatStreamingJson(raw);
+  const scroller = jsonView.querySelector("pre");
+  if (followEnd && scroller) scroller.scrollTop = scroller.scrollHeight;
+}
+
+async function pollReadingDetailsTelemetry() {
+  clearTimeout(readingDetailsTelemetryTimer);
+  const dialog = document.querySelector("#reading-details-dialog");
+  const panel = dialog?.querySelector("[data-model-live-telemetry]");
+  if (!dialog || dialog.hidden || dialog.dataset.runStatus !== "running" || !state.currentBookId) return;
+  try {
+    const response = await fetch(`/api/books/${encodeURIComponent(state.currentBookId)}/model-telemetry`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Live model activity is unavailable.");
+    const telemetry = payload.telemetry || {};
+    const expectedStartedAt = dialog.dataset.runStartedAt ? new Date(dialog.dataset.runStartedAt).valueOf() : 0;
+    const telemetryStartedAt = telemetry.startedAt ? new Date(telemetry.startedAt).valueOf() : 0;
+    const belongsToRun = !expectedStartedAt || (telemetryStartedAt && telemetryStartedAt >= expectedStartedAt - 2000);
+    if (belongsToRun && (telemetry.active || telemetry.status === "complete")) {
+      // A pipeline step may make several consecutive model calls (for example,
+      // a primary reading followed by verification, or multiple smell batches).
+      // Older servers expose only the current call, so preserve the last call
+      // in the already-open inspector instead of making useful progress appear
+      // to reset to zero.
+      const historyKey = `${state.currentBookId}:${dialog.dataset.detailType || "run"}:${dialog.dataset.detailKey || ""}`;
+      const remembered = readingDetailsTelemetryHistory.get(historyKey);
+      const sameCall = remembered?.runKey === telemetry.runKey && remembered?.startedAt === telemetry.startedAt;
+      if (remembered && !sameCall && !telemetry.previousCall) {
+        telemetry.previousCall = {
+          activity: remembered.activity,
+          model: remembered.model,
+          status: remembered.status,
+          startedAt: remembered.startedAt,
+          completedAt: remembered.completedAt,
+          inputCharacters: remembered.inputCharacters,
+          outputCharacters: remembered.outputCharacters,
+          responseFragments: remembered.responseFragments,
+          promptTokens: remembered.promptTokens,
+          generatedTokens: remembered.generatedTokens,
+        };
+      }
+      readingDetailsTelemetryHistory.set(historyKey, structuredClone(telemetry));
+      panel.hidden = false;
+      panel.classList.toggle("is-complete", telemetry.status === "complete");
+      updateLiveModelTelemetry(panel, telemetry);
+      updateLiveOutputInspector(telemetry);
+    } else {
+      panel.hidden = true;
+    }
+    if (belongsToRun && !telemetry.active && telemetry.status === "complete" && !readingDetailsTelemetryRefreshPending) {
+      readingDetailsTelemetryRefreshPending = true;
+      state.pipelineSignature = "";
+      const tab = document.querySelector("#book-page")?.dataset.activeTab || "pipeline";
+      setTimeout(async () => {
+        try { await showBookPage(state.currentBookId, tab); }
+        finally { readingDetailsTelemetryRefreshPending = false; }
+      }, 250);
+    }
+  } catch (error) {
+    panel.hidden = false;
+    panel.innerHTML = `<p>${escapeHtml(error.message || "Live model activity is unavailable.")}</p>`;
+  }
+  if (!dialog.hidden && dialog.dataset.runStatus === "running") readingDetailsTelemetryTimer = setTimeout(pollReadingDetailsTelemetry, 1000);
+}
+
+function startReadingDetailsTelemetry(status, startedAt = "") {
+  clearTimeout(readingDetailsTelemetryTimer);
+  const dialog = document.querySelector("#reading-details-dialog");
+  dialog.dataset.runStatus = status || "";
+  dialog.dataset.runStartedAt = startedAt || "";
+  let panel = dialog.querySelector("[data-model-live-telemetry]");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.className = "model-live-telemetry";
+    panel.dataset.modelLiveTelemetry = "";
+    document.querySelector("#reading-details-body")?.prepend(panel);
+  }
+  panel.hidden = status !== "running";
+  if (status === "running") pollReadingDetailsTelemetry();
 }
 
 function formatByteSize(bytes) {
@@ -2409,16 +2638,30 @@ function pipelineStageDuration(stage, pipeline) {
   const savedDuration = Number(stage?.durationSeconds);
   if (stage?.durationSeconds !== null && stage?.durationSeconds !== undefined && stage?.durationSeconds !== "" && Number.isFinite(savedDuration) && savedDuration > 0) return savedDuration;
   if (stage.id === "summaries") {
-    const durations = (pipeline.chapters || []).map((chapter) => Number(chapter.durationSeconds)).filter((duration) => Number.isFinite(duration) && duration > 0);
+    const durations = (pipeline.chapters || [])
+      .filter((chapter) => !chapter.chapterReadingStatus)
+      .map((chapter) => Number(chapter.durationSeconds))
+      .filter((duration) => Number.isFinite(duration) && duration > 0);
     if (durations.length) return durations.reduce((total, duration) => total + duration, 0);
   }
-  if (["emotions", "tags", "smells"].includes(stage.id)) {
-    const prefix = stage.id === "emotions" ? "emotion" : stage.id === "tags" ? "tag" : "smell";
+  if (["gliner-signals", "emotions", "tags", "smells"].includes(stage.id)) {
+    const prefix = stage.id === "gliner-signals" ? "gliner" : stage.id === "emotions" ? "emotion" : stage.id === "tags" ? "tag" : "smell";
     const durations = (pipeline.chapters || []).map((chapter) => Number(chapter[`${prefix}DurationSeconds`])).filter((duration) => Number.isFinite(duration) && duration > 0);
     if (durations.length) return durations.reduce((total, duration) => total + duration, 0);
   }
-  if (["cumulative-context", "llm-review"].includes(stage.id)) {
-    const prefix = stage.id === "cumulative-context" ? "context" : "llmReview";
+  if (stage.id === "cumulative-context") {
+    const currentModel = String(stage.model || "");
+    const completed = (pipeline.chapters || []).filter((chapter) => chapter.contextStatus === "complete");
+    if (currentModel.includes("deterministic")) {
+      return completed
+        .filter((chapter) => String(chapter.contextModel || "").includes("deterministic"))
+        .reduce((total, chapter) => total + Math.max(0, Number(chapter.contextDurationSeconds) || 0), 0);
+    }
+    const durations = completed.map((chapter) => Number(chapter.contextDurationSeconds)).filter((duration) => Number.isFinite(duration) && duration > 0);
+    if (durations.length) return durations.reduce((total, duration) => total + duration, 0);
+  }
+  if (stage.id === "llm-review") {
+    const prefix = "llmReview";
     const durations = (pipeline.chapters || []).map((chapter) => Number(chapter[`${prefix}DurationSeconds`])).filter((duration) => Number.isFinite(duration) && duration > 0);
     if (durations.length) return durations.reduce((total, duration) => total + duration, 0);
   }
@@ -2436,8 +2679,8 @@ function pipelineStageDuration(stage, pipeline) {
 function pipelineStageFailures(stage, pipeline) {
   if (Array.isArray(stage.failures)) return stage.failures;
   if (stage.id === "summaries") return (pipeline.chapters || []).filter((chapter) => chapter.status === "failed").map((chapter) => `${displayHeading(chapter.title) || "Chapter"}: ${chapter.error || "The summary failed."}`);
-  if (["emotions", "tags", "smells"].includes(stage.id)) {
-    const prefix = stage.id === "emotions" ? "emotion" : stage.id === "tags" ? "tag" : "smell";
+  if (["gliner-signals", "emotions", "tags", "smells"].includes(stage.id)) {
+    const prefix = stage.id === "gliner-signals" ? "gliner" : stage.id === "emotions" ? "emotion" : stage.id === "tags" ? "tag" : "smell";
     return (pipeline.chapters || []).filter((chapter) => chapter[`${prefix}Status`] === "failed").map((chapter) => `${displayHeading(chapter.title) || "Chapter"}: ${chapter[`${prefix}Error`] || `The ${prefix} pass failed.`}`);
   }
   if (stage.id === "dossiers") return (pipeline.chunks || []).filter((chunk) => chunk.dossierStatus === "failed").map((chunk) => `${displayHeading(chunk.chapterLabel) || "Chapter"}, chunk ${chunk.chunkInChapter || 1}: ${chunk.dossierError || "The dossier failed."}`);
@@ -2536,6 +2779,7 @@ function pipelineStageDetails(stage, pipeline, book) {
 function pipelineStageInspectorTarget(stage, pipeline) {
   if (stage.inspectorKind && stage.inspectorId != null) return {kind: stage.inspectorKind, itemId: String(stage.inspectorId)};
   const chapterTargets = {
+    "gliner-signals": {kind: "gliner", status: "glinerStatus", completed: "glinerCompletedAt"},
     summaries: {kind: "summary", status: "status", completed: "completedAt"},
     emotions: {kind: "emotion", status: "emotionStatus", completed: "emotionCompletedAt"},
     tags: {kind: "tag", status: "tagStatus", completed: "tagCompletedAt"},
@@ -2594,11 +2838,35 @@ function stageMarkup(stage, pipeline, book, openRows = new Set(), inferenceChild
   return `<article class="pipeline-stage ${escapeHtml(status)}${isSource ? " source-document-stage" : ""}${inferenceChild ? " inference-algorithm" : ""}${stage.elementary ? " pipeline-elementary-task" : ""}" data-pipeline-stage="${escapeHtml(stage.actionStageId || stage.id)}"${stage.taskId ? ` data-pipeline-task="${escapeHtml(stage.taskId)}"` : ""} data-inspector-kind="${escapeHtml(inspector.kind)}" data-inspector-id="${escapeHtml(inspector.itemId)}"><span class="stage-mark">${status === "complete" ? "✓" : status === "running" ? "↻" : ["failed", "warning"].includes(status) ? "!" : status === "blocked" ? "—" : "·"}</span><div class="pipeline-stage-copy"><span class="pipeline-stage-identity"><strong>${escapeHtml(stage.label || stage.id)}</strong><p>${escapeHtml(isSource ? (stage.sourceFilename || book.sourceFilename || stage.detail) : (stage.detail || "Waiting for the previous stage."))}</p><span class="pipeline-stage-meta"><small>${stage.method ? `${escapeHtml(stage.method)} · ` : stage.model ? `Model: ${escapeHtml(stage.model)} · ` : ""}${stage.completedAt ? `Finished ${escapeHtml(formatPipelineTime(stage.completedAt))}` : stage.startedAt ? `Started ${escapeHtml(formatPipelineTime(stage.startedAt))}` : escapeHtml(statusLabel)}</small>${inspect}</span></span>${sourceMetadata}</div><span class="pipeline-stage-reporting">${download}${statusControl}</span><template class="pipeline-stage-details-template">${pipelineStageDetails(stage, pipeline, book)}</template></article>`;
 }
 
-function chapterPipelineLedger(pipeline, book, openRows = new Set()) {
+function pipelineLedgerProgress(stages = []) {
+  const complete = stages.filter((stage) => ["complete", "excluded"].includes(stage.status)).length;
+  const running = stages.find((stage) => stage.status === "running");
+  const attention = stages.filter((stage) => ["failed", "warning", "blocked"].includes(stage.status)).length;
+  const label = running
+    ? `${running.label || "Work"} running`
+    : attention
+      ? `${attention.toLocaleString()} need${attention === 1 ? "s" : ""} attention`
+      : `${complete.toLocaleString()} of ${stages.length.toLocaleString()} complete`;
+  const status = running ? "running" : attention ? "attention" : stages.length && complete === stages.length ? "complete" : "waiting";
+  return `<span class="pipeline-ledger-progress ${status}"><span aria-hidden="true">${status === "complete" ? "✓" : status === "running" ? "↻" : status === "attention" ? "!" : "·"}</span><strong>${escapeHtml(label)}</strong></span>`;
+}
+
+function pipelineLedgerDisclosure({className = "pipeline-ledger-section", key, open = true, eyebrow, title, description = "", summary = "", body = ""}) {
+  return `<details class="${escapeHtml(className)}" data-analysis-key="${escapeHtml(key)}"${open ? " open" : ""}><summary class="pipeline-ledger-summary"><div class="pipeline-ledger-heading"><span>${escapeHtml(eyebrow)}</span><h3>${escapeHtml(title)}</h3>${description ? `<p>${escapeHtml(description)}</p>` : ""}</div><div class="pipeline-ledger-summary-end">${summary}<span class="pipeline-ledger-disclosure" aria-hidden="true">⌄</span></div></summary>${body}</details>`;
+}
+
+function chapterPipelineLedger(pipeline, book, openRows = new Set(), open = true) {
   const chapters = pipeline.chapters || [];
   if (!chapters.length) return "";
   const stageRecords = Object.fromEntries((pipeline.stages || []).map((stage) => [stage.id, stage]));
+  const sharedReadingSequences = chapters
+    .filter((chapter) => chapter.chapterReadingStatus)
+    .map((chapter) => Number(chapter.sequence || chapter.number || 0))
+    .filter((sequence) => sequence > 0);
+  const firstSharedReadingSequence = sharedReadingSequences.length ? Math.min(...sharedReadingSequences) : Infinity;
   const definitions = [
+    {id: "gliner-signals", label: "GLiNER signals", status: "glinerStatus", model: "glinerModel", started: "glinerStartedAt", completed: "glinerCompletedAt", duration: "glinerDurationSeconds", error: "glinerError", inspector: "gliner", method: "Fast local encoder"},
+    {id: "chapter-reading", label: "Chapter Reading", status: "chapterReadingStatus", model: "chapterReadingModel", started: "chapterReadingStartedAt", completed: "chapterReadingCompletedAt", duration: "chapterReadingDurationSeconds", error: "error", inspector: "chapter-reading", actionStageId: "summaries", method: "One shared model read"},
     {id: "summaries", label: "Summary", status: "status", model: "model", started: "startedAt", completed: "completedAt", duration: "durationSeconds", error: "error", inspector: "summary"},
     {id: "dossiers", label: "Dossier", collection: "chunks", status: "dossierStatus", model: "dossierModel", started: "dossierStartedAt", completed: "dossierCompletedAt", duration: "dossierDurationSeconds", error: "dossierError", inspector: "dossier"},
     {id: "llm-review", label: "LLM Review", status: "llmReviewStatus", model: "llmReviewModel", started: "llmReviewStartedAt", completed: "llmReviewCompletedAt", duration: "llmReviewDurationSeconds", error: "llmReviewError", inspector: "llm-review", optional: true},
@@ -2610,18 +2878,20 @@ function chapterPipelineLedger(pipeline, book, openRows = new Set()) {
   const stageEnabled = (definition) => !definition.optional || Boolean(book.llmReviewEnabled);
   const taskFromRecord = (definition, record, chapter, suffix = "") => {
     const status = record?.[definition.status] || "pending";
+    const sharedReadingStartedAt = status === "running" ? chapter.chapterReadingStartedAt : "";
     const title = displayHeading(chapter.title) || `Section ${chapter.sequence || chapter.number}`;
     const error = record?.[definition.error];
     return {
       id: definition.id,
-      actionStageId: definition.id,
+      actionStageId: definition.actionStageId || definition.id,
       taskId: `${definition.id}-${record?.sequence || chapter.sequence || chapter.number}${suffix}`,
       elementary: true,
       label: definition.label,
-      detail: definition.collection ? `Chunk ${record?.chunkInChapter || 1} of ${title}` : title,
+      detail: definition.id === "chapter-reading" ? `Produces Summary, Dossier${book.llmReviewEnabled && displayHeading(chapter.title).toLocaleLowerCase() !== "front matter" ? ", and LLM Review" : ""} for ${title}` : definition.collection ? `Chunk ${record?.chunkInChapter || 1} of ${title}` : title,
       status,
-      model: record?.[definition.model] || stageRecords[definition.id]?.model || "",
-      startedAt: record?.[definition.started],
+      method: definition.method || "",
+      model: record?.[definition.model] || (sharedReadingStartedAt ? chapter.chapterReadingModel : "") || stageRecords[definition.id]?.model || "",
+      startedAt: record?.[definition.started] || sharedReadingStartedAt,
       completedAt: record?.[definition.completed],
       durationSeconds: record?.[definition.duration],
       scope: definition.collection ? `${title} · chunk ${record?.chunkInChapter || 1}` : title,
@@ -2633,9 +2903,12 @@ function chapterPipelineLedger(pipeline, book, openRows = new Set()) {
   const groups = chapters.map((chapter) => {
     const sequence = Number(chapter.sequence || chapter.number || 0);
     const frontMatter = displayHeading(chapter.title).toLocaleLowerCase() === "front matter";
+    const sharedReading = sequence >= firstSharedReadingSequence;
     const tasks = [];
     definitions.forEach((definition) => {
-      if (!stageEnabled(definition) || (frontMatter && !["summaries", "dossiers"].includes(definition.id))) return;
+      if (sharedReading && ["summaries", "dossiers", "llm-review"].includes(definition.id)) return;
+      if (!sharedReading && definition.id === "chapter-reading") return;
+      if (!stageEnabled(definition) || (frontMatter && !["chapter-reading", "summaries", "dossiers"].includes(definition.id))) return;
       if (definition.collection === "chunks") {
         (pipeline.chunks || []).filter((chunk) => Number(chunk.chapterSequence || 0) === sequence).forEach((chunk, index) => tasks.push(taskFromRecord(definition, chunk, chapter, `-${index + 1}`)));
       } else {
@@ -2657,7 +2930,9 @@ function chapterPipelineLedger(pipeline, book, openRows = new Set()) {
     const complete = group.tasks.filter((task) => task.status === "complete").length;
     const active = group.tasks.find((task) => task.status === "running");
     const key = `pipeline-chapter-${group.sequence}`;
-    const open = openRows.has(key);
+    // The active chapter is the user's most likely working context. Open it on
+    // first encounter, then honor an explicit remembered close/open choice.
+    const open = openRows.has(key) || pipelineDisclosureOpen(book.id, key, group.status === "running");
     const completedDuration = group.tasks.reduce((total, task) => total + (task.status === "running" ? 0 : Number(task.durationSeconds || 0)), 0);
     const failed = group.tasks.filter((task) => task.status === "failed").length;
     const waiting = Math.max(0, group.tasks.length - complete - failed - Number(Boolean(active)));
@@ -2673,10 +2948,50 @@ function chapterPipelineLedger(pipeline, book, openRows = new Set()) {
     const statusControl = `<button class="chapter-status" data-show-chapter-group-details type="button" title="Show aggregate chapter processing time">${escapeHtml(aggregateLabel)}</button>`;
     return `<details class="pipeline-chapter-group ${escapeHtml(group.status)}" data-analysis-key="${escapeHtml(key)}"${open ? " open" : ""}><summary><span class="pipeline-chapter-number">${escapeHtml(group.sequence)}</span><span><strong>${escapeHtml(heading)}</strong><small>${active ? `${escapeHtml(active.label)} running · ` : ""}${complete.toLocaleString()} of ${group.tasks.length.toLocaleString()} jobs complete</small></span>${statusControl}<span class="pipeline-chapter-disclosure" aria-hidden="true">⌄</span></summary><div class="pipeline-chapter-tasks">${group.tasks.map((task) => stageMarkup(task, pipeline, book, openRows)).join("")}</div><template class="chapter-group-details-template">${groupDetails}</template></details>`;
   }).join("");
-  return `<section class="pipeline-chapter-ledger"><header><div><span>Execution order</span><h3>Chapter work</h3><p>Each chapter moves through these jobs before Bookinator advances to the next one.</p></div><div class="pipeline-stage-totals" aria-label="Stage totals">${totals}</div></header>${rows}</section>`;
+  return pipelineLedgerDisclosure({
+    className: "pipeline-chapter-ledger",
+    key: "pipeline-section-chapters",
+    open,
+    eyebrow: "Execution order",
+    title: "Chapter work",
+    description: "Each chapter moves through these jobs before Bookinator advances to the next one.",
+    summary: `<div class="pipeline-stage-totals" aria-label="Stage totals">${totals}</div>`,
+    body: rows,
+  });
 }
 
-function openChapterGroupDetails(button) {
+function chapterGroupDetailsSignature(group) {
+  return [
+    group?.className || "",
+    group?.dataset.analysisKey || "",
+    group?.querySelector(":scope > summary small")?.textContent || "",
+  ].join("\n");
+}
+
+function pipelineStageDetailsSignature(stage) {
+  return [
+    stage?.className || "",
+    stage?.dataset.pipelineTask || stage?.dataset.pipelineStage || "",
+    stage?.dataset.inspectorKind || "",
+    stage?.dataset.inspectorId || "",
+    stage?.querySelector(".pipeline-stage-copy strong")?.textContent || "",
+    stage?.querySelector(".pipeline-stage-copy p")?.textContent || "",
+  ].join("\n");
+}
+
+function analysisDetailsSignature(row) {
+  return [
+    row?.dataset.analysisStatus || "",
+    row?.dataset.analysisSubheading || "",
+    row?.dataset.analysisRange || "",
+    row?.dataset.refreshKind || "",
+    row?.dataset.refreshId || "",
+    row?.dataset.inspectorKind || "",
+    row?.dataset.inspectorId || "",
+  ].join("\n");
+}
+
+function openChapterGroupDetails(button, {refresh = false} = {}) {
   const group = button.closest(".pipeline-chapter-group");
   const template = group?.querySelector("template.chapter-group-details-template");
   if (!group || !template) return;
@@ -2684,14 +2999,19 @@ function openChapterGroupDetails(button) {
   document.querySelector("#reading-details-title").textContent = group.querySelector("summary strong")?.textContent || "Chapter processing";
   document.querySelector("#reading-details-subtitle").textContent = "Aggregate elapsed time and job counts";
   document.querySelector("#reading-details-body").innerHTML = template.innerHTML;
+  const dialog = document.querySelector("#reading-details-dialog");
+  dialog.dataset.detailType = "chapter-group";
+  dialog.dataset.detailKey = group.dataset.analysisKey || "";
+  dialog.dataset.resultSignature = chapterGroupDetailsSignature(group);
   document.querySelector("#refresh-analysis-result").hidden = true;
   document.querySelector("#restart-pipeline-stage").hidden = true;
   configureRunInspector();
-  showDialog("reading-details-dialog");
+  if (!refresh) showDialog("reading-details-dialog");
   startReadingDetailsClock();
+  startReadingDetailsTelemetry(group.classList.contains("running") ? "running" : "complete", group.querySelector("[data-live-duration]")?.dataset.startedAt || "");
 }
 
-function openPipelineStageDetails(button) {
+function openPipelineStageDetails(button, {refresh = false} = {}) {
   const stage = button.closest("[data-pipeline-stage]");
   const template = stage?.querySelector("template.pipeline-stage-details-template");
   if (!stage || !template) return;
@@ -2699,6 +3019,10 @@ function openPipelineStageDetails(button) {
   document.querySelector("#reading-details-title").textContent = stage.querySelector(".pipeline-stage-copy strong")?.textContent || "Run details";
   document.querySelector("#reading-details-subtitle").textContent = "Run notes, provenance, and processing time";
   document.querySelector("#reading-details-body").innerHTML = template.innerHTML;
+  const dialog = document.querySelector("#reading-details-dialog");
+  dialog.dataset.detailType = "pipeline-stage";
+  dialog.dataset.detailKey = stage.dataset.pipelineTask || stage.dataset.pipelineStage || "";
+  dialog.dataset.resultSignature = pipelineStageDetailsSignature(stage);
   const restart = document.querySelector("#restart-pipeline-stage");
   const actions = {
     summaries: "restart",
@@ -2717,8 +3041,9 @@ function openPipelineStageDetails(button) {
   restart.dataset.pipelineAction = actions[stage.dataset.pipelineStage] || "";
   document.querySelector("#refresh-analysis-result").hidden = true;
   configureRunInspector({kind: stage.dataset.inspectorKind || "stage", itemId: stage.dataset.inspectorId || stage.dataset.pipelineStage});
-  showDialog("reading-details-dialog");
+  if (!refresh) showDialog("reading-details-dialog");
   startReadingDetailsClock();
+  startReadingDetailsTelemetry(stage.classList.contains("running") ? "running" : stage.classList.contains("complete") ? "complete" : "pending", stage.querySelector("[data-live-duration]")?.dataset.startedAt || "");
 }
 
 function updateWorkspaceTabProgress(tabs, pipeline, activeTab) {
@@ -3454,12 +3779,12 @@ function analysisSectionGroupMarkup({label, icon, tone, groups}) {
   return `<section class="analysis-findings grouped ${escapeHtml(tone)}"><h3 class="analysis-section-heading"><span aria-hidden="true">${escapeHtml(icon)}</span>${escapeHtml(label)}</h3>${populated.map((group) => `<div class="analysis-subgroup"><h4>${escapeHtml(group.label)}</h4><ul>${group.items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`).join("")}</section>`;
 }
 
-function analysisRunDetails({title, model, startedAt, completedAt, duration, status = "pending", inputCharacters, rows = []}) {
+function analysisRunDetails({title, model, startedAt, completedAt, duration, durationLabel = "", status = "pending", inputCharacters, rows = []}) {
   const details = [
     ["Model", model || "Not assigned"],
     ["Started", formatPipelineTime(startedAt)],
     ["Finished", formatPipelineTime(completedAt)],
-    ["Duration", liveDurationMarkup({startedAt, completedAt, duration, status}), "html"],
+    ["Duration", durationLabel ? escapeHtml(durationLabel) : liveDurationMarkup({startedAt, completedAt, duration, status}), true],
     ["Input", `${Number(inputCharacters || 0).toLocaleString()} characters`],
     ...rows.map((row) => [row.label, row.value, row.code]),
   ];
@@ -3478,7 +3803,9 @@ function chapterMarkup(chapter, openChapters = new Set(), book = {}) {
   const failureDiagnostics = failures.length ? `<section class="failure-diagnostics"><header><strong>Failure diagnostics</strong><span>${failures.length} ${failures.length === 1 ? "attempt" : "attempts"}</span></header>${failures.map((failure, index) => `<section><strong>Attempt ${index + 1} · ${escapeHtml(failure.model || "Unknown model")}</strong><dl><dt>Finished</dt><dd>${escapeHtml(formatPipelineTime(failure.completedAt))}</dd><dt>Error</dt><dd>${escapeHtml(failure.error || "Unknown failure")}</dd><dt>Response keys</dt><dd>${failure.responseKeys?.length ? escapeHtml(failure.responseKeys.join(", ")) : "None recorded"}</dd><dt>Input</dt><dd>${failure.inputCharacters || 0} characters</dd></dl>${failure.rawResponse ? `<details><summary>Raw model response</summary><pre>${escapeHtml(failure.rawResponse)}</pre></details>` : '<p>Raw response was not retained by the server that ran this attempt. Restart Bookinator before retrying to capture the next response.</p>'}</section>`).join("")}</section>` : "";
   const historyRows = (chapter.summaryRuns || []).map((run, index) => ({label: `Earlier run ${index + 1}`, value: `${run.model || "Unknown model"} · ${formatPipelineTime(run.completedAt)} · ${run.durationSeconds ?? "?"} seconds`}));
   if (retryCount) historyRows.push({label: "Recovered retries", value: `${retryCount} transient local-model ${retryCount === 1 ? "disconnect" : "disconnects"}`});
-  const provenance = analysisRunDetails({title: `Reading details${historyCount ? ` · ${historyCount} earlier ${historyCount === 1 ? "run" : "runs"}` : ""}${retryCount ? ` · recovered after ${retryCount} ${retryCount === 1 ? "retry" : "retries"}` : ""}`, model: chapter.model, startedAt: chapter.startedAt, completedAt: chapter.completedAt, duration: chapter.durationSeconds, status, inputCharacters: chapter.inputCharacters, rows: historyRows});
+  const sharedReadingDuration = Number(chapter.chapterReadingDurationSeconds);
+  const sharedReading = Boolean(chapter.chapterReadingStatus) && Number.isFinite(sharedReadingDuration);
+  const provenance = analysisRunDetails({title: `Reading details${historyCount ? ` · ${historyCount} earlier ${historyCount === 1 ? "run" : "runs"}` : ""}${retryCount ? ` · recovered after ${retryCount} ${retryCount === 1 ? "retry" : "retries"}` : ""}`, model: chapter.model, startedAt: chapter.startedAt || chapter.chapterReadingStartedAt, completedAt: chapter.completedAt, duration: sharedReading ? null : chapter.durationSeconds, durationLabel: sharedReading ? `Included in Chapter Reading (${formatRunDuration(sharedReadingDuration)} total)` : "", status, inputCharacters: chapter.inputCharacters, rows: historyRows});
   const chapterError = emptyComplete ? "The saved model response contained no chapter summary. Restart Bookinator, then Resume to retry this chapter." : chapter.error;
   const chapterQuestions = chapter.questionDetails?.length ? analysisQuestionDetailsMarkup(chapter.questionDetails) : analysisSectionMarkup({label: "Questions now in play", icon: "?", tone: "questions", items: chapter.newQuestions});
   const contents = complete ? `<p>${escapeHtml(chapter.summary)}</p>${analysisSectionMarkup({label: "What this chapter establishes", icon: "✓", tone: "establishes", items: chapter.keyPoints})}${chapterQuestions}` : chapterError ? `<p>This chapter does not have a usable summary. Select <strong>Failed</strong> for the error and attempt history.</p>` : `<p>${chapter.status === "running" ? "This chapter is being read now." : "Haven’t summarized this chapter yet."}</p>`;
@@ -3947,7 +4274,7 @@ function failedAnalysisCount(pipeline) {
   const chapters = pipeline.chapters || [];
   const chapterFailures = chapters.reduce((count, chapter) => count
     + (chapter.status === "failed" ? 1 : 0)
-    + (["emotionStatus", "tagStatus", "smellStatus"].filter((field) => chapter[field] === "failed").length), 0);
+    + (["glinerStatus", "emotionStatus", "tagStatus", "smellStatus"].filter((field) => chapter[field] === "failed").length), 0);
   const dossierFailures = (pipeline.chunks || []).filter((chunk) => chunk.dossierStatus === "failed").length;
   const wholeBookFailures = [pipeline.wholeBookSummary, pipeline.wholeBookLlmReview]
     .filter((record) => record?.status === "failed").length;
@@ -4990,9 +5317,12 @@ function timingChartRows(pipeline, view) {
     const title = displayHeading(chapter.chapterTitle || "");
     return {label: heading, title, tooltip: title ? `${heading}: ${title}` : heading};
   };
-  const durationField = {summaries: "durationSeconds", emotions: "emotionDurationSeconds", tags: "tagDurationSeconds", smells: "smellDurationSeconds", "llm-review": "llmReviewDurationSeconds"}[view];
+  const durationField = {summaries: "durationSeconds", emotions: "emotionDurationSeconds", tags: "tagDurationSeconds", smells: "smellDurationSeconds", "cumulative-context": "contextDurationSeconds", "llm-review": "llmReviewDurationSeconds"}[view];
   if (durationField) {
-    const rows = chapters.map((chapter) => ({...chapterIdentity(chapter), seconds: Number(chapter[durationField] || 0), sequence: Number(chapter.sequence || chapter.number || 0)})).filter((item) => item.seconds > 0);
+    const rows = chapters
+      .filter((chapter) => view !== "summaries" || !chapter.chapterReadingStatus)
+      .map((chapter) => ({...chapterIdentity(chapter), seconds: Number(chapter[durationField] || 0), sequence: Number(chapter.sequence || chapter.number || 0)}))
+      .filter((item) => item.seconds > 0);
     const rollup = view === "summaries" ? pipeline.wholeBookSummary : view === "llm-review" ? pipeline.wholeBookLlmReview : null;
     if (Number(rollup?.durationSeconds || 0) > 0) rows.push({label: "Summary", title: "Whole book", tooltip: "Whole-book summary", seconds: Number(rollup.durationSeconds)});
     if (view === "llm-review" && Number(rollup?.durationSeconds || 0) > 0) {
@@ -5038,14 +5368,29 @@ function timingChartRows(pipeline, view) {
       .filter((item) => item.seconds > 0);
   }
   if (view === "pipeline") {
+    const hasSharedReadings = chapters.some((chapter) => chapter.chapterReadingStatus);
+    const hasDeterministicContext = chapters.some((chapter) => String(chapter.contextModel || "").includes("deterministic"));
     const stageDefinitions = [
       ["extraction", "Extraction"], ["structure", "Chapter detection"],
       ["chapter-archive", "Chapter archive"], ["chunking", "Chunking"],
-      ["summaries", "Chapter summaries"], ["dossiers", "Chunk dossiers"],
+      ["gliner-signals", "GLiNER signals"],
+      ["chapter-reading", "Chapter Reading"],
+      ["summaries", hasSharedReadings ? "Legacy chapter summaries" : "Chapter summaries"],
+      ["dossiers", hasSharedReadings ? "Legacy chunk dossiers" : "Chunk dossiers"],
       ["emotions", "Emotions"], ["tags", "Tags"], ["smells", "Smells"],
-      ["cumulative-context", "Context"], ["llm-review", "LLM Review"],
+      ["cumulative-context", hasDeterministicContext ? "Legacy Context" : "Context"], ["llm-review", hasSharedReadings ? "Legacy LLM Review" : "LLM Review"],
     ];
     const rows = stageDefinitions.map(([id, label]) => {
+      if (id === "chapter-reading") {
+        const seconds = chapters.reduce((total, chapter) => total + Number(chapter.chapterReadingDurationSeconds || 0), 0);
+        return {label, tooltip: "Combined Summary, Dossier, and optional LLM Review reads", seconds};
+      }
+      if (id === "cumulative-context" && hasDeterministicContext) {
+        const seconds = chapters
+          .filter((chapter) => !String(chapter.contextModel || "").includes("deterministic"))
+          .reduce((total, chapter) => total + Math.max(0, Number(chapter.contextDurationSeconds) || 0), 0);
+        return {label, tooltip: "Earlier model-generated Context checkpoints; current Context is deterministic", seconds};
+      }
       const stage = (pipeline.stages || []).find((item) => item.id === id) || {};
       return {label, tooltip: stage.label || label, seconds: Number(pipelineStageDuration(stage, pipeline) || 0)};
     }).filter((item) => item.seconds > 0);
@@ -5517,7 +5862,7 @@ function markAnalysisResultWaiting(kind, id) {
   }
 }
 
-function openAnalysisDetails(button) {
+function openAnalysisDetails(button, {refreshing = false} = {}) {
   const row = button.closest("details.analysis-row");
   const template = row?.querySelector("template.analysis-details-template");
   if (!row || !template) return;
@@ -5528,17 +5873,20 @@ function openAnalysisDetails(button) {
   document.querySelector("#reading-details-subtitle").textContent = subtitle;
   document.querySelector("#reading-details-body").innerHTML = template.innerHTML;
   const dialog = document.querySelector("#reading-details-dialog");
+  dialog.dataset.detailType = "analysis";
+  dialog.dataset.detailKey = `${row.dataset.refreshKind || ""}:${row.dataset.refreshId || ""}`;
   const refresh = document.querySelector("#refresh-analysis-result");
   refresh.hidden = !row.dataset.refreshKind || !row.dataset.refreshId;
   refresh.dataset.refreshKind = row.dataset.refreshKind || "";
   refresh.dataset.refreshId = row.dataset.refreshId || "";
   refresh.dataset.runStatus = row.dataset.analysisStatus || "";
   refresh.textContent = row.dataset.analysisStatus === "running" ? "Restart" : row.dataset.analysisStatus === "failed" ? "Retry" : "Refresh";
-  dialog.dataset.resultSignature = `${subtitle}\n${template.innerHTML}`;
+  dialog.dataset.resultSignature = analysisDetailsSignature(row);
   document.querySelector("#restart-pipeline-stage").hidden = true;
   configureRunInspector({kind: row.dataset.inspectorKind, itemId: row.dataset.inspectorId});
-  showDialog("reading-details-dialog");
+  if (!refreshing) showDialog("reading-details-dialog");
   startReadingDetailsClock();
+  startReadingDetailsTelemetry(row.dataset.analysisStatus || "pending", row.querySelector("[data-live-duration]")?.dataset.startedAt || "");
 }
 
 function prettyJsonMarkup(value) {
@@ -5578,6 +5926,12 @@ async function showRunInspectorView(view) {
   summary.hidden = view !== "summary";
   jsonView.hidden = view === "summary";
   if (view === "summary") return;
+  if (view === "output" && dialog.dataset.runStatus === "running") {
+    jsonView.dataset.liveResponse = "";
+    jsonView.innerHTML = '<p class="artifact-inspector-loading">Waiting for the current structured response…</p>';
+    pollReadingDetailsTelemetry();
+    return;
+  }
   jsonView.innerHTML = '<p class="artifact-inspector-loading">Loading saved run data…</p>';
   try {
     let artifact = dialog.dataset.inspectorArtifact ? JSON.parse(dialog.dataset.inspectorArtifact) : null;
@@ -5601,15 +5955,31 @@ async function showRunInspectorView(view) {
 
 function refreshOpenAnalysisDetails(body) {
   const dialog = document.querySelector("#reading-details-dialog");
-  const refresh = document.querySelector("#refresh-analysis-result");
-  if (!dialog || dialog.hidden || !refresh?.dataset.refreshKind || !refresh.dataset.refreshId) return;
-  const row = [...body.querySelectorAll("details.analysis-row")].find((candidate) => candidate.dataset.refreshKind === refresh.dataset.refreshKind && candidate.dataset.refreshId === refresh.dataset.refreshId);
-  const button = row?.querySelector("[data-show-reading-details]");
-  const template = row?.querySelector("template.analysis-details-template");
-  if (!row || !button || !template) return;
-  const subtitle = [row.dataset.analysisSubheading, row.dataset.analysisRange, row.dataset.analysisStatus].filter(Boolean).join(" · ");
-  if (dialog.dataset.resultSignature === `${subtitle}\n${template.innerHTML}`) return;
-  openAnalysisDetails(button);
+  if (!dialog || dialog.hidden) return;
+  const selectedView = dialog.querySelector('[data-run-inspector-view][aria-selected="true"]')?.dataset.runInspectorView || "summary";
+  let owner = null;
+  let signature = "";
+  let reopen = null;
+  if (dialog.dataset.detailType === "analysis") {
+    const [kind, id] = String(dialog.dataset.detailKey || "").split(":");
+    owner = [...body.querySelectorAll("details.analysis-row")].find((candidate) => candidate.dataset.refreshKind === kind && candidate.dataset.refreshId === id);
+    signature = owner ? analysisDetailsSignature(owner) : "";
+    const button = owner?.querySelector("[data-show-reading-details]");
+    if (button) reopen = () => openAnalysisDetails(button, {refreshing: true});
+  } else if (dialog.dataset.detailType === "pipeline-stage") {
+    owner = [...body.querySelectorAll("[data-pipeline-stage]")].find((candidate) => (candidate.dataset.pipelineTask || candidate.dataset.pipelineStage) === dialog.dataset.detailKey);
+    signature = owner ? pipelineStageDetailsSignature(owner) : "";
+    const button = owner?.querySelector("[data-show-stage-details]");
+    if (button) reopen = () => openPipelineStageDetails(button, {refresh: true});
+  } else if (dialog.dataset.detailType === "chapter-group") {
+    owner = [...body.querySelectorAll(".pipeline-chapter-group")].find((candidate) => candidate.dataset.analysisKey === dialog.dataset.detailKey);
+    signature = owner ? chapterGroupDetailsSignature(owner) : "";
+    const button = owner?.querySelector("[data-show-chapter-group-details]");
+    if (button) reopen = () => openChapterGroupDetails(button, {refresh: true});
+  }
+  if (!reopen || !signature || dialog.dataset.resultSignature === signature) return;
+  reopen();
+  if (selectedView !== "summary") showRunInspectorView(selectedView);
 }
 
 function chunkMarkup(chunk, openRows = new Set(), book = {}) {
@@ -5631,7 +6001,9 @@ function chunkMarkup(chunk, openRows = new Set(), book = {}) {
   const result = status === "complete" ? `<p>${escapeHtml(dossier.synopsis || "")}</p>${groups.map((group) => group.grouped ? analysisSectionGroupMarkup({...group, groups: group.grouped}) : analysisSectionMarkup(group)).join("")}${analysisQuestionDetailsMarkup(dossier.questionDetails, "Questions")}` : status === "failed" ? `<p>This source chunk does not have a usable dossier. Select <strong>Failed</strong> for the error and run details.</p>` : `<p>${status === "running" ? "This source chunk is being analyzed now." : "This source chunk has not been analyzed yet."}</p>`;
   const retryDiagnostics = dossier.retryDiagnostics || chunk.dossierRetryDiagnostics || [];
   const attempts = retryDiagnostics.length ? retryDiagnostics.length + (status === "complete" ? 1 : 0) : 1;
-  const runDetails = analysisRunDetails({title: "Dossier details", model: chunk.dossierModel, startedAt: chunk.dossierStartedAt, completedAt: chunk.dossierCompletedAt, duration: chunk.dossierDurationSeconds, status, inputCharacters: chunk.inputCharacters, rows: [{label: "Model attempts", value: attempts}, {label: "Source overlap", value: chunk.overlap === "one-page" ? "One page" : "None"}, {label: "Artifact", value: chunk.id, code: true}]});
+  const sharedReadingDuration = Number(chunk.chapterReadingDurationSeconds);
+  const sharedReading = Boolean(chunk.chapterReadingInputSignature) && Number.isFinite(sharedReadingDuration);
+  const runDetails = analysisRunDetails({title: "Dossier details", model: chunk.dossierModel, startedAt: chunk.dossierStartedAt, completedAt: chunk.dossierCompletedAt, duration: sharedReading ? null : chunk.dossierDurationSeconds, durationLabel: sharedReading ? `Included in Chapter Reading (${formatRunDuration(sharedReadingDuration)} total)` : "", status, inputCharacters: chunk.inputCharacters, rows: [{label: "Model attempts", value: attempts}, {label: "Source overlap", value: chunk.overlap === "one-page" ? "One page" : "None"}, {label: "Artifact", value: chunk.id, code: true}]});
   const statusBody = `${chunk.dossierError ? `<p class="pipeline-error">${escapeHtml(chunk.dossierError)}</p>` : ""}${runDetails}`;
   return analysisDisclosure({className: "dossier-chunk", status, key: chunk.id, open: openRows.has(chunk.id), heading: displayHeading(chunk.chapterLabel) || `Chapter ${chunk.chapterSequence}`, subheading: `${chunk.chapterTitle ? `${displayHeading(chunk.chapterTitle)} · ` : ""}Chunk ${chunk.chunkInChapter}`, range: sourcePageRange(book, chunk.pageStart, chunk.pageEnd), metrics: chunk, body: result, statusBody, sourceSequence: chunk.chapterSequence, refreshKind: "dossier", refreshId: chunk.sequence});
 }
@@ -6274,12 +6646,15 @@ function optionalChapterRows(pipeline, kind, openRows = new Set(), book = {}, re
       : error
         ? `<p>This chapter does not have a usable ${context ? "context checkpoint" : "machine review"}. Select <strong>Failed</strong> for the saved error and run details.</p>`
         : `<p>${escapeHtml(status === "running" ? running : waiting)}</p>`;
+    const sharedReadingDuration = Number(chapter.llmReviewSharedDurationSeconds);
+    const sharedReading = !context && Boolean(chapter.chapterReadingStatus) && Number.isFinite(sharedReadingDuration);
     const details = `${error ? `<p class="pipeline-error">${escapeHtml(error)}</p>` : ""}${analysisRunDetails({
       title: context ? "Context details" : "LLM Review details",
       model: chapter[`${prefix}Model`],
       startedAt: chapter[`${prefix}StartedAt`],
       completedAt: chapter[`${prefix}CompletedAt`],
-      duration: chapter[`${prefix}DurationSeconds`],
+      duration: sharedReading ? null : chapter[`${prefix}DurationSeconds`],
+      durationLabel: sharedReading ? `Included in Chapter Reading (${formatRunDuration(sharedReadingDuration)} total)` : "",
       status,
       inputCharacters: chapter.characterCount || chapter.inputCharacters,
       rows: [
@@ -6382,7 +6757,7 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
   const identitySignature = JSON.stringify({id: book.id, title: book.title, author: book.author, icon: book.icon, priority: book.priority, manuscriptId: book.manuscriptId, sourceFilename: book.sourceFilename, ingestedAt: book.ingestedAt, llmReviewEnabled: book.llmReviewEnabled});
   const sameIdentity = bookPage.dataset.identitySignature === identitySignature;
   const body = document.querySelector("#book-workspace-body");
-  const openRows = new Set([...body.querySelectorAll("details[data-analysis-key][open]")].map((details) => details.dataset.analysisKey));
+  let openRows = new Set([...body.querySelectorAll("details[data-analysis-key][open]")].map((details) => details.dataset.analysisKey));
   const priorIndexQuery = body.querySelector("[data-index-search]")?.value || "";
   const priorScrollY = window.scrollY;
   document.querySelector("#book-page").hidden = false;
@@ -6459,6 +6834,13 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
       if (workspacePipelineNeedsPolling(book.id, pipeline)) state.pipelineTimer = setTimeout(() => showBookPage(book.id, activeTab), pipeline.status === "queued" ? 500 : 1800);
       return;
     }
+    // A polling request can spend long enough in flight for the reader to
+    // open or close a disclosure after the request began. Snapshot again at
+    // the last possible moment so the incoming render cannot undo that newer
+    // choice with stale pre-fetch DOM state.
+    if (sameWorkspace) {
+      openRows = new Set([...body.querySelectorAll("details[data-analysis-key][open]")].map((details) => details.dataset.analysisKey));
+    }
     const running = pipeline.status === "running";
     const queued = pipeline.status === "queued";
     const chapterMapApproved = Boolean(pipeline.chapterMapApproved);
@@ -6520,8 +6902,25 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
       const preparationIds = new Set(["source", "extraction", "structure", "chapter-archive", "chunking"]);
       const preparation = fixedStages.filter((stage) => preparationIds.has(stage.id));
       const finishing = fixedStages.filter((stage) => !preparationIds.has(stage.id));
-      const chapterLedger = chapterPipelineLedger(pipeline, book, openRows);
-      body.innerHTML = workspaceTaskView({icon: "pipeline", title: "Reading pipeline", subtitle: pipeline.message || "Ready.", actions: pipelineWorkspaceActions, explanationTitle: "The pipeline is the work ledger.", explanation: "It shows every elementary job in the order Bookinator attempts it. Stage totals summarize the ledger; they are not queue items.", error: pipelineError, progress: pipelineProgressMarkup, content: `${provisionalAnalysisNotice(pipeline)}${chapterMapWarning}<section class="pipeline-ledger-section"><header><span>Preparation</span><h3>Manuscript intake</h3></header><div class="pipeline-stages">${preparation.map((stage) => stageMarkup(stage, pipeline, book, openRows)).join("")}</div></section>${chapterLedger}${finishing.length ? `<section class="pipeline-ledger-section"><header><span>After analysis</span><h3>Book-level completion</h3></header><div class="pipeline-stages">${finishing.map((stage) => stageMarkup(stage, pipeline, book, openRows)).join("")}</div></section>` : ""}`});
+      const sectionOpen = (key) => sameWorkspace ? openRows.has(key) : pipelineDisclosureOpen(book.id, key);
+      const intakeLedger = pipelineLedgerDisclosure({
+        key: "pipeline-section-intake",
+        open: sectionOpen("pipeline-section-intake"),
+        eyebrow: "Preparation",
+        title: "Manuscript intake",
+        summary: pipelineLedgerProgress(preparation),
+        body: `<div class="pipeline-stages">${preparation.map((stage) => stageMarkup(stage, pipeline, book, openRows)).join("")}</div>`,
+      });
+      const chapterLedger = chapterPipelineLedger(pipeline, book, openRows, sectionOpen("pipeline-section-chapters"));
+      const completionLedger = finishing.length ? pipelineLedgerDisclosure({
+        key: "pipeline-section-completion",
+        open: sectionOpen("pipeline-section-completion"),
+        eyebrow: "After analysis",
+        title: "Book-level completion",
+        summary: pipelineLedgerProgress(finishing),
+        body: `<div class="pipeline-stages">${finishing.map((stage) => stageMarkup(stage, pipeline, book, openRows)).join("")}</div>`,
+      }) : "";
+      body.innerHTML = workspaceTaskView({icon: "pipeline", title: "Reading pipeline", subtitle: pipeline.message || "Ready.", actions: pipelineWorkspaceActions, explanationTitle: "The pipeline is the work ledger.", explanation: "It shows every elementary job in the order Bookinator attempts it. Stage totals summarize the ledger; they are not queue items.", error: pipelineError, progress: pipelineProgressMarkup, content: `${provisionalAnalysisNotice(pipeline)}${chapterMapWarning}${intakeLedger}${chapterLedger}${completionLedger}`});
     } else if (activeTab === "chapters") {
       const mapReady = chapterMapReadyForReview(pipeline);
       const chapterAction = !mapReady
@@ -7444,6 +7843,9 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
       sortQuestions("source", "asc");
     }
     const collapseButton = body.querySelector("[data-collapse-analysis]");
+    body.querySelectorAll('details[data-analysis-key^="pipeline-section-"], details[data-analysis-key^="pipeline-chapter-"]').forEach((details) => {
+      details.addEventListener("toggle", () => rememberPipelineDisclosure(book.id, details.dataset.analysisKey, details.open));
+    });
     if (collapseButton) {
       const disclosureRows = [...body.querySelectorAll("details")];
       const syncCollapseButton = () => {

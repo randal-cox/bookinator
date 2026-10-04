@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd "$(dirname "$0")/.." && pwd -P)"
+command="$project_dir/node_modules/.bin/inator"
+
+if [[ ! -x "$command" ]]; then
+  printf 'Installed Inator command is unavailable: %s\n' "$command" >&2
+  printf 'Run npm install in %s.\n' "$project_dir" >&2
+  exit 1
+fi
+
+exec env INATOR_PROJECT_DIR="$project_dir" "$command" "$@"
