@@ -2111,8 +2111,8 @@ async function openSystemPanel(panelName) {
         }
       };
       const primaryRecommendation = system.models.roleRecommendations.primary;
-      const heavyweightAdvice = system.memoryGiB >= 320 ? "This Mac can also run the 235B Q8 heavyweight as a demanding second opinion." : system.memoryGiB >= 180 ? "This Mac can also run the 235B Q4 heavyweight as a demanding second opinion." : "Skip the 235B heavyweight on this machine; leave memory for long context and the rest of Bookinator.";
-      document.querySelector("#hardware-advice").innerHTML = `<strong>${system.memoryGiB} GB of unified memory gives Bookinator room to think.</strong>Use <b>${escapeHtml(primaryRecommendation)}</b> as the primary reader. The fast utility model handles inexpensive intake work. ${heavyweightAdvice}`;
+      const fastAssignment = system.models.roles.fast;
+      document.querySelector("#hardware-advice").innerHTML = `<strong>${system.memoryGiB} GB of unified memory gives Bookinator room to think.</strong>Use <b>${escapeHtml(primaryRecommendation)}</b> as the primary reader. <b>${escapeHtml(fastAssignment || "No model assigned")}</b> remains the fast intake model until the recorded speed-and-quality comparison is complete.`;
       document.querySelector("#role-models").innerHTML = Object.entries(system.models.roleLabels).map(([role, label]) => `<div class="role-model-row"><label for="role-${role}">${escapeHtml(label)}</label><select id="role-${role}" data-model-role="${role}"><option value=""${system.models.roles[role] ? "" : " selected"}>Not assigned</option>${ollama.models.map((model) => `<option value="${escapeHtml(model)}"${model === system.models.roles[role] ? " selected" : ""}>${escapeHtml(model)}${model === system.models.roleRecommendations[role] ? " · recommended" : ""}</option>`).join("")}</select></div>`).join("");
       document.querySelectorAll("[data-model-role]").forEach((select) => select.addEventListener("change", async () => {
         const saveResponse = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({role: select.dataset.modelRole, model: select.value})});

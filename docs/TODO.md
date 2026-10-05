@@ -69,6 +69,14 @@ the model recorded on each completed run remains visible as provenance. Keep
 specialist non-LLM dependencies, such as the emotion classifier, explicit in
 Machine without pretending they are interchangeable reader roles.
 
+- **Benchmark the fast role before replacing Qwen 2.5.** Compare the installed
+  `qwen2.5:7b` intake assignment with `qwen3.8:27b` on the same representative
+  manuscript openings and utility schemas. Record cold-start time, warm
+  tokens/second, wall-clock completion, schema-validity rate, title/author
+  accuracy, and any downstream corrections. Keep 2.5 only if its speed benefit
+  is material and its bounded outputs remain equivalent enough for intake;
+  otherwise consolidate the fast role on Qwen 3.8.
+
 The model-free one-book publication described in
 [`MODEL-FREE-EXPORT-TODO.md`](MODEL-FREE-EXPORT-TODO.md) remains the distribution
 follow-through. It should let one capable Bookinator machine produce an

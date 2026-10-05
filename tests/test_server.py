@@ -3300,10 +3300,11 @@ def test_metadata_model_prefers_small_general_model_families() -> None:
     assert choose_primary_model([*models, "deepseek-r1:latest"]) == "qwen2.5:32B"
 
 
-def test_large_memory_recommends_large_primary_editor() -> None:
-    assert recommended_roles(645)["primary"] == "qwen3.5:122b"
-    assert recommended_roles(645) == {"primary": "qwen3.5:122b", "fast": "qwen3.5:9b"}
-    assert recommended_roles(64) == {"primary": "qwen3.8:27b", "fast": "qwen3.5:9b"}
+def test_model_recommendations_use_qwen_38_without_replacing_proven_fast_intake() -> None:
+    expected = {"primary": "qwen3.8:27b", "fast": "qwen2.5:7b"}
+    assert recommended_roles(645) == expected
+    assert recommended_roles(64) == expected
+    assert [model["tag"] for model in server.MODEL_CATALOG] == ["qwen3.8:27b"]
 
 
 def test_chapters_keep_manuscript_order_regardless_of_title() -> None:

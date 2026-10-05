@@ -94,11 +94,7 @@ MODEL_ROLES = {
     "fast": "Fast intake & utilities",
 }
 MODEL_CATALOG = [
-    {"tag": "qwen3.5:9b", "sizeGb": 6.6, "tier": "quick", "label": "Quick reader", "use": "Intake, extraction, and inexpensive structured passes", "hf": "https://huggingface.co/Qwen"},
-    {"tag": "qwen3.8:27b", "sizeGb": 18, "tier": "balanced", "label": "Balanced editor", "use": "Chapter reading and routine editorial roles", "hf": "https://huggingface.co/Qwen/Qwen3.8-27B"},
-    {"tag": "qwen3.5:122b", "sizeGb": 81, "tier": "primary", "label": "Primary editor", "use": "Whole-book synthesis, continuity, structure, and argument", "hf": "https://huggingface.co/Qwen"},
-    {"tag": "qwen3:235b-a22b-instruct-2507-q8_0", "sizeGb": 250, "tier": "heavy", "label": "Heavyweight reviewer", "use": "Maximum-capability comparison and difficult adjudication", "hf": "https://huggingface.co/Qwen/Qwen3-235B-A22B-Instruct-2507"},
-    {"tag": "qwen3-embedding:8b", "sizeGb": 4.7, "tier": "embedding", "label": "Similarity engine", "use": "Redundancy candidates and evidence retrieval", "hf": "https://huggingface.co/Qwen/Qwen3-Embedding-8B"},
+    {"tag": "qwen3.8:27b", "sizeGb": 18, "tier": "recommended", "label": "Qwen 3.8 editor", "use": "Primary chapter reading, whole-book synthesis, and editorial analysis", "hf": "https://huggingface.co/Qwen/Qwen3.8-27B"},
 ]
 API_FEATURES = {
     "chapterMapApproval": 1,
@@ -11011,10 +11007,11 @@ def machine_readiness(ollama: dict[str, object] | None = None) -> dict[str, obje
 
 
 def recommended_roles(memory_gib: float) -> dict[str, str]:
-    primary = "qwen3.5:122b" if memory_gib >= 128 else "qwen3.8:27b" if memory_gib >= 48 else "qwen3.5:9b"
     return {
-        "primary": primary,
-        "fast": "qwen3.5:9b",
+        "primary": "qwen3.8:27b",
+        # Preserve the proven small intake recommendation until the recorded
+        # Qwen 2.5 versus 3.8 intake benchmark establishes a better choice.
+        "fast": "qwen2.5:7b",
     }
 
 
