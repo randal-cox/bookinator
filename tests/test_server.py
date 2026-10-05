@@ -537,6 +537,19 @@ def test_system_status_is_local_only() -> None:
     assert set(status["models"]["roles"]) == {"primary", "fast"}
 
 
+def test_machine_readiness_trusts_a_reachable_ollama_service() -> None:
+    readiness = server.machine_readiness({"installed": False, "running": True, "version": "1.2.3", "models": []})
+    ollama = next(check for check in readiness["checks"] if check["id"] == "ollama")
+    assert ollama["status"] == "ready"
+    assert ollama["value"] == "Ollama 1.2.3"
+    assert "serving Bookinator" in ollama["detail"]
+
+
+def test_local_executable_checks_canonical_homebrew_location_when_path_is_restricted() -> None:
+    with patch("bookinator.server.__main__.shutil.which", return_value=None), patch.object(Path, "is_file", lambda path: str(path) == "/opt/homebrew/bin/brew"), patch("bookinator.server.__main__.os.access", return_value=True):
+        assert server.local_executable("brew") == "/opt/homebrew/bin/brew"
+
+
 def test_analysis_ui_does_not_offer_per_task_model_overrides() -> None:
     root = Path(__file__).parents[1]
     app = (root / "web" / "app.js").read_text(encoding="utf-8")
@@ -2924,7 +2937,7 @@ def test_chapter_source_control_lives_with_source_metrics_not_identity() -> None
     assert "metadata: chapterSourceMetadata(chapter.sequence || chapter.number, title, stats)" in chapter_map
 
 
-def test_primary_navigation_unifies_machine_and_pipeline_with_responsive_status() -> None:
+def test_machine_is_low_frequency_workspace_navigation() -> None:
     root = Path(__file__).parents[1]
     page = (root / "web" / "index.html").read_text(encoding="utf-8")
     app = (root / "web" / "app.js").read_text(encoding="utf-8")
@@ -2933,7 +2946,11 @@ def test_primary_navigation_unifies_machine_and_pipeline_with_responsive_status(
     assert "mountInatorAppShell" in shell
     assert "createWorkspaceCapabilityRegistry" in shell
     assert '{href: "#/books", route: "books", label: "Books", detail: "Library"}' in shell
-    assert '{href: "#/machine", route: "machine", label: "Machine", detail: "Local"}' in shell
+    assert 'id: "machine"' in shell
+    assert 'detail: "Readiness and local models"' in shell
+    assert 'href: "#/machine"' in shell
+    navigation = shell.split("navigation: [", 1)[1].split("],", 1)[0]
+    assert 'label: "Machine"' not in navigation
     assert 'data-system-panel="machine"' in page
     assert 'data-system-panel="models"' in page
     assert '<main class="machine-page" id="machine-page" hidden>' in page

@@ -10932,6 +10932,22 @@ def physical_memory_gib() -> float:
         return 0
 
 
+def local_executable(name: str) -> str | None:
+    """Find local tools even when a GUI launcher supplies a minimal PATH."""
+    if found := shutil.which(name):
+        return found
+    candidates = {
+        "brew": ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"),
+        "uv": ("/opt/homebrew/bin/uv", "/usr/local/bin/uv"),
+        "ollama": (
+            "/opt/homebrew/bin/ollama",
+            "/usr/local/bin/ollama",
+            "/Applications/Ollama.app/Contents/Resources/ollama",
+        ),
+    }
+    return next((path for path in candidates.get(name, ()) if Path(path).is_file() and os.access(path, os.X_OK)), None)
+
+
 def machine_readiness(ollama: dict[str, object] | None = None) -> dict[str, object]:
     """Return actionable host checks without confusing unknown with failure."""
     system = platform.system()
@@ -10940,16 +10956,17 @@ def machine_readiness(ollama: dict[str, object] | None = None) -> dict[str, obje
     python_version = platform.python_version()
     python_supported = sys.version_info >= (3, 11)
     pip_available = importlib.util.find_spec("pip") is not None
-    uv_available = shutil.which("uv") is not None
+    uv_available = local_executable("uv") is not None
     ollama = ollama or ollama_status()
     ollama_version = str(ollama.get("version") or "")
     ollama_installed = bool(ollama.get("installed"))
     ollama_running = bool(ollama.get("running"))
-    brew_available = system == "Darwin" and shutil.which("brew") is not None
+    brew_path = local_executable("brew") if system == "Darwin" else None
+    brew_available = brew_path is not None
     brew_version = ""
     if brew_available:
         try:
-            brew_version = subprocess.run(["brew", "--version"], capture_output=True, text=True, timeout=5, check=True).stdout.splitlines()[0].strip()
+            brew_version = subprocess.run([brew_path, "--version"], capture_output=True, text=True, timeout=5, check=True).stdout.splitlines()[0].strip()
         except (OSError, subprocess.SubprocessError, IndexError):
             brew_available = False
     try:
@@ -10984,7 +11001,7 @@ def machine_readiness(ollama: dict[str, object] | None = None) -> dict[str, obje
         {"id": "memory", "label": "Memory", "status": "warning" if not memory_gib else "ready" if memory_gib >= 32 else "blocked", "value": f"{memory_gib:g} GB" if memory_gib else "Unknown", "detail": "Bookinator's supported floor for model-backed analysis is 32 GB of physical memory." if memory_gib else "Bookinator could not measure physical memory on this computer.", "instructions": "memory" if not memory_gib or memory_gib < 32 else ""},
         *([{"id": "homebrew", "label": "Homebrew", "status": "ready" if brew_available else "blocked", "value": brew_version or "Missing", "detail": "Bookinator uses Homebrew to install and maintain Ollama and other native dependencies on macOS." if brew_available else "Homebrew is required for Bookinator's managed dependency installation on macOS.", "instructions": "homebrew" if not brew_available else ""}] if system == "Darwin" else []),
         {"id": "python", "label": "Python runtime", "status": "ready" if python_supported else "blocked", "value": python_version, "detail": "Python 3.11 or newer is available." if python_supported else "This source build requires Python 3.11 or newer.", "instructions": "python" if not python_supported else ""},
-        {"id": "ollama", "label": "Ollama runtime", "status": "ready" if ollama_installed and ollama_running else "repairable" if brew_available else "blocked", "value": f"Ollama {ollama_version}" if ollama_version else "Not installed or version unavailable", "detail": "Ollama is installed and serving Bookinator's local models." if ollama_running else "Bookinator requires a running Ollama service for local model analysis.", "action": "update-ollama" if brew_available and not ollama_installed else "", "instructions": "ollama" if not brew_available and not ollama_running else ""},
+        {"id": "ollama", "label": "Ollama runtime", "status": "ready" if ollama_running else "repairable" if brew_available else "blocked", "value": f"Ollama {ollama_version}" if ollama_version else "Running (version unavailable)" if ollama_running else "Not installed or version unavailable", "detail": "Ollama is serving Bookinator's local models." if ollama_running else "Bookinator requires a running Ollama service for local model analysis.", "action": "update-ollama" if brew_available and not ollama_installed and not ollama_running else "", "instructions": "ollama" if not brew_available and not ollama_running else ""},
         {"id": "package-installer", "label": "Library installer", "status": "ready" if pip_available or uv_available else "warning", "value": "uv" if uv_available else "pip" if pip_available else "Missing", "detail": "Bookinator can install its managed Python components." if pip_available or uv_available else "Automatic repair of Python components is unavailable until uv or pip is installed.", "instructions": "package-installer" if not pip_available and not uv_available else ""},
         {"id": "storage", "label": "Working storage", "status": "warning" if not free_disk_gib else "ready" if free_disk_gib >= 10 else "blocked", "value": f"{free_disk_gib:g} GB free" if free_disk_gib else "Unknown", "detail": "At least 10 GB of working headroom is required in addition to model downloads." if free_disk_gib else "Bookinator could not measure free space on its data volume.", "instructions": "storage" if not free_disk_gib or free_disk_gib < 10 else ""},
         {"id": "pdf-reader", "label": "Document reader", "status": "ready" if pdf_reader_ready() else "repairable" if pip_available or uv_available else "blocked", "value": "PyMuPDF ready" if pdf_reader_ready() else "PyMuPDF missing", "detail": "PDF and normalized manuscript pages can be read locally." if pdf_reader_ready() else "Bookinator needs its local document reader for manuscript ingestion.", "action": "install-pdf-reader" if not pdf_reader_ready() and (pip_available or uv_available) else "", "instructions": "package-installer" if not pdf_reader_ready() and not (pip_available or uv_available) else ""},
@@ -11013,7 +11030,7 @@ def managed_package_install_command(*requirements: str) -> list[str]:
     """Use the installer available for this exact runtime, preferring pip."""
     if importlib.util.find_spec("pip") is not None:
         return [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--target", str(LOCAL_PACKAGES), *requirements]
-    if uv := shutil.which("uv"):
+    if uv := local_executable("uv"):
         return [uv, "pip", "install", "--python", sys.executable, "--target", str(LOCAL_PACKAGES), *requirements]
     return []
 
@@ -11361,7 +11378,7 @@ def infer_title_mark(title: str, models: list[str], configured_model: str = "") 
 
 
 def ollama_status() -> dict[str, object]:
-    installed = shutil.which("ollama") is not None
+    installed = local_executable("ollama") is not None
     running = False
     models: list[str] = []
     version = ""
@@ -12471,14 +12488,15 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
             self.send_json({"installed": installed, "message": message}, HTTPStatus.OK if installed else HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         if route.path == "/api/setup/ollama":
-            if platform.system() != "Darwin" or not shutil.which("brew"):
+            brew_path = local_executable("brew") if platform.system() == "Darwin" else None
+            if not brew_path:
                 self.send_json({"error": "Automatic Ollama installation is currently available only for Homebrew-managed macOS systems.", "instructions": "ollama"}, HTTPStatus.NOT_IMPLEMENTED)
                 return
             if pipeline_is_enabled():
                 self.send_json({"error": "Stop the analysis queue before installing or updating Ollama so an active model response is not interrupted."}, HTTPStatus.CONFLICT)
                 return
-            installed = subprocess.run(["brew", "list", "--versions", "ollama"], capture_output=True, text=True, timeout=30).returncode == 0
-            command = ["brew", "upgrade" if installed else "install", "ollama"]
+            installed = subprocess.run([brew_path, "list", "--versions", "ollama"], capture_output=True, text=True, timeout=30).returncode == 0
+            command = [brew_path, "upgrade" if installed else "install", "ollama"]
             try:
                 result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
             except (OSError, subprocess.TimeoutExpired) as error:

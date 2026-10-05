@@ -111,7 +111,17 @@ export function createBookinatorWorkspaceRegistry(identity = loadBookinatorIdent
     base: {
       identity: {href: "#/workspace/identity", route: "workspace-identity", detail: identity.shortName || "Local attribution"},
       workspace: {href: "#/workspace/backup", route: "workspace", detail: "Complete library backup"}
-    }
+    },
+    extensions: [{
+      id: "machine",
+      label: "Machine",
+      detail: "Readiness and local models",
+      icon: "machine",
+      href: "#/machine",
+      route: "machine",
+      order: 240,
+      createView: () => null
+    }]
   });
 }
 
@@ -134,8 +144,7 @@ export function mountBookinatorShell({active = "books", selectedBook = null} = {
     navigation: [
       {href: "#/books", route: "books", label: "Books", detail: "Library"},
       {href: selectedBook ? `#/book/${selectedBook.id}/${selectedAnalysisTab}` : "#/books", route: "analysis", label: "Analysis", selectedObject: {displayName: selectedBook?.title || "", emptyLabel: "No book selected"}},
-      {href: "#/pipeline", route: "pipeline", label: "Pipeline", detail: "Local queue"},
-      {href: "#/machine", route: "machine", label: "Machine", detail: "Local"}
+      {href: "#/pipeline", route: "pipeline", label: "Pipeline", detail: "Local queue"}
     ],
     footer: {links: productShellFooterLinks(bookinatorShellPolicy, {identity, capabilities: ["resources"]})}
   });
