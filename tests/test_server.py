@@ -533,6 +533,8 @@ def test_system_status_is_local_only() -> None:
         assert [check["id"] for check in status["readiness"]["checks"]][:3] == ["operating-system", "memory", "homebrew"]
     assert all(check["status"] in {"ready", "repairable", "warning", "blocked"} for check in status["readiness"]["checks"])
     assert set(status["emotionModel"]) >= {"runtime", "model", "ready", "modelId", "runtimeError"}
+    assert set(status["glinerModel"]) >= {"runtime", "model", "ready", "modelId", "runtimeError", "provider"}
+    assert status["glinerModel"]["modelId"] == "fastino/gliner2.5-small-v1"
     assert status["models"]["roleLabels"] == {"primary": "Primary reader", "fast": "Fast intake & utilities"}
     assert set(status["models"]["roles"]) == {"primary", "fast"}
 
@@ -2967,6 +2969,8 @@ def test_machine_is_low_frequency_workspace_navigation() -> None:
     assert "Showing the checks this server can verify." in app
     assert "machineChecks.map(readinessCheckMarkup)" in app
     assert 'label: "Bookinator server", status: "ready"' in app
+    assert "GLiNER 2.5 specialist is ready" in app
+    assert "outside Ollama" in app
     assert 'status === "blocked" ? "!"' in app
     assert 'data-setup-instructions=' in app
     assert 'check.action === "install-pdf-reader"' in app

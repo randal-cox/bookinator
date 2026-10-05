@@ -11064,6 +11064,25 @@ def emotion_model_status() -> dict[str, object]:
     return {"runtime": runtime, "model": cached, "ready": runtime and cached, "modelId": EMOTION_MODEL_ID, "runtimeError": runtime_error}
 
 
+def gliner_model_status() -> dict[str, object]:
+    """Report the isolated GLiNER runtime and pinned product checkpoint."""
+    runtime = ROOT / ".venv-gliner" / "bin" / "python"
+    runner = ROOT / "tools" / "gliner_chapter_spike.py"
+    package_files = (ROOT / ".venv-gliner" / "lib").glob("python*/site-packages/gliner2/__init__.py")
+    runtime_ready = runtime.is_file() and runner.is_file() and any(package_files)
+    cache_root = Path(os.environ.get("HF_HOME") or (Path.home() / ".cache" / "huggingface"))
+    model_root = cache_root / "hub" / "models--fastino--gliner2.5-small-v1" / "snapshots"
+    cached = model_root.is_dir() and any((snapshot / "config.json").is_file() for snapshot in model_root.iterdir() if snapshot.is_dir())
+    return {
+        "runtime": runtime_ready,
+        "model": cached,
+        "ready": runtime_ready and cached,
+        "modelId": GLINER_MODEL_ID,
+        "runtimeError": "" if runtime_ready else "The isolated GLiNER runtime is incomplete.",
+        "provider": "isolated-python-hugging-face",
+    }
+
+
 def install_emotion_model() -> tuple[bool, str]:
     """Install the explicit local classifier runtime and cache the pinned model."""
     LOCAL_PACKAGES.mkdir(parents=True, exist_ok=True)
@@ -11469,6 +11488,7 @@ def system_status() -> dict[str, object]:
         "readiness": machine_readiness(ollama),
         "pdfReader": pdf_reader_ready(),
         "emotionModel": emotion_model_status(),
+        "glinerModel": gliner_model_status(),
         "ollama": ollama,
         "models": {
             "intake": assignments["fast"],
