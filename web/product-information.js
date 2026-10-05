@@ -1,4 +1,4 @@
-import { createProductAboutPage, createProductDocsFlow, defineProductAbout, defineProductShellPolicy, productShellFooterLinks } from "/commons/@inator/ui/index.js";
+import { createProductAboutPage, createProductDocsFlow, defineProductAbout } from "/commons/@inator/ui/index.js";
 
 export const bookinatorAbout = defineProductAbout({
   product: {
@@ -14,18 +14,6 @@ export const bookinatorAbout = defineProductAbout({
     text: "Randal Cox. Bookinator, version 0.1.0 (2026)."
   }
 });
-
-export const bookinatorFooterLinks = productShellFooterLinks(defineProductShellPolicy({
-  routes: {
-    about: { href: "#about/premise", route: "about" },
-    help: { href: "#docs/architecture", route: "docs" }
-  },
-  labels: { help: "Docs" },
-  omit: ["privacy", "security", "milestones", "releases", "roadmap", "resources"],
-  extensions: [
-    { id: "resources", href: "/docs/presentations/", route: "resources", label: "Resources", group: "resources", after: "help" }
-  ]
-}));
 
 const recordRoutes = Object.freeze({
   milestones: "#releases/milestones",

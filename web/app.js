@@ -1,7 +1,8 @@
 import { articlePages, roadmapItems } from "./pages.js";
-import { createProductHistoryView, mountProductShell } from "/commons/@inator/ui/index.js";
+import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
-import { bookinatorFooterLinks, createBookinatorAboutPage } from "./product-information.js";
+import { createBookinatorAboutPage } from "./product-information.js";
+import { mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=common-shell-180";
 import { createBookinatorDocsFlow } from "./product-docs.js";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
 import { isTemporalDossierObservation } from "./dossier-index.js";
@@ -26,13 +27,12 @@ const pipelinePageSizeKey = "bookinator.pipeline-page-size.v1";
 const developmentControlsEnabled = true;
 const pipelinePageSizes = [5, 10, 25, 50, "all"];
 
-mountProductShell({
-  footerMount: document.querySelector("[data-inator-product-footer]"),
-  brand: { href: "#books", label: "Bookinator" },
-  footer: {
-    links: bookinatorFooterLinks
-  }
-});
+try {
+  mountBookinatorShell();
+} catch (error) {
+  console.error("[Bookinator shell]", error);
+  throw error;
+}
 
 function updateFooterRoute(active = "") {
   document.querySelectorAll("[data-inator-product-footer] a").forEach((link) => {
@@ -282,25 +282,12 @@ function updateGlobalPipelineStatus() {
   const percent = total ? Math.round(completed / total * 100) : 0;
   const etaSeconds = Number(pipeline.etaSeconds || 0);
   const etaText = etaSeconds > 0 ? formatEta(etaSeconds) : waitingCount > 0 ? "Estimating from recent work…" : "No queued work remaining";
-  const navigation = document.querySelector("#pipeline-nav");
-  const navigationStatus = document.querySelector("#pipeline-nav-status");
-  const navigationAlert = document.querySelector("#pipeline-nav-alert");
-  const navigationToggle = document.querySelector("#navigation-toggle");
-  const navigationToggleAlert = document.querySelector("#navigation-toggle-alert");
+  const navigation = document.querySelector('[data-route="pipeline"]');
+  const navigationStatus = navigation?.querySelector("small");
   const diagnosticCount = Number(pipeline.diagnosticCount || 0);
   navigation?.classList.toggle("running", running);
   navigation?.classList.toggle("urgent", !enabled && waitingCount > 0);
-  navigationToggle?.classList.toggle("running", running);
-  navigationToggle?.classList.toggle("urgent", !enabled && waitingCount > 0);
-  if (navigationAlert) {
-    navigationAlert.hidden = diagnosticCount === 0;
-    navigationAlert.textContent = String(diagnosticCount);
-    navigationAlert.setAttribute("aria-label", `${diagnosticCount} analysis ${diagnosticCount === 1 ? "problem" : "problems"}`);
-  }
-  if (navigationToggleAlert) {
-    navigationToggleAlert.hidden = diagnosticCount === 0;
-    navigationToggleAlert.textContent = String(diagnosticCount);
-  }
+  navigation?.toggleAttribute("data-has-errors", diagnosticCount > 0);
   if (navigationStatus) navigationStatus.textContent = running && etaSeconds > 0
     ? formatCompactEta(etaSeconds)
     : running
@@ -614,7 +601,8 @@ function updateAnalysisNavigation() {
     state.currentBookId = current.id;
     localStorage.setItem(currentBookKey, current.id);
   }
-  document.querySelector("#current-analysis-book").textContent = current?.title || "No book selected";
+  const detail = document.querySelector('[data-route="analysis"] small');
+  if (detail) detail.textContent = current?.title || "No book selected";
   return current;
 }
 
@@ -2000,8 +1988,9 @@ async function openSystemPanel(panelName) {
   document.querySelector("#article-page").hidden = true;
   document.querySelector("#book-page").hidden = true;
   document.querySelector("#machine-page").hidden = false;
+  document.querySelector("#workspace-page").hidden = true;
   document.querySelector("#welcome-dialog").hidden = true;
-  document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.toggle("active", item.dataset.page === "machine"));
+  mountBookinatorShell({active: "machine", selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   updateFooterRoute();
   const machinePanel = document.querySelector("#machine-panel");
   const modelsPanel = document.querySelector("#models-panel");
@@ -2015,7 +2004,7 @@ async function openSystemPanel(panelName) {
     else tab.removeAttribute("aria-current");
   });
   updateLocalQueueStatus();
-  document.title = `${modelsSelected ? "Models" : "Machine"} · Bookinator`;
+  document.title = `Bookinator · ${modelsSelected ? "Models" : "Machine"}`;
   const checks = document.querySelector("#system-checks");
   const modelChecks = document.querySelector("#model-checks");
   try {
@@ -2027,13 +2016,13 @@ async function openSystemPanel(panelName) {
     const machineChecks = hasReadinessManifest ? system.readiness.checks : legacyMachineChecks(system);
     const compatibilityNotice = hasReadinessManifest ? "" : '<div class="system-version-notice"><strong>Showing the checks this server can verify.</strong><span>Restart <code>./bin/serve</code> to add the complete OS, storage, and installer checks.</span></div>';
     checks.innerHTML = `${compatibilityNotice}${machineChecks.map(readinessCheckMarkup).join("")}`;
-    const machineNavigation = document.querySelector("#machine-nav");
-    const machineNavigationStatus = document.querySelector("#machine-nav-status");
+    const machineNavigation = document.querySelector('[data-route="machine"]');
+    const machineNavigationStatus = machineNavigation?.querySelector("small");
     const blockedCount = hasReadinessManifest ? Number(system.readiness.blockedCount || 0) : machineChecks.filter((check) => check.status === "blocked").length;
     const readinessStatus = hasReadinessManifest ? system.readiness.status : blockedCount ? "blocked" : "warning";
-    machineNavigationStatus.textContent = blockedCount ? `${blockedCount} blocking` : readinessStatus === "warning" ? "Needs attention" : "Local · Ready";
-    machineNavigation.classList.toggle("blocked", blockedCount > 0);
-    machineNavigation.classList.toggle("warning", !blockedCount && readinessStatus === "warning");
+    if (machineNavigationStatus) machineNavigationStatus.textContent = blockedCount ? `${blockedCount} blocking` : readinessStatus === "warning" ? "Needs attention" : "Local · Ready";
+    machineNavigation?.classList.toggle("blocked", blockedCount > 0);
+    machineNavigation?.classList.toggle("warning", !blockedCount && readinessStatus === "warning");
     modelChecks.innerHTML = `
       <div class="system-check ${emotionModel.ready ? "" : "warning"}" id="emotion-model-check"><b>${emotionModel.ready ? "✓" : "!"}</b><div><strong>${emotionModel.ready ? "Emotion classifier is ready" : "Emotion classifier needs installing"}</strong><small>${emotionModel.ready ? "Hartmann DistilRoBERTa is cached and runs locally." : "This installs PyTorch, Transformers, and the pinned Hartmann model inside Bookinator."}</small>${emotionModel.ready ? '<div class="model-card-actions"><a class="component-install-link" href="https://huggingface.co/j-hartmann/emotion-english-distilroberta-base" target="_blank" rel="noreferrer">Inspect model card ↗</a><button class="component-uninstall" data-manual-uninstall="emotion" type="button">Uninstall</button></div>' : '<button class="component-install" id="install-emotion-model" type="button">Install emotion classifier</button>'}</div></div>
       <div class="system-check ${ollama.running ? "ready" : "blocked"}"><b>${ollama.running ? "✓" : "!"}</b><div><strong>${ollama.running ? "Ollama is awake" : ollama.installed ? "Ollama is installed but not running" : "Ollama is not installed"}</strong><small>${ollama.running ? `${ollama.models.length} local ${ollama.models.length === 1 ? "model" : "models"} available.` : "Ollama is required for chapter summaries and other LLM analysis."}</small>${ollama.running ? '<div class="model-card-actions"><a class="component-install-link" href="https://ollama.com/download" target="_blank" rel="noreferrer">Inspect Ollama ↗</a><button class="component-uninstall" data-manual-uninstall="ollama" type="button">Uninstall</button></div>' : setupInstructionsMarkup("ollama")}</div></div>`;
@@ -2234,9 +2223,10 @@ function showBooksPage() {
   document.querySelector("#article-page").hidden = true;
   document.querySelector("#book-page").hidden = true;
   document.querySelector("#machine-page").hidden = true;
-  document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.toggle("active", item.dataset.page === "books"));
+  document.querySelector("#workspace-page").hidden = true;
+  mountBookinatorShell({active: "books", selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   updateFooterRoute();
-  document.title = "Books · Bookinator";
+  document.title = "Bookinator · Books";
 }
 
 function showPipelinePage() {
@@ -2246,13 +2236,14 @@ function showPipelinePage() {
   document.querySelector("#article-page").hidden = true;
   document.querySelector("#book-page").hidden = true;
   document.querySelector("#machine-page").hidden = true;
+  document.querySelector("#workspace-page").hidden = true;
   document.querySelector("#welcome-dialog").hidden = true;
-  document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.toggle("active", item.dataset.page === "pipeline"));
+  mountBookinatorShell({active: "pipeline", selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   updateFooterRoute();
   renderPipelineQueue();
   renderPipelineDiagnostics();
   updateGlobalPipelineStatus();
-  document.title = "Pipeline · Bookinator";
+  document.title = "Bookinator · Pipeline";
 }
 
 function showArticlePage(collection, requestedTab) {
@@ -2265,8 +2256,9 @@ function showArticlePage(collection, requestedTab) {
   document.querySelector("#article-page").hidden = false;
   document.querySelector("#book-page").hidden = true;
   document.querySelector("#machine-page").hidden = true;
+  document.querySelector("#workspace-page").hidden = true;
   document.querySelector("#welcome-dialog").hidden = true;
-  document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.remove("active"));
+  mountBookinatorShell({active: collection, selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   const hero = document.querySelector("#article-hero");
   hero.hidden = collection === "about";
   hero.classList.toggle("has-mark", Boolean(page.mark));
@@ -2299,7 +2291,7 @@ function showArticlePage(collection, requestedTab) {
     location.hash = `${collection}/${button.dataset.articleTab}`;
   }));
   updateFooterRoute(collection);
-  document.title = `${page.title} · Bookinator`;
+  document.title = `Bookinator · ${page.title}`;
   scrollTo({top: 0, behavior: "auto"});
 }
 
@@ -6751,6 +6743,7 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
   document.querySelector("#pipeline-page").hidden = true;
   document.querySelector("#article-page").hidden = true;
   document.querySelector("#machine-page").hidden = true;
+  document.querySelector("#workspace-page").hidden = true;
   const bookPage = document.querySelector("#book-page");
   const sameWorkspace = bookPage.dataset.bookId === bookId && bookPage.dataset.activeTab === activeTab;
   if (bookForm.closest("#book-workspace-body") && (!sameWorkspace || activeTab !== "identity")) restoreBookFormToDialog();
@@ -6762,8 +6755,7 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
   const priorScrollY = window.scrollY;
   document.querySelector("#book-page").hidden = false;
   document.querySelector("#welcome-dialog").hidden = true;
-  document.querySelectorAll(".topbar nav [data-page]").forEach((item) => item.classList.remove("active"));
-  document.querySelector('#analysis-nav').classList.add("active");
+  mountBookinatorShell({active: "analysis", selectedBook: book});
   if (!sameIdentity) {
     bookPage.dataset.identitySignature = identitySignature;
     delete bookPage.dataset.connectionIntersectionKind;
@@ -6786,7 +6778,7 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
     renderWorkspaceNavigation(tabs, book, activeTab);
     body.innerHTML = '<div class="pipeline-loading">Inspecting the local pipeline…</div>';
   }
-  document.title = `${book.title} · Bookinator`;
+  document.title = `Bookinator · ${book.title}`;
   try {
     const response = cachedPipeline ? null : await fetch(`/api/books/${encodeURIComponent(book.id)}/pipeline`);
     const pipeline = cachedPipeline || await response.json();
@@ -8048,53 +8040,28 @@ function installTooltips() {
 }
 
 function route() {
-  const [collection = "books", part, tab, subtab] = location.hash.replace(/^#/, "").split("/");
+  const [collection = "books", part, tab, subtab] = location.hash.replace(/^#\/?/, "").split("/");
   if (collection === "book" && part) showBookPage(part, tab, subtab);
   else if (collection === "pipeline") showPipelinePage();
   else if (collection === "machine") openSystemPanel(part === "models" ? "models" : "machine");
+  else if (collection === "workspace") showWorkspacePage(part);
   else if (collection === "books" || !articlePages[collection]) showBooksPage();
   else showArticlePage(collection, part);
 }
 
-const navigationToggle = document.querySelector("#navigation-toggle");
-const primaryNavigation = document.querySelector("#primary-navigation");
-
-function closePrimaryNavigation() {
-  primaryNavigation?.classList.remove("open");
-  navigationToggle?.setAttribute("aria-expanded", "false");
-  navigationToggle?.setAttribute("aria-label", "Open navigation");
+function showWorkspacePage(kind = "backup") {
+  leaveBookWorkspace();
+  for (const id of ["books-page", "pipeline-page", "article-page", "book-page", "machine-page"]) document.querySelector(`#${id}`).hidden = true;
+  document.querySelector("#workspace-page").hidden = false;
+  document.querySelector("#welcome-dialog").hidden = true;
+  const identity = kind === "identity";
+  mountBookinatorShell({active: identity ? "workspace-identity" : "workspace", selectedBook: state.books.find((book) => book.id === state.currentBookId)});
+  mountBookinatorWorkspace(identity ? "identity" : "backup");
+  updateFooterRoute();
+  document.title = `Bookinator · ${identity ? "Identity" : "Backup"}`;
 }
 
-navigationToggle?.addEventListener("click", (event) => {
-  event.stopPropagation();
-  const opening = !primaryNavigation.classList.contains("open");
-  primaryNavigation.classList.toggle("open", opening);
-  navigationToggle.setAttribute("aria-expanded", String(opening));
-  navigationToggle.setAttribute("aria-label", opening ? "Close navigation" : "Open navigation");
-});
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".topbar")) closePrimaryNavigation();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closePrimaryNavigation();
-});
-window.matchMedia("(min-width: 1051px)").addEventListener?.("change", (event) => { if (event.matches) closePrimaryNavigation(); });
-
-document.querySelectorAll('button[data-page="books"]').forEach((button) => button.addEventListener("click", () => {
-  closePrimaryNavigation();
-  if (location.hash === "#books") showBooksPage();
-  else location.hash = "books";
-}));
-document.querySelector("#pipeline-nav")?.addEventListener("click", () => { closePrimaryNavigation(); location.hash = "pipeline"; });
-document.querySelector("#analysis-nav")?.addEventListener("click", () => {
-  closePrimaryNavigation();
-  const current = updateAnalysisNavigation();
-  location.hash = current ? `book/${current.id}/${rememberedAnalysisTab(current.id)}` : "books";
-});
-document.querySelector("#machine-nav")?.addEventListener("click", () => {
-  closePrimaryNavigation();
-  location.hash = "machine";
-});
+globalThis.addEventListener("bookinator:library-restored", () => refreshLibraryBooks());
 document.querySelector("#refresh-analysis-result")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;
   const bookId = state.currentBookId;

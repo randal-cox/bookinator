@@ -668,10 +668,12 @@ def test_failed_analysis_dialog_calls_its_rerun_action_retry() -> None:
 
 def test_analysis_navigation_remembers_each_books_last_workspace_tab() -> None:
     app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    shell = (Path(__file__).parents[1] / "web" / "product-shell.js").read_text(encoding="utf-8")
     assert 'const analysisTabsKey = "bookinator.analysis-tabs.v1"' in app
     assert "function rememberedAnalysisTab(bookId)" in app
     assert "rememberAnalysisTab(bookId, activeTab)" in app
-    assert '`book/${current.id}/${rememberedAnalysisTab(current.id)}`' in app
+    assert '"bookinator.analysis-tabs.v1"' in shell
+    assert '`#/book/${selectedBook.id}/${selectedAnalysisTab}`' in shell
 
 
 def test_library_uses_one_global_queue_control_and_priority_membership() -> None:
@@ -684,7 +686,8 @@ def test_library_uses_one_global_queue_control_and_priority_membership() -> None
     assert 'id="dequeue-books"' not in page
     assert "Add to pipeline" not in app
     assert "Remove from pipeline" not in app
-    assert 'id="pipeline-nav"' in page
+    shell = (root / "web" / "product-shell.js").read_text(encoding="utf-8")
+    assert '{href: "#/pipeline", route: "pipeline", label: "Pipeline"' in shell
     assert 'id="pipeline-page"' in page
     assert page.index('id="pipeline-page"') < page.index('id="library-pipeline-panel"')
     assert 'id="library-pipeline-panel"' not in page[page.index('id="books-page"'):page.index('id="pipeline-page"')]
@@ -2925,12 +2928,12 @@ def test_primary_navigation_unifies_machine_and_pipeline_with_responsive_status(
     root = Path(__file__).parents[1]
     page = (root / "web" / "index.html").read_text(encoding="utf-8")
     app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
-    assert 'id="primary-navigation"' in page
-    assert 'id="navigation-toggle"' in page
-    assert 'id="navigation-toggle-alert"' in page
-    assert 'id="machine-nav"' in page
-    assert '<strong>Books</strong><small>Library</small>' in page
+    shell = (root / "web" / "product-shell.js").read_text(encoding="utf-8")
+    assert 'data-inator-product-header' in page
+    assert "mountInatorAppShell" in shell
+    assert "createWorkspaceCapabilityRegistry" in shell
+    assert '{href: "#/books", route: "books", label: "Books", detail: "Library"}' in shell
+    assert '{href: "#/machine", route: "machine", label: "Machine", detail: "Local"}' in shell
     assert 'data-system-panel="machine"' in page
     assert 'data-system-panel="models"' in page
     assert '<main class="machine-page" id="machine-page" hidden>' in page
@@ -2940,10 +2943,7 @@ def test_primary_navigation_unifies_machine_and_pipeline_with_responsive_status(
     assert 'id="local-menu"' not in page
     assert "function updateLocalQueueStatus()" in app
     assert 'openSystemPanel("machine")' in app
-    assert 'navigationToggle?.classList.toggle("running", running)' in app
-    assert 'primaryNavigation.classList.toggle("open", opening)' in app
-    assert '.topbar nav.primary-navigation.open' in styles
-    assert '@media (max-width: 1050px)' in styles
+    assert "navigation?.classList.toggle(\"running\", running)" in app
     assert "function readinessCheckMarkup(check)" in app
     assert "function legacyMachineChecks(system)" in app
     assert "Showing the checks this server can verify." in app
@@ -3437,7 +3437,7 @@ def test_leaving_book_workspace_invalidates_delayed_analysis_refresh() -> None:
     app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
     assert "function leaveBookWorkspace()" in app
     assert "state.workspaceRequestId += 1;" in app
-    assert "if (location.hash === \"#books\") showBooksPage();" in app
+    assert 'else if (collection === "books" || !articlePages[collection]) showBooksPage();' in app
     assert "The local worker owns this job." in app
     assert "if (!pipeline.nextAction && !queued && !pausedActions.size) return;" in app
     assert 'definition.resultKey ? {status: "pending"' not in app

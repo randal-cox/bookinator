@@ -12,7 +12,7 @@ __pycache__/
 .inator/rollback/
 .inator/packages/*.tgz
 !.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz
-!.inator/packages/inator-ui-0.4.1-dev.29.tgz
+!.inator/packages/inator-ui-0.4.1-dev.44.tgz
 
 # Generated exports and visual-QA intermediates.
 output/

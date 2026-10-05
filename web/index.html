@@ -9,26 +9,13 @@
     <link rel="stylesheet" href="/commons/@inator/ui/product-history.css" />
     <link rel="stylesheet" href="/commons/@inator/ui/product-information.css" />
     <link rel="stylesheet" href="/commons/@inator/ui/product-shell.css" />
-    <link rel="stylesheet" href="/styles.css?v=pipeline-disclosures-168" />
+    <link rel="stylesheet" href="/commons/@inator/ui/workspace.css" />
+    <link rel="stylesheet" href="/commons/@inator/ui/workspace-backup.css" />
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <a class="brand" href="#about/premise" data-page="about" aria-label="About Bookinator">
-          <img src="/assets/bookinator.svg" alt="" />
-          <span><strong>Bookinator</strong><small>Find what the author forgot.</small></span>
-        </a>
-        <button class="navigation-toggle" id="navigation-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation" aria-label="Open navigation">
-          <span class="navigation-toggle-lines" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="navigation-toggle-status" aria-hidden="true"><i class="navigation-toggle-pulse"></i><b id="navigation-toggle-alert" hidden></b></span>
-        </button>
-        <nav class="primary-navigation" id="primary-navigation" aria-label="Primary navigation">
-          <button class="primary-nav-item active" type="button" data-page="books"><strong>Books</strong><small>Library</small></button>
-          <button class="primary-nav-item analysis-nav" id="analysis-nav" type="button" data-page="analysis"><strong>Analysis</strong><small id="current-analysis-book">No book selected</small></button>
-          <button class="primary-nav-item pipeline-nav" id="pipeline-nav" type="button" data-page="pipeline"><span><i class="pipeline-nav-pulse" aria-hidden="true"></i><strong>Pipeline</strong><b class="pipeline-nav-alert" id="pipeline-nav-alert" hidden></b></span><small id="pipeline-nav-status">Checking queue</small></button>
-          <button class="primary-nav-item machine-nav" id="machine-nav" type="button" data-page="machine"><span><i class="machine-nav-mark" aria-hidden="true"></i><strong>Machine</strong></span><small id="machine-nav-status">Local</small></button>
-        </nav>
-      </header>
+      <header data-inator-product-header></header>
 
       <main class="library-page" id="books-page">
         <header class="library-heading">
@@ -163,6 +150,10 @@
         </section>
       </main>
 
+      <main class="workspace-utility-page" id="workspace-page" hidden>
+        <section class="workspace-utility-page__body" id="workspace-host"></section>
+      </main>
+
       <footer class="app-footer" data-inator-product-footer></footer>
     </div>
 
@@ -291,6 +282,6 @@
       </section>
     </div>
 
-    <script src="/app.js?v=visible-gliner-signals-177" type="module"></script>
+    <script src="/app.js?v=common-shell-180" type="module"></script>
   </body>
 </html>

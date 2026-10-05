@@ -25,11 +25,11 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
     pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
     app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
     history = (ROOT / "web" / "product-history.js").read_text(encoding="utf-8")
-    information = (ROOT / "web" / "product-information.js").read_text(encoding="utf-8")
+    shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
 
     assert 'data-inator-product-footer' in index
-    assert 'href: "#docs/architecture"' in information
-    assert 'label: "Resources"' in information
+    assert 'href: "#docs/architecture"' in shell
+    assert 'label: "Resources"' in shell
     assert 'title: "Milestones, not machinery"' in pages
     assert '/commons/@inator/ui/product-history.css' in index
     assert 'createProductHistoryView' in app
@@ -40,20 +40,21 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
     assert 'title: "Holy Crap, that Worked"' in history
     assert 'title: "Reanimator"' in history
     assert 'title: "The Engine Room"' in history
-    footer_config = app.split("footer: {", 1)[1].split("}", 1)[0]
+    footer_config = shell.split("footer: {", 1)[1].split("}", 1)[0]
     assert "brand:" not in footer_config
     assert "status:" not in footer_config
 
 
 def test_footer_information_architecture_is_about_docs_and_resources():
-    information = (ROOT / "web" / "product-information.js").read_text(encoding="utf-8")
-    labels = ['help: "Docs"', 'label: "Resources"']
-    positions = [information.index(label) for label in labels]
+    shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
+    labels = ['href: "#docs/architecture"', 'label: "Resources"']
+    positions = [shell.index(label) for label in labels]
     assert positions == sorted(positions)
-    assert 'href: "#about/premise"' in information
-    assert 'href: "#docs/architecture"' in information
-    assert 'defineProductShellPolicy' in information
-    assert 'productShellFooterLinks' in information
+    assert 'href: "#about/premise"' in shell
+    assert 'href: "#docs/architecture"' in shell
+    assert 'defineProductShellPolicy' in shell
+    assert 'productShellFooterLinks' in shell
+    assert 'roles: ["developer", "team"]' in shell
 
 
 def test_docs_use_shared_editorial_flow_without_replacing_product_prose():
