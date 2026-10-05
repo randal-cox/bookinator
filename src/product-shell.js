@@ -112,14 +112,14 @@ export const bookinatorShellPolicy = createStandardProductShellPolicy({
   information: bookinatorInformation,
   capabilities: ["resources", "security"],
   routes: {
-    about: {href: "#about/premise", route: "about"},
+    about: {href: "#about/product", route: "about"},
     help: {href: "#help/start", route: "help"},
     privacy: {href: "#privacy", route: "privacy"},
     security: {href: "#security", route: "security"},
-    milestones: {href: "#releases/milestones", route: "releases"},
-    releases: {href: "#releases/history", route: "releases"},
-    roadmap: {href: "#roadmap/priorities", route: "roadmap"},
-    resources: {href: "#resources/library", route: "resources"}
+    milestones: {href: "#roadmap", route: "roadmap"},
+    releases: {href: "#releases", route: "releases"},
+    roadmap: {href: "#roadmap", route: "roadmap"},
+    resources: {href: "#resources", route: "resources"}
   },
 });
 

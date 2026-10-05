@@ -1,9 +1,9 @@
-import { articlePages, roadmapItems } from "./pages.js";
-import { createProductHistoryView } from "/commons/@inator/ui/index.js";
+import { articlePages } from "./pages.js";
+import { createProductHistoryTabs, normalizeProductAboutTab } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
 import { createBookinatorAboutPage } from "./product-information.js?v=about-route-200";
 import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=about-layout-198";
-import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-199";
+import { createBookinatorHelpPage } from "./product-docs.js?v=commons-routes-201";
 import { createBookinatorResourcePage } from "./product-resources.js?v=resources-flow-193";
 
 const routeScrollPositions = new Map();
@@ -2273,15 +2273,22 @@ function showPipelinePage() {
 
 async function showArticlePage(collection, requestedTab) {
   leaveBookWorkspace();
+  const sharedProductDocs = ["about", "help", "resources", "privacy", "security"].includes(collection);
+  const productHistoryMode = collection === "releases" ? "releases" : collection === "roadmap" ? "roadmap" : "";
+  const commonsOwned = sharedProductDocs || Boolean(productHistoryMode);
   const page = collection === "help"
     ? { kicker: "Bookinator help", title: "Help", intro: "Orientation, everyday tasks, reference, and common questions.", tabs: { start: ["Start here", ""], tasks: ["Everyday tasks", ""], reference: ["Reference", ""], faq: ["FAQ", ""] } }
     : collection === "resources"
       ? { kicker: "Bookinator resources", title: "Resources", intro: "Presentations, briefs, and bounded product language.", tabs: { library: ["Library", ""] } }
       : collection === "privacy" || collection === "security"
         ? { kicker: `Bookinator ${collection}`, title: collection === "privacy" ? "Privacy" : "Security", intro: "", tabs: { record: ["Record", ""] } }
-      : articlePages[collection] || articlePages.about;
-  const tabKeys = Object.keys(page.tabs);
-  const activeTab = tabKeys.includes(requestedTab) ? requestedTab : tabKeys[0];
+      : productHistoryMode
+        ? { title: productHistoryMode === "releases" ? "Releases" : "Roadmap", tabs: {} }
+        : articlePages[collection] || articlePages.about;
+  const tabKeys = Object.keys(page.tabs || {});
+  const activeTab = collection === "about"
+    ? normalizeProductAboutTab(requestedTab)
+    : tabKeys.includes(requestedTab) ? requestedTab : tabKeys[0];
   document.querySelector("#books-page").hidden = true;
   document.querySelector("#pipeline-page").hidden = true;
   document.querySelector("#article-page").hidden = false;
@@ -2290,119 +2297,58 @@ async function showArticlePage(collection, requestedTab) {
   document.querySelector("#workspace-page").hidden = true;
   document.querySelector("#welcome-dialog").hidden = true;
   mountBookinatorShell({active: collection, selectedBook: state.books.find((book) => book.id === state.currentBookId)});
-  const hero = document.querySelector("#article-hero");
-  hero.hidden = ["about", "help", "resources", "privacy", "security"].includes(collection);
-  hero.classList.toggle("has-mark", Boolean(page.mark));
-  hero.innerHTML = `${page.mark ? '<img src="/assets/bookinator.svg" alt="">' : ""}<p class="context">${page.kicker}</p><h1>${page.title}</h1><p>${page.intro}</p>`;
-  const tabs = document.querySelector("#article-tabs");
-  tabs.hidden = ["about", "help", "resources", "privacy", "security"].includes(collection);
-  tabs.innerHTML = Object.entries(page.tabs).map(([key, [label]]) => `<button type="button" data-article-tab="${key}"${key === activeTab ? ' aria-current="page"' : ""}>${label}</button>`).join("");
   const articleBody = document.querySelector("#article-body");
   articleBody.dataset.articleCollection = collection;
-  const productHistoryMode = collection === "releases" ? "releases" : collection === "roadmap" ? "roadmap" : "";
   articleBody.classList.remove("inator-information-page", "inator-about-page", "inator-help-page", "inator-resource-page", "inator-practice-page");
-  articleBody.classList.toggle("shared-product-docs", ["help", "about", "resources", "privacy", "security"].includes(collection));
+  articleBody.classList.toggle("shared-product-docs", commonsOwned);
   articleBody.innerHTML = productHistoryMode
-    ? `<section class="shared-product-history" aria-label="Bookinator ${productHistoryMode}"><div data-product-history="${productHistoryMode}"></div></section>`
+    ? '<section class="shared-product-history" aria-label="Bookinator product history"><div data-product-history-tabs></div></section>'
     : "";
   if (!productHistoryMode) {
     if (collection === "about") await createBookinatorAboutPage({
       root: articleBody,
-      tabs: page.tabs,
-      initialTab: requestedTab === "ecosystem" ? "ecosystem" : "product",
+      sections: page.sections,
+      initialTab: activeTab,
       onSelect(selected) {
-        const nextHash = selected === "ecosystem" ? "#about/ecosystem" : `#about/${activeTab}`;
+        const nextHash = `#about/${selected}`;
         if (location.hash !== nextHash) history.replaceState(history.state, "", nextHash);
       }
     });
-    else if (collection === "help") createBookinatorHelpPage({ root: articleBody, guideTabs: articlePages.guide.tabs, referenceTabs: articlePages.docs.tabs, initialSection: activeTab });
+    else if (collection === "help") createBookinatorHelpPage({
+      root: articleBody,
+      guideTabs: articlePages.guide.tabs,
+      referenceTabs: articlePages.docs.tabs,
+      initialSection: activeTab,
+      onSelect(section) {
+        const nextHash = `#help/${section}`;
+        if (location.hash !== nextHash) history.replaceState(history.state, "", nextHash);
+      }
+    });
     else if (collection === "resources") await createBookinatorResourcePage({ root: articleBody });
     else if (collection === "privacy" || collection === "security") {
       createBookinatorPracticePage({ root: articleBody, destination: collection });
     }
-    else articleBody.innerHTML = page.tabs[activeTab][1];
   }
-  const productHistoryMount = document.querySelector("[data-product-history]");
+  const productHistoryMount = document.querySelector("[data-product-history-tabs]");
   if (productHistoryMount) {
-    createProductHistoryView({
+    const canonicalHistoryHash = productHistoryMode === "releases" ? "#releases" : "#roadmap";
+    if (location.hash !== canonicalHistoryHash) history.replaceState(history.state, "", canonicalHistoryHash);
+    createProductHistoryTabs({
       mount: productHistoryMount,
       history: bookinatorProductHistory,
-      mode: productHistoryMount.dataset.productHistory
+      initialMode: productHistoryMode,
+      onChange({ mode }) {
+        const nextHash = mode === "releases" ? "#releases" : "#roadmap";
+        if (location.hash !== nextHash) history.replaceState(history.state, "", nextHash);
+        updateFooterRoute(mode);
+        document.title = `Bookinator · ${mode === "releases" ? "Releases" : "Roadmap"}`;
+      }
     });
   }
-  if (collection === "roadmap" && !productHistoryMode) installRoadmapLedger();
-  tabs.querySelectorAll("[data-article-tab]").forEach((button) => button.addEventListener("click", () => {
-    location.hash = `${collection}/${button.dataset.articleTab}`;
-  }));
+  if (collection === "resources" && location.hash !== "#resources") history.replaceState(history.state, "", "#resources");
   updateFooterRoute(collection);
   document.title = `Bookinator · ${page.title}`;
   restoreArticleScroll();
-}
-
-function roadmapRating(value, kind) {
-  const labels = kind === "ease" ? ["", "Moonshot", "Hard", "Moderate", "Reachable", "Near"] : ["", "Niche", "Useful", "Strong", "Major", "Transformative"];
-  return `<span class="roadmap-rating ${kind}" aria-label="${escapeHtml(labels[value])}: ${value} out of 5"><i style="--rating:${value}"></i><b>${escapeHtml(labels[value])}</b><small>${value}/5</small></span>`;
-}
-
-function installRoadmapLedger() {
-  const ledger = document.querySelector("[data-roadmap-ledger]");
-  if (!ledger) return;
-  const columns = [
-    {key: "name", label: "Name", first: "asc"},
-    {key: "description", label: "Description", first: "asc"},
-    {key: "tags", label: "Tags", first: "asc"},
-    {key: "ease", label: "Ease", first: "desc"},
-    {key: "impact", label: "Impact", first: "desc"},
-    {key: "payoff", label: "Payoff", first: "desc"},
-  ];
-  let sortKey = "payoff";
-  let sortDirection = "desc";
-  let query = "";
-  const selectedTags = new Set();
-  const tags = [...new Set(roadmapItems.flatMap((item) => item.tags))].sort((left, right) => left.localeCompare(right));
-  const compare = (left, right) => {
-    const a = sortKey === "tags" ? left.tags.join(" ") : left[sortKey];
-    const b = sortKey === "tags" ? right.tags.join(" ") : right[sortKey];
-    const result = typeof a === "number" ? a - b : String(a).localeCompare(String(b));
-    return (sortDirection === "asc" ? result : -result) || right.payoff - left.payoff || left.name.localeCompare(right.name);
-  };
-  const render = () => {
-    const headings = columns.map((column) => `<th scope="col" aria-sort="${column.key === sortKey ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}"><button type="button" data-roadmap-sort="${column.key}" data-sort-first="${column.first}">${column.label}<i aria-hidden="true">${column.key === sortKey ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}</i></button></th>`).join("");
-    const rows = [...roadmapItems].sort(compare).map((item, index) => `<tr data-roadmap-row data-roadmap-search="${escapeHtml(`${item.name} ${item.description} ${item.tags.join(" ")}`.toLocaleLowerCase())}" data-roadmap-tags="${escapeHtml(item.tags.join("|"))}"><td><span class="roadmap-rank" aria-label="Current rank ${index + 1}">${index + 1}</span></td><th scope="row" class="roadmap-name"><strong>${escapeHtml(item.name)}</strong></th><td class="roadmap-description">${escapeHtml(item.description)}</td><td><div class="roadmap-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div></td><td>${roadmapRating(item.ease, "ease")}</td><td>${roadmapRating(item.impact, "impact")}</td><td><span class="roadmap-payoff"><strong>${item.payoff}</strong><small>of 25</small></span></td></tr>`).join("");
-    const tagButtons = tags.map((tag) => `<button type="button" data-roadmap-tag="${escapeHtml(tag)}" aria-pressed="${selectedTags.has(tag)}">${escapeHtml(tag)}</button>`).join("");
-    ledger.innerHTML = `<header><div><h2>Roadmap ledger</h2><p><span data-roadmap-count>${roadmapItems.length}</span> of ${roadmapItems.length} capabilities · sorted by ${escapeHtml(columns.find((column) => column.key === sortKey)?.label || sortKey).toLocaleLowerCase()}</p></div><span class="roadmap-formula">Payoff = ease × impact</span></header><div class="roadmap-filters"><label class="roadmap-search"><span aria-hidden="true">⌕</span><span class="sr-only">Search the roadmap</span><input type="search" data-roadmap-search value="${escapeHtml(query)}" placeholder="Search names, descriptions, and tags" autocomplete="off"></label><div class="roadmap-tag-picker" role="group" aria-label="Filter roadmap by tag"><span>Tags</span><div>${tagButtons}</div></div><button class="roadmap-clear" type="button" data-roadmap-clear${query || selectedTags.size ? "" : " hidden"}>Clear filters</button></div><p class="roadmap-filter-empty" data-roadmap-empty hidden>No roadmap capabilities match these filters. Clear a tag or try a broader search.</p><div class="roadmap-table-wrap"><table class="roadmap-table"><colgroup><col class="roadmap-rank-column"><col class="roadmap-name-column"><col class="roadmap-description-column"><col class="roadmap-tags-column"><col class="roadmap-rating-column"><col class="roadmap-rating-column"><col class="roadmap-payoff-column"></colgroup><thead><tr><th scope="col" class="roadmap-rank-heading">#</th>${headings}</tr></thead><tbody>${rows}</tbody></table></div>`;
-    const applyFilters = () => {
-      let visible = 0;
-      ledger.querySelectorAll("[data-roadmap-row]").forEach((row) => {
-        const rowTags = new Set((row.dataset.roadmapTags || "").split("|").filter(Boolean));
-        const matchesQuery = !query || row.dataset.roadmapSearch.includes(query);
-        const matchesTags = !selectedTags.size || [...selectedTags].some((tag) => rowTags.has(tag));
-        row.hidden = !(matchesQuery && matchesTags);
-        if (!row.hidden) visible += 1;
-      });
-      ledger.querySelector("[data-roadmap-count]").textContent = visible.toLocaleString();
-      ledger.querySelector("[data-roadmap-empty]").hidden = visible !== 0;
-      ledger.querySelector("[data-roadmap-clear]").hidden = !query && !selectedTags.size;
-    };
-    ledger.querySelectorAll("[data-roadmap-sort]").forEach((button) => button.addEventListener("click", () => {
-      const nextKey = button.dataset.roadmapSort;
-      sortDirection = sortKey === nextKey ? (sortDirection === "asc" ? "desc" : "asc") : button.dataset.sortFirst;
-      sortKey = nextKey;
-      render();
-    }));
-    const search = ledger.querySelector("[data-roadmap-search]");
-    search.addEventListener("input", () => { query = search.value.trim().toLocaleLowerCase(); applyFilters(); });
-    ledger.querySelectorAll("[data-roadmap-tag]").forEach((button) => button.addEventListener("click", () => {
-      const tag = button.dataset.roadmapTag;
-      if (selectedTags.has(tag)) selectedTags.delete(tag);
-      else selectedTags.add(tag);
-      ledger.querySelectorAll("[data-roadmap-tag]").forEach((candidate) => candidate.setAttribute("aria-pressed", String(selectedTags.has(candidate.dataset.roadmapTag))));
-      applyFilters();
-    }));
-    ledger.querySelector("[data-roadmap-clear]").addEventListener("click", () => { query = ""; selectedTags.clear(); render(); ledger.querySelector("[data-roadmap-search]").focus(); });
-    applyFilters();
-  };
-  render();
 }
 
 function formatPipelineTime(value) {
@@ -8091,7 +8037,7 @@ function route() {
   else if (collection === "workspace") showWorkspacePage(part);
   else if (collection === "docs" || collection === "guide") showArticlePage("help", collection === "guide" ? "start" : part || "reference");
   else if (collection === "legal" && ["privacy", "security"].includes(part)) showArticlePage(part);
-  else if (["help", "resources", "privacy", "security"].includes(collection)) showArticlePage(collection, part);
+  else if (["about", "help", "resources", "privacy", "security", "roadmap", "releases"].includes(collection)) showArticlePage(collection, part);
   else if (collection === "books" || !articlePages[collection]) showBooksPage();
   else showArticlePage(collection, part);
 }

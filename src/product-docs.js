@@ -73,7 +73,7 @@ function flowForTabs(tabs = {}) {
   return createProductDocsFlow({ sections: Object.entries(tabs).map(([id, [heading, content]]) => ({ id: `help-${id}`, heading, content })) });
 }
 
-export function createBookinatorHelpPage({ root, guideTabs = {}, referenceTabs = {}, initialSection = "start" } = {}) {
+export function createBookinatorHelpPage({ root, guideTabs = {}, referenceTabs = {}, initialSection = "start", onSelect = null } = {}) {
   const guideEntries = Object.entries(guideTabs);
   const start = guideEntries[0]?.[1]?.[1] || "<p>Choose a book to begin.</p>";
   const tasks = Object.fromEntries(guideEntries.slice(1));
@@ -94,7 +94,7 @@ export function createBookinatorHelpPage({ root, guideTabs = {}, referenceTabs =
       faq: { content: faq }
     }
   });
-  const controller = createProductDocsPage({ root, docs, initialSection });
+  const controller = createProductDocsPage({ root, docs, initialSection, onSelect });
   replaceHelpLabelsWithGraphics(root);
   return controller;
 }

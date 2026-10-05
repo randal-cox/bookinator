@@ -5,7 +5,7 @@ export const bookinatorAbout = defineProductAbout({
   citation: { title: "Bookinator", authors: ["Randal Cox"], version: "0.1.0", year: 2026, url: "https://github.com/randal-cox/bookinator", text: "Randal Cox. Bookinator, version 0.1.0 (2026)." }
 });
 
-const recordRoutes = Object.freeze({ milestones: "#releases/milestones", roadmap: "#roadmap/priorities", security: "#security", privacy: "#privacy" });
+const recordRoutes = Object.freeze({ milestones: "#roadmap", roadmap: "#roadmap", security: "#security", privacy: "#privacy" });
 
 function uniqueModels(system = {}) {
   const roles = system.models?.roles || {};
@@ -128,13 +128,13 @@ function bindSharedAboutDisclosure(disclosure) {
   }, { capture: true });
 }
 
-export async function createBookinatorAboutPage({ root, tabs, initialTab = "product", onSelect = null } = {}) {
+export async function createBookinatorAboutPage({ root, sections: sectionRecords, initialTab = "product", onSelect = null } = {}) {
   const renderSequence = ++aboutRenderSequence;
   root.innerHTML = '<p class="book-about-loading" role="status">Preparing the current Bookinator record…</p>';
   const system = await aboutSystemInventory();
   if (renderSequence !== aboutRenderSequence || root.dataset.articleCollection !== "about") return null;
   activeAboutController?.destroy();
-  const sections = Object.entries(tabs || {}).map(([id, [label, content]]) => ({ id, heading: label, content }));
+  const sections = Object.entries(sectionRecords || {}).map(([id, [label, content]]) => ({ id, heading: label, content }));
   const controller = createProductAboutPage({
     root, productLabel: bookinatorAbout.product.name, productContent: createProductDocsFlow({ sections }), about: bookinatorAbout,
     citationRegistry: createModelCitationRegistry(system), trust: createBookinatorTrust(system), trustIntroContent: () => trustIntro(system),

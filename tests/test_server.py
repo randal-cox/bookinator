@@ -2180,36 +2180,23 @@ def test_public_docs_exist_inside_the_docs_root() -> None:
     assert DOCS_ROOT.resolve() in resources.parents
 
 
-def test_roadmap_uses_shared_history_while_preserving_detailed_product_candidates() -> None:
+def test_roadmap_jettisons_the_legacy_candidate_control_for_commons_history() -> None:
     root = Path(__file__).parents[1]
     page = (root / "src" / "index.html").read_text(encoding="utf-8")
     pages = (root / "src" / "pages.js").read_text(encoding="utf-8")
     app = (root / "src" / "app.js").read_text(encoding="utf-8")
     styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'data-inator-product-footer' in page
-    assert "export const roadmapItems" in pages
-    assert "Sharper summary and dossier questions" in pages
-    assert "Book-title collision research" in pages
-    for field in ("name", "description", "tags", "ease", "impact"):
-        assert f"{field}:" in pages
-    assert "item.payoff = item.ease * item.impact" in pages
+    assert "export const roadmapItems" not in pages
+    assert 'roadmap:' not in pages
+    assert 'releases:' not in pages
     assert 'collection === "roadmap" ? "roadmap"' in app
-    assert "createProductHistoryView" in app
-    assert 'if (collection === "roadmap" && !productHistoryMode) installRoadmapLedger();' in app
-    for field in ("name", "description", "tags", "ease", "impact", "payoff"):
-        assert f'key: "{field}"' in app
-    assert '<table class="roadmap-table">' in app
-    assert '<th scope="col" aria-sort=' in app
-    assert '<th scope="row" class="roadmap-name">' in app
-    assert 'data-roadmap-search' in app
-    assert 'data-roadmap-tag' in app
-    assert 'data-roadmap-clear' in app
-    assert 'selectedTags.some' not in app
-    assert '[...selectedTags].some' in app
-    assert ".roadmap-filters" in styles
-    assert '.roadmap-tag-picker button[aria-pressed="true"]' in styles
-    assert ".roadmap-introduction" in styles
-    assert ".roadmap-table" in styles
+    assert "createProductHistoryTabs" in app
+    assert "createProductHistoryView" not in app
+    assert "installRoadmapLedger" not in app
+    assert "roadmap-table" not in app
+    assert ".roadmap-filters" not in styles
+    assert ".release-history" not in styles
 
 
 def test_model_free_report_is_wired_to_a_privacy_safe_manifest() -> None:

@@ -1,53 +1,9 @@
-export const roadmapItems = [
-  {name: "Reviewer annotations", description: "Highlight manuscript text, write durable editorial comments, accept or dismiss machine findings, set priority, and carry reviewed decisions into author-facing reports.", tags: ["Reviewer", "Editing", "Reports"], ease: 5, impact: 5},
-  {name: "Evidence-anchored editorial first pass", description: "Let Qwen propose a small, selective set of passage-anchored editorial notes from chapter text and saved analysis. Proposals remain machine-authored and cannot satisfy sign-off or enter author-facing reports until a human accepts them. Add a disabled-by-default, visibly stamped demo/test override for simulated acceptance without impersonating a real reviewer.", tags: ["Reviewer", "LLM", "Annotations"], ease: 4, impact: 5},
-  {name: "Sharper summary and dossier questions", description: "Focus Qwen on specific motivation, causality, character knowledge, relationship change, thematic consequence, reader expectation, and setup/payoff questions instead of generic discussion prompts.", tags: ["Questions", "Prompts", "LLM"], ease: 5, impact: 4},
-  {name: "Author action panel", description: "Turn accepted smells, findings, and comments into a rapid chapter-by-chapter editing queue where authors can revise text, respond, defer, or mark an issue resolved.", tags: ["Author", "Editing", "Workflow"], ease: 4, impact: 5},
-  {name: "Revision comparison", description: "Compare manuscript versions at line, passage, scene, and chapter scale, then summarize what materially changed and which prior findings became stale or resolved.", tags: ["Versions", "Editing", "Infrastructure"], ease: 4, impact: 5},
-  {name: "Portable mini-site", description: "Export a private, model-free analysis site with reviewed findings, plots, annotations, evidence excerpts, and provenance for authors on ordinary computers.", tags: ["Sharing", "Reports", "Author"], ease: 4, impact: 5},
-  {name: "Editorial assessment room", description: "Assess clarity, propulsion, character appeal, agency, stakes, payoff, voice, genre fit, and commercial positioning with evidence, counterarguments, and visible model disagreement.", tags: ["Assessment", "LLM", "Reviewer"], ease: 4, impact: 5},
-  {name: "Scene purpose map", description: "Identify who wants what, what obstructs them, what changes, and why the next scene follows; surface scenes with weak state change or repeated structural jobs.", tags: ["Structure", "Scenes", "Plot"], ease: 4, impact: 5},
-  {name: "Open questions and payoffs", description: "Follow mysteries, promises, setup, repetition, answers, and intentional ambiguity across the manuscript with exact evidence at both endpoints.", tags: ["Continuity", "Reader", "Plot"], ease: 5, impact: 4},
-  {name: "Character state ledger", description: "Show where each character begins and ends a chapter: location, goals, knowledge, beliefs, relationships, injuries, possessions, and unresolved intentions.", tags: ["Characters", "Continuity", "Author"], ease: 4, impact: 5},
-  {name: "Character intelligence", description: "Combine presence, agency, emotional movement, relationship changes, dialogue share, voice, goals, and causal influence into an evidence-linked portrait of every major character.", tags: ["Characters", "Connections", "Reports"], ease: 4, impact: 5},
-  {name: "Causality and coherence map", description: "Distinguish happened-before from caused, enabled, prevented, and motivated; find missing bridges, unsupported decisions, overloaded coincidences, and local non-sequiturs.", tags: ["Causality", "Integrity", "Plot"], ease: 3, impact: 5},
-  {name: "Multiple plot arcs", description: "Chart external action, goal progress, agency, emotional pressure, mystery pressure, relationships, revelations, losses, and setup/payoff activity without forcing one universal story curve.", tags: ["Plot", "Charts", "Structure"], ease: 3, impact: 5},
-  {name: "Reader memory simulation", description: "Read chapter by chapter as readers with different attention and recall, tracking what feels salient, forgotten, confusing, expected, or genuinely surprising.", tags: ["Reader", "LLM", "Research"], ease: 3, impact: 5},
-  {name: "Revision impact graph", description: "After an edit, identify moved anchors, changed obligations, invalidated analyses, newly broken connections, and downstream work that can safely remain cached.", tags: ["Versions", "Infrastructure", "Continuity"], ease: 3, impact: 5},
-  {name: "Continuity engine", description: "Reconcile character state, world rules, deadlines, objects, relationships, and reader knowledge to find impossible or unexplained changes across distant chapters.", tags: ["Continuity", "Integrity", "Characters"], ease: 3, impact: 5},
-  {name: "Author-intent contracts", description: "Let an author state goals such as ‘keep this a surprise until Chapter 12,’ then test revisions against those intentions as evidence-linked manuscript unit tests.", tags: ["Author", "Intent", "Editing"], ease: 3, impact: 5},
-  {name: "Evidence and anchor foundation", description: "Give every observation, comment, event, relationship, and obligation stable source ranges, version signatures, provenance, and repairable anchors across manuscript revisions.", tags: ["Infrastructure", "Provenance", "Versions"], ease: 4, impact: 4},
-  {name: "Editorial packet builder", description: "Package reviewed findings, annotations, summaries, charts, evidence, sign-off, and freshness into configurable author, editor-detail, and compact PDF reports.", tags: ["Reports", "Reviewer", "Sharing"], ease: 4, impact: 4},
-  {name: "Geography and journey maps", description: "Plot real-world travel or place story events on an author-supplied fictional map, preserving authored order, uncertainty, simultaneous branches, and evidence.", tags: ["Geography", "Charts", "World"], ease: 3, impact: 4},
-  {name: "Story chronology graph", description: "Separate narrated order from story time using before/after constraints, durations, dates, ages, flashbacks, simultaneity, uncertainty, and competing placements.", tags: ["Time", "Continuity", "Graph"], ease: 2, impact: 5},
-  {name: "Dialogue dynamics", description: "Inspect interruption, dominance, unanswered questions, information asymmetry, subtext, and who changes the direction of a conversation.", tags: ["Dialogue", "Characters", "Scenes"], ease: 3, impact: 4},
-  {name: "Semantic Echoes", description: "Use small local embeddings to retrieve callbacks, recurring images, parallel scenes, repeated exposition, and near-duplicate phrasing across distant chapters; let Qwen or an editor explain whether each echo is meaningful, accidental, or excessive.", tags: ["Style", "Retrieval", "Annotations"], ease: 4, impact: 4},
-  {name: "Figurative-language density", description: "Map metaphor-related language first with token-level evidence, then add separately evaluated simile, personification, metonymy, hyperbole, symbolism, irony, and imagery layers before claiming an overall figurative density.", tags: ["Style", "Annotations", "Charts"], ease: 3, impact: 4},
-  {name: "Entity Signals", description: "Run a fast GLiNER pass that preserves source-anchored mentions of people, places, groups, creatures, artifacts, institutions, events, and speculative entities. Show the lists immediately, then use them to focus dossiers, connections, continuity work, questions, and Qwen review.", tags: ["Entities", "Models", "Infrastructure"], ease: 4, impact: 5},
-  {name: "Explicit entity grouping review", description: "Make aliases, pluralization, misspellings, type corrections, and location merges explicit and reversible so Connections never silently rewrites the book's evidence graph.", tags: ["Entities", "Reviewer", "Infrastructure"], ease: 4, impact: 4},
-  {name: "Editorial attention router", description: "Batch a small Jev-compatible decision model before Qwen to rank likely evidence for Smells, Tags, LLM Review, questions, and dossiers. Persist every score and uncertainty, unload the router before Qwen runs, and suppress nothing until held-out human review proves high recall.", tags: ["Models", "Performance", "Infrastructure"], ease: 3, impact: 5},
-  {name: "Motif evolution", description: "Trace returning objects, phrases, sensory images, jokes, and symbols—including where an embedding-retrieved echo changes meaning rather than merely recurring.", tags: ["Style", "Themes", "Reader"], ease: 3, impact: 4},
-  {name: "Attention budget", description: "Measure how many new names, locations, rules, mysteries, and concepts a reader must absorb at once and where old threads go cold.", tags: ["Reader", "Readability", "Structure"], ease: 3, impact: 4},
-  {name: "Editorial calibration corpus", description: "Learn privately from accepted, dismissed, restored, and resolved findings to evaluate detectors and tune ranking to an editor without inventing universal rules.", tags: ["Evaluation", "Reviewer", "Infrastructure"], ease: 2, impact: 5},
-  {name: "Editorial sandbox", description: "Move or remove scenes, compare alternate endings, and estimate which promises, knowledge boundaries, causal links, and downstream passages each experiment disturbs.", tags: ["Editing", "Simulation", "Versions"], ease: 2, impact: 5},
-  {name: "Time-travel consistency", description: "Extend chronology into branches, loops, overwritten histories, observer-specific knowledge, causal origin, paradox candidates, and uncertain timeline joins.", tags: ["Time", "Science fiction", "Graph"], ease: 1, impact: 5},
-  {name: "Character voice test", description: "Hide dialogue attribution and test whether speakers remain distinguishable through vocabulary, rhythm, syntax, interiority, and recurring verbal habits.", tags: ["Dialogue", "Characters", "Style"], ease: 3, impact: 3},
-  {name: "Audiobook lens", description: "Find confusable character names, unclear dialogue attribution, typography-dependent meaning, and passages likely to become harder when heard instead of seen.", tags: ["Audio", "Accessibility", "Names"], ease: 3, impact: 3},
-  {name: "World-rule ledger", description: "Collect every stated rule, exception, demonstration, and apparent violation for magic systems, technologies, institutions, and fictional cultures.", tags: ["World", "Continuity", "Genre"], ease: 2, impact: 4},
-  {name: "Counter-critic panels", description: "For consequential assessments, show the criticism, the strongest evidence-based defense, and an optional judge without silently erasing human judgment.", tags: ["Reviewer", "LLM", "Trust"], ease: 3, impact: 3},
-  {name: "Adaptation lens", description: "Expose cast load, location load, effects-heavy sequences, contained episodes, and scene dependencies for adaptation exploration without judging the novel by production cost.", tags: ["Adaptation", "Structure", "Reports"], ease: 2, impact: 3},
-  {name: "Book-title collision research", description: "Search exact and similar published titles, explain the kind of overlap, and—where defensible—show sourced, time-stamped market proxies without inventing sales figures.", tags: ["Titles", "Research", "Market"], ease: 2, impact: 2},
-  {name: "Friendly cross-platform distribution", description: "Provide guided installation, model checks, storage estimates, updates, and clean removal on macOS, Windows, and Linux without weakening the local privacy boundary.", tags: ["Distribution", "Models", "Infrastructure"], ease: 2, impact: 4},
-];
-
-roadmapItems.forEach((item) => { item.payoff = item.ease * item.impact; });
-
 export const articlePages = {
   about: {
     kicker: "About Bookinator",
     title: "A book remembers more than any prompt can hold",
     intro: "Bookinator is a local editorial workbench. It builds durable evidence chapter by chapter, connects distant parts of a manuscript, and keeps machine proposals separate from human judgment.",
-    tabs: {
+    sections: {
       premise: ["The premise", `<section class="information-lede book-about-lede"><div><p>Follow the thread across the whole manuscript.</p><h2>A novel makes promises hundreds of pages apart.</h2><p>A rule appears early. A question changes shape. A character knows something too soon. Bookinator keeps the evidence alive until the story returns to it—without pretending that a machine gets the final word.</p></div><figure class="book-about-art"><img src="/assets/book-analysis-paper-landscape.png" alt="Layered manuscript pages crossed by three colored threads that meet in a single knot"><figcaption>Chapters become evidence layers; editorial questions travel between them.</figcaption></figure></section><section class="principle-ledger"><article><span class="about-box-icon" data-inator-icon="summaries"></span><h3>Remember</h3><p>Save chapter summaries, dossiers, entity signals, questions, and model attempts beyond the prompt that found them.</p></article><article><span class="about-box-icon" data-inator-icon="connections"></span><h3>Connect</h3><p>Inspect recurrence, contradiction, character knowledge, setup, payoff, and absence across distant chapters.</p></article><article><span class="about-box-icon" data-inator-icon="reviewer"></span><h3>Adjudicate</h3><p>Let models propose. Let an editor annotate, accept, dismiss, revise, sign off, and carry judgment into reports.</p></article></section>`],
       work: ["What it does", `<section class="information-lede compact"><p>One book, several instruments</p><h2>Read linearly. Examine structurally. Return to the passage.</h2><p>Bookinator combines deterministic extraction, specialist local models, long-form readers, and human review in one saved workspace.</p></section><div class="capability-bands"><article><span class="about-box-icon" data-inator-icon="chapters"></span><strong>Build the source map</strong><h3>Chapters and exact spans</h3><p>Ingestion preserves page provenance and stops for review when chapter structure is genuinely ambiguous.</p></article><article><span class="about-box-icon" data-inator-icon="models"></span><strong>Build the memory</strong><h3>Summaries, dossiers, and context</h3><p>Local readers create chapter evidence and cumulative checkpoints before whole-book reconciliation.</p></article><article><span class="about-box-icon" data-inator-icon="connections"></span><strong>Find the returning threads</strong><h3>Entities, signals, and inferences</h3><p>GLiNER, deterministic detectors, emotion and tag passes, Connections, and Questions &amp; Payoffs expose material worth inspection.</p></article><article><span class="about-box-icon" data-inator-icon="reports"></span><strong>Turn evidence into editorial work</strong><h3>Review and portable reports</h3><p>Passage-linked human annotations, sign-off, PDF, and offline HTML preserve the distinction between analysis and judgment.</p></article></div>`],
       trust: ["Trust and limits", `<section class="information-lede compact trust-about-lede"><span class="trust-hero-icon" data-inator-icon="trust"></span><div><p>Editorial aid, not authority</p><h2>Trust is the chain from manuscript to claim.</h2><p>Bookinator records what acted, what it read, what it produced, and what a person decided. The Trust record below explains that system; Citation gives the software and models proper credit.</p></div></section><dl class="trust-ledger"><div><dt>Local custody</dt><dd>Manuscripts, prompts, derived text, model output, reviewer state, and saved reports remain on this computer during ordinary use.</dd></div><div><dt>Visible provenance</dt><dd>Runs expose model identity, input size, timing, attempts, failures, source ranges, and saved artifacts.</dd></div><div><dt>Separate authorship</dt><dd>Detectors, language models, and human reviewers remain distinguishable instead of collapsing into one authoritative voice.</dd></div><div><dt>Honest incompleteness</dt><dd>A completed pipeline is not a completed edit, and the absence of a warning is not evidence that a manuscript is sound.</dd></div></dl>`],
@@ -70,101 +26,6 @@ export const articlePages = {
       pipeline: ["Analysis pipeline", `<section class="information-lede compact"><p>Repeatable work</p><h2>Per-chapter evidence first; book-level synthesis second.</h2><p>The analysis pipeline records independent artifacts instead of producing one enormous, disposable answer.</p></section><ol class="pipeline-doc"><li><strong>Map the source</strong><span>Extract pages and establish chapter boundaries.</span></li><li><strong>Read the chapters</strong><span>Create summaries, dossiers, and chapter-scale signals with inspectable run details.</span></li><li><strong>Reconcile the book</strong><span>Combine current child artifacts into whole-book summaries and dossiers.</span></li><li><strong>Run inferences</strong><span>Apply slower cross-book algorithms to saved evidence.</span></li><li><strong>Render reports</strong><span>Present results without rerunning the analysis that created them.</span></li></ol><p>Failures belong to the affected artifact. They should remain inspectable and retryable without turning every other completed result back into unknown work.</p>`],
       models: ["Models", `<section class="information-lede compact"><p>Ollama model roles</p><h2>Different reading jobs have different costs.</h2><p>The Machine page is the source of truth for installed models, prerequisites, assignments, and readiness.</p></section><div class="model-doc"><article><h3>Deterministic tools first</h3><p>Extraction, chapter mapping, and local detectors avoid model work where a repeatable tool is the better instrument.</p></article><article><h3>Language models for interpretation</h3><p>Summaries, dossiers, reconciliation, and inference use a configured local model when the job requires semantic judgment.</p></article><article><h3>Time is observable</h3><p>Bookinator records model identity, input size, timing, attempts, and failures because local throughput varies dramatically by model and hardware.</p></article></div>`],
       privacy: ["Data and privacy", `<section class="information-lede compact"><p>The boundary</p><h2>Normal analysis remains on this computer.</h2><p>Book records, manuscripts, prompts, model output, and queue state are stored locally and excluded from Git.</p></section><ul class="privacy-doc"><li><strong>Loopback only:</strong> the Bookinator UI and API listen locally rather than publishing a public web service.</li><li><strong>Local inference:</strong> manuscript analysis is sent to the editor’s own Ollama service.</li><li><strong>Explicit network use:</strong> installing dependencies or models can contact external registries; manuscript text is not part of those installation requests.</li><li><strong>Export discipline:</strong> reports disclose which analysis was available and avoid embedding the source manuscript unless a future tool explicitly says otherwise.</li></ul>`],
-    },
-  },
-  legal: {
-    kicker: "Bookinator information", title: "Legal and privacy", intro: "Short, readable promises now; formal release documents before distribution.",
-    tabs: {
-      license: ["License", `<h2>Business Source License 1.1</h2><p>Bookinator 0.1.0 is source-available. Personal, educational, research, and internal business production use is permitted; offering Bookinator as a commercial hosted or managed service, or selling it as part of a competing commercial product, requires a separate commercial license.</p><p>On September 24, 2030, this version converts to GPL-3.0-or-later. The repository <code>LICENSE</code> file contains the controlling terms.</p>`],
-      terms: ["Terms", `<h2>Editorial aid, not editorial authority</h2><p>Bookinator produces evidence-linked hypotheses. It can be wrong, overly literal, or unaware of deliberate ambiguity. Authors and editors remain responsible for applying its findings.</p>`],
-    },
-  },
-  releases: {
-    kicker: "Bookinator releases",
-    title: "Milestones, not machinery",
-    intro: "Shared Commons presentation generated from Bookinator's product-owned milestone ledger. Only milestones that actually shipped appear as releases.",
-    tabs: {
-      milestones: ["Milestones", `<section class="release-history" aria-labelledby="release-030-title">
-        <header class="release-history-intro">
-          <p>Product history</p>
-          <h2>A record of useful leaps</h2>
-          <p>This is intentionally not a list of commits. Each entry describes the change an editor could actually feel.</p>
-        </header>
-        <article class="release-entry planned">
-          <aside class="release-spine">
-            <span>v0.3.0</span>
-            <time>Next<br>milestone</time>
-            <i aria-hidden="true"></i>
-          </aside>
-          <div class="release-entry-body">
-            <header>
-              <div><p>Commons conversion</p><h2 id="release-030-title">Common Ground</h2></div>
-              <span class="release-state">Planned</span>
-            </header>
-            <p class="release-lede">Bookinator becomes an ordinary consumer of installable Inator Commons contracts without moving manuscript, analysis, editorial, or saved-book behavior out of Bookinator.</p>
-            <section class="release-accomplishments" aria-label="Planned milestone pieces">
-              <article><span>01</span><div><h3>Installable Commons becomes the foundation</h3><p>Versioned public packages replace the temporary sibling-checkout dependency through pinned, diagnosable installation boundaries.</p></div></article>
-              <article><span>02</span><div><h3>Shared interfaces gain shared behavior</h3><p>Navigation, dialogs, status, releases, help, backup, and machine conventions move behind Commons contracts and thin Bookinator adapters.</p></div></article>
-              <article><span>03</span><div><h3>Bookinator keeps its domain</h3><p>Manuscript processing, analysis, editorial judgment, local privacy, and saved-book compatibility remain product-owned.</p></div></article>
-              <article><span>04</span><div><h3>Research waits for stable ground</h3><p>GLiNER, semantic forks, prompt changes, and the independent worker stay outside this infrastructure milestone.</p></div></article>
-            </section>
-            <section class="release-meaning"><p>Why it is next</p><h3>Reader research needs boringly trustworthy ground.</h3><p>A reproducible Commons installation lets later pipeline experiments change model behavior without changing infrastructure at the same time.</p></section>
-          </div>
-        </article>
-        <article class="release-entry current">
-          <aside class="release-spine">
-            <span>v0.2.0</span>
-            <time>Release<br>candidate</time>
-            <i aria-hidden="true"></i>
-          </aside>
-          <div class="release-entry-body">
-            <header>
-              <div><p>Human judgment milestone</p><h2 id="release-020-title">Reviewer Tools</h2></div>
-              <span class="release-state">In progress</span>
-            </header>
-            <p class="release-lede">Bookinator became an editorial workspace: machine evidence remains inspectable, while a human can annotate the manuscript, judge model proposals, sign off, and carry those decisions into polished reports.</p>
-            <section class="release-accomplishments" aria-label="Current milestone accomplishments">
-              <article><span>01</span><div><h3>The reviewer can work in the manuscript</h3><p>Passage-linked notes can be categorized, reprioritized, edited in place, revisited, archived, or permanently removed without losing reading position.</p></div></article>
-              <article><span>02</span><div><h3>Qwen became an inspectable first reader</h3><p>Significant concerns, soft leads, counterarguments, rubric scores, exact source anchors, and whole-book synthesis remain distinct from human judgment.</p></div></article>
-              <article><span>03</span><div><h3>Whole-book evidence became editorial reporting</h3><p>Summaries, emotions, tags, smells, chapter length, questions, reviewer notes, and LLM Review travel into Explore, HTML, and PDF.</p></div></article>
-              <article><span>04</span><div><h3>Chapter maps became testable infrastructure</h3><p>A 350-specimen corpus catches EPUB and text disagreements, while genuinely ambiguous structures stop for review before expensive analysis.</p></div></article>
-            </section>
-            <section class="release-meaning"><p>Release gate</p><h3>Carmilla gets the complete treatment.</h3><p>Fresh EPUB ingestion through all analysis, human annotation, sign-off, backup and restore, interactive HTML, and rendered PDF—then inspection of the actual artifacts.</p></section>
-          </div>
-        </article>
-        <article class="release-entry delivered">
-          <aside class="release-spine">
-            <span>v0.1.0</span>
-            <time datetime="2026-09-24">Sep 24<br>2026</time>
-            <i aria-hidden="true"></i>
-          </aside>
-          <div class="release-entry-body">
-            <header>
-              <div><p>First working milestone</p><h2 id="release-010-title">Holy Crap, that Worked</h2></div>
-              <span class="release-state">Delivered</span>
-            </header>
-            <p class="release-lede">Bookinator became an end-to-end, local editorial workbench: bring in a manuscript, build a durable understanding chapter by chapter, explore patterns across the whole book, and share a professional report.</p>
-            <section class="release-accomplishments" aria-label="Milestone accomplishments">
-              <article><span>01</span><div><h3>A manuscript becomes a navigable book</h3><p>Import, chapter structure, preserved source, and analysis connected back to the passages that produced it.</p></div></article>
-              <article><span>02</span><div><h3>The machine remembers beyond one prompt</h3><p>Chapter summaries and evidence-rich dossiers accumulate into whole-book understanding instead of isolated answers.</p></div></article>
-              <article><span>03</span><div><h3>Editors can see the shape of the story</h3><p>Emotion maps, editorial tags, and prose smells reveal patterns that are difficult to notice while reading linearly.</p></div></article>
-              <article><span>04</span><div><h3>Distant details become connected</h3><p>Book-wide indexes, connections, and questions with payoffs turn scattered observations into things an editor can follow.</p></div></article>
-              <article><span>05</span><div><h3>Analysis can be trusted carefully</h3><p>Pipeline state, model runs, failures, evidence, and source passages stay inspectable. The app offers arguments, not oracles.</p></div></article>
-              <article><span>06</span><div><h3>The work can leave the app</h3><p>A branded, book-specific PDF turns the strongest available analysis into a professional artifact for another reader.</p></div></article>
-            </section>
-            <section class="release-meaning"><p>Why it mattered</p><h3>The pieces stopped feeling like experiments and began behaving like one product.</h3><p>This milestone proved the full loop on a real book while keeping manuscripts and model work local to the editor’s computer.</p></section>
-            <section class="release-boundary"><strong>What came next</strong><p>Reviewer annotations, machine-assisted first reading, stronger reports, chapter-map hardening, and a human sign-off workflow became the center of Reviewer Tools.</p></section>
-          </div>
-        </article>
-      </section>`],
-    },
-  },
-  roadmap: {
-    kicker: "Bookinator roadmap",
-    title: "The road from working reader to trustworthy editor",
-    intro: "Shared Commons presentation generated from Bookinator's milestone ledger. Detailed feature candidates remain product-owned while this view shows the committed sequence.",
-    tabs: {
-      priorities: ["Priorities", `<section class="roadmap-introduction"><div><h2>Build the editorial loop, then widen the intelligence.</h2><p>Bookinator already reads a manuscript as connected evidence rather than isolated prompts. The next work closes the loop between machine observation, human judgment, author revision, and trustworthy sharing. Beyond that lie deeper models of causality, reader memory, character state, geography, and time.</p></div><dl><div><dt>Ease</dt><dd>How directly the idea can grow from foundations already in Bookinator.</dd></div><div><dt>Impact</dt><dd>How much editorial or author value the finished capability could create.</dd></div><div><dt>Payoff</dt><dd>Ease × impact. A useful first ordering—not a substitute for judgment.</dd></div></dl></section><section class="roadmap-landscape" aria-label="Roadmap payoff landscape"><div><strong>Close the loop</strong><span>Reviewer · Author editing · Revisions · Sharing</span></div><i aria-hidden="true"></i><div><strong>Understand the book</strong><span>Scenes · Characters · Causality · Reader memory</span></div><i aria-hidden="true"></i><div><strong>Explore the frontier</strong><span>Chronology · Maps · Simulations · Time travel</span></div></section><section class="roadmap-ledger" data-roadmap-ledger></section>`],
     },
   },
 };

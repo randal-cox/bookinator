@@ -22,7 +22,6 @@ def test_milestone_document_records_first_release_at_product_level():
 
 def test_releases_use_shared_history_and_footer_uses_abbreviated_information_menu():
     index = (ROOT / "src" / "index.html").read_text(encoding="utf-8")
-    pages = (ROOT / "src" / "pages.js").read_text(encoding="utf-8")
     app = (ROOT / "src" / "app.js").read_text(encoding="utf-8")
     history = (ROOT / "src" / "product-history.js").read_text(encoding="utf-8")
     shell = (ROOT / "src" / "product-shell.js").read_text(encoding="utf-8")
@@ -30,10 +29,12 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
     assert 'data-inator-product-footer' in index
     assert 'href: "#help/start"' in shell
     assert 'resources: "docs/presentations/catalog.json"' in shell
-    assert 'title: "Milestones, not machinery"' in pages
     assert '/commons/@inator/ui/product-history.css' in index
-    assert 'createProductHistoryView' in app
-    assert 'data-product-history' in app
+    assert 'createProductHistoryTabs' in app
+    assert 'data-product-history-tabs' in app
+    assert 'createProductHistoryView' not in app
+    assert 'onChange({ mode })' in app
+    assert 'const canonicalHistoryHash' in app
     assert 'defineProductHistory' in history
     assert 'title: "Common Ground"' in history
     assert 'title: "Reviewer Tools"' in history
@@ -47,8 +48,14 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
 
 def test_footer_information_architecture_uses_the_strict_commons_rollup():
     shell = (ROOT / "src" / "product-shell.js").read_text(encoding="utf-8")
-    assert 'href: "#about/premise"' in shell
+    assert 'href: "#about/product"' in shell
     assert 'href: "#help/start"' in shell
+    assert 'href: "#roadmap"' in shell
+    assert 'href: "#releases"' in shell
+    assert 'href: "#resources"' in shell
+    assert "#about/premise" not in shell
+    app = (ROOT / "src" / "app.js").read_text(encoding="utf-8")
+    assert '["about", "help", "resources", "privacy", "security", "roadmap", "releases"]' in app
     assert 'createStandardProductShellPolicy' in shell
     assert 'defineProductInformationContract' in shell
     assert 'productShellFooterLinks' in shell
@@ -68,6 +75,10 @@ def test_docs_use_shared_editorial_flow_without_replacing_product_prose():
     assert 'createProductDocsPage' in docs
     assert 'createProductDocsFlow' in docs
     assert 'createProductFaq' in docs
+    assert 'onSelect(section)' in app
+    assert 'const nextHash = `#help/${section}`' in app
+    assert 'id="article-tabs"' not in index
+    assert 'data-article-tab' not in app
     assert 'HELP_GRAPHIC_ICONS' in docs
     assert 'replaceHelpLabelsWithGraphics(root)' in docs
     assert 'title: "How the local system works"' in pages
@@ -82,8 +93,10 @@ def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
 
     assert "createBookinatorAboutPage" in app
     assert "createProductAboutPage" in information
-    assert 'initialTab: requestedTab === "ecosystem" ? "ecosystem" : "product"' in app
-    assert '"#about/ecosystem"' in app
+    assert "normalizeProductAboutTab(requestedTab)" in app
+    assert 'const nextHash = `#about/${selected}`' in app
+    assert "sections: page.sections" in app
+    assert "tabs: page.tabs" not in app
     assert "createProductDocsFlow" in information
     assert "about: bookinatorAbout" in information
     assert "recordIds: Object.keys(recordRoutes)" in information
