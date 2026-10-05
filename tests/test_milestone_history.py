@@ -68,6 +68,8 @@ def test_docs_use_shared_editorial_flow_without_replacing_product_prose():
     assert 'createProductDocsPage' in docs
     assert 'createProductDocsFlow' in docs
     assert 'createProductFaq' in docs
+    assert 'HELP_GRAPHIC_ICONS' in docs
+    assert 'replaceHelpLabelsWithGraphics(root)' in docs
     assert 'title: "How the local system works"' in pages
     assert "The browser directs; the server owns the work." in pages
     assert "Normal analysis remains on this computer." in pages
@@ -90,8 +92,15 @@ def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
     assert "createProductPracticeViewForFooter" in practice
     assert "defineProductPrivacy" in practice
     assert "defineProductSecurity" in practice
+    assert 'createBookinatorPracticePage({ root: articleBody, destination: collection })' in app
+    assert 'bookinatorShellPolicy.destinations.find' not in app
     assert 'privacy: {href: "#privacy"' in shell
     assert 'security: {href: "#security"' in shell
+
+
+def test_ui_conformance_scans_bookinators_actual_web_root():
+    package = (ROOT / "package.json").read_text(encoding="utf-8")
+    assert 'inator audit-ui web --baseline .inator/ui-audit-baseline.json' in package
 
 
 def test_about_guide_and_docs_describe_the_current_product():

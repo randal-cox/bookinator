@@ -1,0 +1,15 @@
+{
+  "schema": "inator.ui-audit-baseline.v2",
+  "reviewed": true,
+  "reviewedAt": "2026-10-05T16:38:25.883Z",
+  "reviewAfter": "2027-01-03T16:38:25.883Z",
+  "findings": [
+    "web/app.js: [UI-DIALOG-LITERAL-ROLE] Literal role=dialog markup bypasses the shared lifecycle, focus, movement, and containment contract; use createDialogSurface.",
+    "web/app.js: [UI-BUTTON-BAR-TOOL-CONTROLS] A toolbar or button bar must use shared icon-over-label tool controls.",
+    "web/app.js: [UI-LIST-NATIVE-TABLE-REVIEW] Native tables require explicit review; durable collections must use createListView.",
+    "web/index.html: [UI-DIALOG-LITERAL-ROLE] Literal role=dialog markup bypasses the shared lifecycle, focus, movement, and containment contract; use createDialogSurface.",
+    "web/index.html: [UI-BUTTON-BAR-TOOL-CONTROLS] A toolbar or button bar must use shared icon-over-label tool controls.",
+    "web/portable-report.js: [UI-LIST-NATIVE-TABLE-REVIEW] Native tables require explicit review; durable collections must use createListView.",
+    "web/styles.css: [UI-TYPOGRAPHY-FLOOR] Text below the 12px/.75rem Inator readability floor is blocked."
+  ]
+}

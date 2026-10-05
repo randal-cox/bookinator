@@ -3,7 +3,7 @@ import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
 import { createBookinatorAboutPage } from "./product-information.js?v=resources-flow-193";
 import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=about-layout-198";
-import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-186";
+import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-199";
 import { createBookinatorResourcePage } from "./product-resources.js?v=resources-flow-193";
 
 const routeScrollPositions = new Map();
@@ -26,7 +26,7 @@ function restoreArticleScroll() {
     requestAnimationFrame(() => { restoringRouteScroll = false; });
   });
 }
-import { createBookinatorPracticePage } from "./product-practice.js?v=commons-practice-187";
+import { createBookinatorPracticePage } from "./product-practice.js?v=commons-practice-199";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
 import { isTemporalDossierObservation } from "./dossier-index.js";
 import { auditPortableReport, buildPortableReportHtml, buildPortableReportManifest, reportExportFilename } from "./portable-report.js?v=queue-order-166";
@@ -2310,8 +2310,7 @@ async function showArticlePage(collection, requestedTab) {
     else if (collection === "help") createBookinatorHelpPage({ root: articleBody, guideTabs: articlePages.guide.tabs, referenceTabs: articlePages.docs.tabs, initialSection: activeTab });
     else if (collection === "resources") await createBookinatorResourcePage({ root: articleBody });
     else if (collection === "privacy" || collection === "security") {
-      const destination = bookinatorShellPolicy.destinations.find(({ id }) => id === collection);
-      createBookinatorPracticePage({ root: articleBody, destination });
+      createBookinatorPracticePage({ root: articleBody, destination: collection });
     }
     else articleBody.innerHTML = page.tabs[activeTab][1];
   }
