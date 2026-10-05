@@ -1,4 +1,4 @@
-import { createProductDocsFlow, createProductFaq } from "/commons/@inator/ui/index.js";
+import { createProductDocsFlow, createProductDocsPage, createProductFaq, defineProductDocs } from "/commons/@inator/ui/index.js";
 
 function fragmentFromMarkup(markup) {
   const template = document.createElement("template");
@@ -38,4 +38,32 @@ export function createBookinatorDocsFlow({ tab, markup } = {}) {
   }
 
   return createProductDocsFlow({ sections });
+}
+
+function flowForTabs(tabs = {}) {
+  return createProductDocsFlow({ sections: Object.entries(tabs).map(([id, [heading, content]]) => ({ id: `help-${id}`, heading, content })) });
+}
+
+export function createBookinatorHelpPage({ root, guideTabs = {}, referenceTabs = {}, initialSection = "start" } = {}) {
+  const guideEntries = Object.entries(guideTabs);
+  const start = guideEntries[0]?.[1]?.[1] || "<p>Choose a book to begin.</p>";
+  const tasks = Object.fromEntries(guideEntries.slice(1));
+  const faq = createProductFaq({ items: [
+    { question: "Does Bookinator upload the manuscript?", answer: "<p>No. Normal manuscript analysis, saved evidence, and reports remain on this computer.</p>" },
+    { question: "Why can analysis take a while?", answer: "<p>Bookinator reads locally. Large models and long chapters can take minutes, so the Pipeline keeps waiting, running, completed, and failed work visible.</p>" },
+    { question: "What should I share?", answer: "<p>Use the model-free HTML or PDF reports. They carry selected analysis and provenance without including the source manuscript.</p>" },
+    { question: "Where do I inspect models and prerequisites?", answer: "<p>Open Workspace, then Machine. Models and installed software are deliberately kept out of the everyday editorial workflow.</p>" }
+  ] });
+  const docs = defineProductDocs({
+    productLabel: "Bookinator",
+    heading: "Find your bearings. Then follow the evidence.",
+    introduction: "Start with the first run, follow an everyday task, look up the local architecture, or answer a common question.",
+    sections: {
+      start: { content: createBookinatorDocsFlow({ tab: "start", markup: start }) },
+      tasks: { content: flowForTabs(tasks) },
+      reference: { content: flowForTabs(referenceTabs) },
+      faq: { content: faq }
+    }
+  });
+  return createProductDocsPage({ root, docs, initialSection });
 }

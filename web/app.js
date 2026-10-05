@@ -3,7 +3,8 @@ import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
 import { createBookinatorAboutPage } from "./product-information.js?v=about-records-185";
 import { mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=navigation-hydration-183";
-import { createBookinatorDocsFlow } from "./product-docs.js";
+import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-186";
+import { createBookinatorResourcePage } from "./product-resources.js?v=commons-help-186";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
 import { isTemporalDossierObservation } from "./dossier-index.js";
 import { auditPortableReport, buildPortableReportHtml, buildPortableReportManifest, reportExportFilename } from "./portable-report.js?v=queue-order-166";
@@ -2250,7 +2251,11 @@ function showPipelinePage() {
 
 function showArticlePage(collection, requestedTab) {
   leaveBookWorkspace();
-  const page = articlePages[collection] || articlePages.about;
+  const page = collection === "help"
+    ? { kicker: "Bookinator help", title: "Help", intro: "Orientation, everyday tasks, reference, and common questions.", tabs: { start: ["Start here", ""], tasks: ["Everyday tasks", ""], reference: ["Reference", ""], faq: ["FAQ", ""] } }
+    : collection === "resources"
+      ? { kicker: "Bookinator resources", title: "Resources", intro: "Presentations, briefs, and bounded product language.", tabs: { library: ["Library", ""] } }
+      : articlePages[collection] || articlePages.about;
   const tabKeys = Object.keys(page.tabs);
   const activeTab = tabKeys.includes(requestedTab) ? requestedTab : tabKeys[0];
   document.querySelector("#books-page").hidden = true;
@@ -2262,22 +2267,23 @@ function showArticlePage(collection, requestedTab) {
   document.querySelector("#welcome-dialog").hidden = true;
   mountBookinatorShell({active: collection, selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   const hero = document.querySelector("#article-hero");
-  hero.hidden = collection === "about";
+  hero.hidden = ["about", "help", "resources"].includes(collection);
   hero.classList.toggle("has-mark", Boolean(page.mark));
   hero.innerHTML = `${page.mark ? '<img src="/assets/bookinator.svg" alt="">' : ""}<p class="context">${page.kicker}</p><h1>${page.title}</h1><p>${page.intro}</p>`;
   const tabs = document.querySelector("#article-tabs");
-  tabs.hidden = collection === "about";
+  tabs.hidden = ["about", "help", "resources"].includes(collection);
   tabs.innerHTML = Object.entries(page.tabs).map(([key, [label]]) => `<button type="button" data-article-tab="${key}"${key === activeTab ? ' aria-current="page"' : ""}>${label}</button>`).join("");
   const articleBody = document.querySelector("#article-body");
   const productHistoryMode = collection === "releases" ? "releases" : collection === "roadmap" ? "roadmap" : "";
-  if (collection !== "about") articleBody.classList.remove("inator-information-page", "inator-about-page");
-  articleBody.classList.toggle("shared-product-docs", collection === "docs" || collection === "about");
+  articleBody.classList.remove("inator-information-page", "inator-about-page", "inator-help-page", "inator-resource-page");
+  articleBody.classList.toggle("shared-product-docs", ["help", "about", "resources"].includes(collection));
   articleBody.innerHTML = productHistoryMode
     ? `<section class="shared-product-history" aria-label="Bookinator ${productHistoryMode}"><div data-product-history="${productHistoryMode}"></div></section>`
     : "";
   if (!productHistoryMode) {
     if (collection === "about") createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
-    else if (collection === "docs") articleBody.append(createBookinatorDocsFlow({ tab: activeTab, markup: page.tabs[activeTab][1] }));
+    else if (collection === "help") createBookinatorHelpPage({ root: articleBody, guideTabs: articlePages.guide.tabs, referenceTabs: articlePages.docs.tabs, initialSection: activeTab });
+    else if (collection === "resources") void createBookinatorResourcePage({ root: articleBody });
     else articleBody.innerHTML = page.tabs[activeTab][1];
   }
   const productHistoryMount = document.querySelector("[data-product-history]");
@@ -8047,6 +8053,8 @@ function route() {
   else if (collection === "pipeline") showPipelinePage();
   else if (collection === "machine") openSystemPanel(part === "models" ? "models" : "machine");
   else if (collection === "workspace") showWorkspacePage(part);
+  else if (collection === "docs" || collection === "guide") showArticlePage("help", collection === "guide" ? "start" : part || "reference");
+  else if (collection === "help" || collection === "resources") showArticlePage(collection, part);
   else if (collection === "books" || !articlePages[collection]) showBooksPage();
   else showArticlePage(collection, part);
 }

@@ -97,11 +97,11 @@ export const bookinatorShellPolicy = defineProductShellPolicy({
   capabilities: ["resources"],
   routes: {
     about: {href: "#about/premise", route: "about"},
-    help: {href: "#docs/architecture", route: "docs"}
+    help: {href: "#help/start", route: "help"}
   },
   omit: ["privacy", "security", "milestones", "releases", "roadmap", "resources"],
   extensions: [
-    {id: "resources", href: "/docs/presentations/", route: "resources", label: "Resources", group: "resources", after: "help", roles: ["developer", "team"], capability: "resources"}
+    {id: "resources", href: "#resources/library", route: "resources", label: "Resources", group: "resources", after: "help", roles: ["developer", "team"], capability: "resources"}
   ]
 });
 

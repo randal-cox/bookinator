@@ -28,7 +28,7 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
     shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
 
     assert 'data-inator-product-footer' in index
-    assert 'href: "#docs/architecture"' in shell
+    assert 'href: "#help/start"' in shell
     assert 'label: "Resources"' in shell
     assert 'title: "Milestones, not machinery"' in pages
     assert '/commons/@inator/ui/product-history.css' in index
@@ -47,11 +47,11 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
 
 def test_footer_information_architecture_is_about_docs_and_resources():
     shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
-    labels = ['href: "#docs/architecture"', 'label: "Resources"']
+    labels = ['href: "#help/start"', 'label: "Resources"']
     positions = [shell.index(label) for label in labels]
     assert positions == sorted(positions)
     assert 'href: "#about/premise"' in shell
-    assert 'href: "#docs/architecture"' in shell
+    assert 'href: "#help/start"' in shell
     assert 'defineProductShellPolicy' in shell
     assert 'productShellFooterLinks' in shell
     assert 'roles: ["developer", "team"]' in shell
@@ -64,8 +64,9 @@ def test_docs_use_shared_editorial_flow_without_replacing_product_prose():
     docs = (ROOT / "web" / "product-docs.js").read_text(encoding="utf-8")
 
     assert '/commons/@inator/ui/product-information.css' in index
-    assert 'createBookinatorDocsFlow' in app
-    assert 'collection === "docs"' in app
+    assert 'createBookinatorHelpPage' in app
+    assert 'collection === "help"' in app
+    assert 'createProductDocsPage' in docs
     assert 'createProductDocsFlow' in docs
     assert 'createProductFaq' in docs
     assert 'title: "How the local system works"' in pages

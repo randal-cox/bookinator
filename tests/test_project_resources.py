@@ -14,8 +14,10 @@ def read(path: Path) -> str:
 
 
 def test_resource_catalog_describes_current_materials():
-    resources = json.loads(read(PRESENTATIONS / "catalog.json"))
+    catalog = json.loads(read(PRESENTATIONS / "catalog.json"))
+    resources = catalog["resources"]
 
+    assert catalog["schema"] == "inator.resources.v1"
     assert [resource["id"] for resource in resources] == [
         "why-bookinator",
         "one-pager",
@@ -23,12 +25,12 @@ def test_resource_catalog_describes_current_materials():
         "wish-list",
     ]
     assert resources[-1]["title"] == "Next bets and evaluation"
-    assert resources[-1]["status"] == "Working direction"
+    assert resources[-1]["statusLabel"] == "Working direction"
     assert all("free forever" not in json.dumps(resource).lower() for resource in resources)
 
     for resource in resources:
         for action in resource["actions"]:
-            target = (PRESENTATIONS / action["url"]).resolve()
+            target = (ROOT / action["href"].lstrip("/")).resolve()
             if target.is_dir():
                 target /= "index.html"
             assert target.exists(), f"Missing resource target: {target}"
