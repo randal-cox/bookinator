@@ -1,0 +1,27 @@
+{
+  "schema": "inator.product-information-contract.v1",
+  "productId": "Bookinator",
+  "records": {
+    "about": {
+      "source": "src/product-information.js"
+    },
+    "help": {
+      "source": "src/product-docs.js"
+    },
+    "privacy": {
+      "source": "src/product-information.js"
+    },
+    "security": {
+      "source": "src/product-information.js"
+    },
+    "milestones": {
+      "source": "src/product-history.js"
+    },
+    "releases": {
+      "source": "src/product-history.js"
+    },
+    "roadmap": {
+      "source": "src/product-history.js"
+    }
+  }
+}

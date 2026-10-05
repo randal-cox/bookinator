@@ -285,13 +285,7 @@ h2 { margin-bottom: 10px; font: 500 29px/1.12 Georgia, serif; }
 .shared-product-docs .inator-docs-section:first-child { border-top: 0; }
 .shared-product-docs .inator-docs-section .information-lede { padding-bottom: 0; border-bottom: 0; }
 .inator-help-page .information-lede { grid-template-columns: minmax(170px,.42fr) minmax(0,1.58fr); gap: 18px 36px; padding-bottom: 0; border: 0; }
-.help-topic-graphic { grid-row: 1 / 3; position: relative; min-height: 150px; display: grid; place-items: center; margin: 0; overflow: hidden; color: #65dbea; background: #102f57; border-radius: 22px; }
-.help-topic-graphic > span:first-child { position: relative; z-index: 2; width: 62px; height: 62px; display: grid; place-items: center; color: #fff; background: #1e5fa7; border: 1px solid #76dce9; border-radius: 18px; box-shadow: 0 12px 24px #061a343d; }
-.help-topic-graphic svg { width: 36px; height: 36px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.help-topic-graphic__threads,.help-topic-graphic__threads i { position: absolute; inset: 0; }
-.help-topic-graphic__threads i { top: auto; right: -12%; bottom: 27px; left: -12%; height: 3px; background: #54d7e8; transform: rotate(-8deg); }
-.help-topic-graphic__threads i:nth-child(2) { bottom: 48px; background: #b44f92; transform: rotate(7deg); }
-.help-topic-graphic__threads i:nth-child(3) { bottom: 15px; background: #f0b640; transform: rotate(2deg); }
+.help-topic-graphic { grid-row: 1 / 3; min-height: 150px; }
 .inator-help-page .information-lede h2 { max-width: 20ch; font-size: clamp(2rem,4vw,3rem); }
 .article-body.inator-help-page .information-lede > p:last-child,.article-body.inator-help-page .guide-path li p,.article-body.inator-help-page .workspace-guide p,.article-body.inator-help-page .share-guide p,.article-body.inator-help-page .model-doc p { font-size: 1rem; line-height: 1.65; }
 .inator-help-page .workspace-guide span,.inator-help-page .architecture-flow span,.inator-help-page .pipeline-doc li::before,.inator-help-page .pipeline-doc span { font-size: .875rem; }
@@ -353,12 +347,13 @@ h2 { margin-bottom: 10px; font: 500 29px/1.12 Georgia, serif; }
 .inator-about-page .information-lede>p:first-child { font-size: .875rem; }
 .article-body.inator-about-page .information-lede>p:last-child { font-size: 1rem; }
 .inator-about-page .trust-ledger dd { font-size: 1rem; }
-.inator-about-page #work { display: grid; grid-template-columns: minmax(260px,.76fr) minmax(0,1.24fr); gap: 8px 48px; }
-.inator-about-page #work>h2 { grid-column: 1; grid-row: 1; }
-.inator-about-page #work>.information-lede { display: contents; }
-.inator-about-page #work>.information-lede>p:first-child { grid-column: 1; grid-row: 2; margin-top: 4px; }
-.inator-about-page #work>.information-lede>h2 { grid-column: 2; grid-row: 1/3; }
-.inator-about-page #work>.information-lede>p:last-child { grid-column: 2; grid-row: 3; margin-top: 8px; }
+.inator-about-page #work { display: grid; grid-template-columns: minmax(170px,.38fr) minmax(0,1.62fr); gap: 22px 48px; align-items: center; }
+.inator-about-page #work>h2 { grid-column: 1/-1; margin-bottom: 2px; }
+.inator-about-page #work>.book-workflow-graphic { grid-column: 1; grid-row: 2; min-height: 190px; }
+.inator-about-page #work>.information-lede { grid-column: 2; grid-row: 2; display: block; padding: 0; border: 0; }
+.inator-about-page #work>.information-lede>p:first-child { margin: 0 0 9px; }
+.inator-about-page #work>.information-lede>h2 { max-width: 19ch; }
+.inator-about-page #work>.information-lede>p:last-child { max-width: 62ch; margin-top: 12px; }
 .inator-about-page #work>.capability-bands { grid-column: 1/-1; }
 .trust-about-lede { display: grid; grid-template-columns: minmax(170px,.42fr) minmax(0,1.58fr); gap: 34px; align-items: center; }
 .trust-about-lede>div>p:first-child { margin: 0 0 8px; color: #2865ae; font-size: .875rem; font-weight: 850; }
@@ -378,6 +373,7 @@ h2 { margin-bottom: 10px; font: 500 29px/1.12 Georgia, serif; }
 .book-about-model-list strong { color: #102748; font-size: .95rem; }
 .book-about-model-list span,.book-about-model-list small { color: #536981; font-size: .8rem; line-height: 1.45; }
 @media (max-width: 800px) { .inator-about-page .book-about-lede>div,.inator-about-page #work,.trust-about-lede { grid-template-columns: 1fr; }.inator-about-page .book-about-lede h2,.article-body.inator-about-page .book-about-lede>div>p:last-child,.inator-about-page #work>h2,.inator-about-page #work>.information-lede>p:first-child,.inator-about-page #work>.information-lede>h2,.inator-about-page #work>.information-lede>p:last-child { grid-column: 1; grid-row: auto; }.article-body.inator-about-page .book-about-lede>div>p:last-child { margin-top: 10px; }.book-about-art img { aspect-ratio: 16/9; }.inator-about-page .principle-ledger { grid-template-columns: 1fr; }.inator-about-page .principle-ledger article { min-height: 0; }.book-about-model-list { grid-template-columns: 1fr; }.trust-hero-icon { width: 96px; height: 96px; justify-self: start; }.trust-hero-icon svg { width: 54px; height: 54px; } }
+@media (max-width: 800px) { .inator-about-page #work>.book-workflow-graphic,.inator-about-page #work>.information-lede { grid-column: 1; grid-row: auto; }.inator-about-page #work>.book-workflow-graphic { min-height: 140px; justify-items: start; } }
 .guide-path,.pipeline-doc { counter-reset: guide-step; margin: 27px 0 0; padding: 0; list-style: none; }
 .guide-path li { counter-increment: guide-step; position: relative; display: grid; grid-template-columns: 76px minmax(0,1fr); min-height: 104px; }
 .guide-path li::before { content: counter(guide-step); position: relative; z-index: 1; width: 43px; height: 43px; display: grid; place-items: center; color: #fff; background: #2865ae; border: 7px solid #e5f0fc; border-radius: 50%; font: 700 15px Georgia,serif; box-sizing: border-box; }

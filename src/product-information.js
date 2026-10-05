@@ -1,4 +1,4 @@
-import { createInatorIcon, createProductAboutPage, createProductDocsFlow, defineCitationRegistry, defineProductAbout, defineTrustSurface } from "/commons/@inator/ui/index.js";
+import { createInatorIcon, createInformationGraphic, createProductAboutPage, createProductDocsFlow, defineCitationRegistry, defineProductAbout, defineTrustSurface } from "/commons/@inator/ui/index.js";
 
 export const bookinatorAbout = defineProductAbout({
   product: { name: "Bookinator", summary: "A local-first editorial workbench that connects manuscript evidence across chapters while preserving human judgment." },
@@ -112,6 +112,21 @@ async function aboutSystemInventory() {
 }
 
 function installAboutIcons(root) {
+  const work = root.querySelector("#work");
+  if (work && !work.querySelector(".book-workflow-graphic")) {
+    work.querySelector(":scope > .information-lede")?.before(createInformationGraphic({
+      icon: "connections",
+      label: "Manuscript passages connected across the whole book",
+      className: "book-workflow-graphic"
+    }));
+  }
+  root.querySelectorAll("[data-inator-information-graphic]").forEach((mount) => {
+    mount.replaceWith(createInformationGraphic({
+      icon: mount.dataset.inatorInformationGraphic,
+      label: mount.getAttribute("aria-label"),
+      className: mount.className
+    }));
+  });
   root.querySelectorAll("[data-inator-icon]").forEach((mount) => mount.replaceChildren(createInatorIcon(mount.dataset.inatorIcon)));
 }
 

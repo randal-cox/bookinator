@@ -1,4 +1,4 @@
-import { createInatorIcon, createProductDocsFlow, createProductDocsPage, createProductFaq, defineProductDocs } from "/commons/@inator/ui/index.js";
+import { createInformationGraphic, createProductDocsFlow, createProductDocsPage, createProductFaq, defineProductDocs } from "/commons/@inator/ui/index.js";
 
 const HELP_GRAPHIC_ICONS = Object.freeze({
   "Before the book reads itself": "machine",
@@ -14,18 +14,12 @@ const HELP_GRAPHIC_ICONS = Object.freeze({
 
 function replaceHelpLabelsWithGraphics(root) {
   root.querySelectorAll(".information-lede > p:first-child").forEach((label) => {
-    const figure = document.createElement("figure");
-    figure.className = "help-topic-graphic";
-    figure.setAttribute("role", "img");
-    figure.setAttribute("aria-label", label.textContent.trim());
-    const icon = document.createElement("span");
-    icon.append(createInatorIcon(HELP_GRAPHIC_ICONS[label.textContent.trim()] || "guide"));
-    const threads = document.createElement("span");
-    threads.className = "help-topic-graphic__threads";
-    threads.setAttribute("aria-hidden", "true");
-    threads.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
-    figure.append(icon, threads);
-    label.replaceWith(figure);
+    const topic = label.textContent.trim();
+    label.replaceWith(createInformationGraphic({
+      icon: HELP_GRAPHIC_ICONS[topic] || "guide",
+      label: topic,
+      className: "help-topic-graphic"
+    }));
   });
 }
 
