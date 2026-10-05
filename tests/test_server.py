@@ -691,11 +691,12 @@ def test_analysis_navigation_remembers_each_books_last_workspace_tab() -> None:
     assert '`#/book/${selectedBook.id}/${selectedAnalysisTab}`' in shell
 
 
-def test_library_uses_one_global_queue_control_and_priority_membership() -> None:
+def test_library_delegates_global_queue_controls_and_project_priority_to_commons() -> None:
     root = Path(__file__).parents[1]
     page = (root / "src" / "index.html").read_text(encoding="utf-8")
     app = (root / "src" / "app.js").read_text(encoding="utf-8")
-    assert 'id="toggle-library-pipeline"' in page
+    adapter = (root / "src" / "pipeline-adapter.js").read_text(encoding="utf-8")
+    assert 'id="toggle-library-pipeline"' not in page
     assert 'id="global-pipeline-status"' not in page
     assert 'id="queue-books"' not in page
     assert 'id="dequeue-books"' not in page
@@ -706,24 +707,20 @@ def test_library_uses_one_global_queue_control_and_priority_membership() -> None
     assert 'id="pipeline-page"' in page
     assert page.index('id="pipeline-page"') < page.index('id="library-pipeline-panel"')
     assert 'id="library-pipeline-panel"' not in page[page.index('id="books-page"'):page.index('id="pipeline-page"')]
-    assert 'data-pipeline-selection-action="top"' in page
-    assert 'data-pipeline-selection-action="raise"' in page
-    assert 'data-pipeline-selection-action="lower"' in page
-    assert 'data-pipeline-selection-action="pause"' in page
-    assert 'data-pipeline-selection-action="resume"' in page
+    assert "createAtomicPipelineWorkspace" in app
+    assert 'supportedActions: ["move-top", "raise", "lower", "pause", "resume"]' in app
+    assert 'import { definePipelineSnapshot } from "/commons/@inator/engine/pipeline-contract.js"' in adapter
+    assert 'priority: projectPriority[book.priority] || "normal"' in adapter
+    assert 'ready: "waiting", waiting: "blocked"' in adapter
+    assert 'data-pipeline-selection-action=' not in page
     assert 'data-pipeline-selection-action="remove"' not in page
-    assert 'id="pipeline-page-size"' in page
-    assert 'id="pipeline-page-previous"' in page
-    assert 'id="pipeline-page-next"' in page
-    assert '<option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="all">All</option>' in page
+    assert 'id="pipeline-page-size"' not in page
+    assert 'id="pipeline-page-previous"' not in page
+    assert 'id="pipeline-page-next"' not in page
     assert 'id="pipeline-attention-button"' in page
-    assert 'id="pipeline-selection-count"' in page.split('class="pipeline-queue-footer"', 1)[1]
-    assert 'const pageTasks = tasks.slice(pageStart, pageStart + pageLimit)' in app
-    assert 'pageTasks.forEach((task) => state.pipelineSelection.add(task.id))' in app
-    assert 'localStorage.setItem(pipelinePageSizeKey' in app
-    assert 'pipelinePageSize = 10' in app
+    assert 'class="pipeline-queue-footer"' not in page
+    assert 'state.pipelineSelection' not in app
     assert 'scrollIntoView({behavior: "smooth", block: "start"})' in app
-    assert 'data-select-pipeline-task' in app
     assert 'function pipelineTasks()' in app
     assert 'activity.bookId === item.bookId' in app
     assert '{...item, action: activityAction, task: activity.task || item.task}' in app
@@ -731,7 +728,7 @@ def test_library_uses_one_global_queue_control_and_priority_membership() -> None
     assert 'action: "questions"' in app
     assert 'postLibraryAction("/api/library/pipeline/task-state"' in app
     assert 'id="library-pipeline-progress"' in page
-    assert 'label: "Current run"' in app
+    assert 'runName: "Current run"' in app
     assert 'id="restart-current-run"' in page
     assert 'class="pipeline-control-button pipeline-new-run"' in page
     assert '<small>Start here</small>' in page
@@ -967,7 +964,7 @@ def test_library_marks_only_the_global_worker_book_as_running() -> None:
 
     assert "function bookOwnsActiveWorker(book)" in app
     assert 'if (activity.bookId) return activity.bookId === book.id;' in app
-    assert app.count('book-cover${running ? " is-running" : ""}') == 2
+    assert app.count('book-cover${running ? " is-running" : ""}') == 1
     assert ".book-cover.is-running::after" in styles
     assert ".book-cover.is-running::after" in styles and "background: var(--blue)" in styles
     assert "animation: book-running-pulse" in styles
@@ -1592,13 +1589,15 @@ def test_development_launcher_delegates_to_the_shared_inator_launcher() -> None:
     assert package["devDependencies"]["@inator/dev-tools"] == "file:.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz"
 
 
-def test_server_exposes_the_installed_commons_ui_through_a_narrow_static_facade() -> None:
+def test_server_exposes_installed_commons_modules_through_a_narrow_static_facade() -> None:
     handler = server.BookinatorHandler.__new__(server.BookinatorHandler)
     handler.directory = str(server.APP_ROOT)
 
     assert handler.translate_path("/commons/@inator/ui/index.js") == str(server.COMMONS_UI_ROOT / "index.js")
     assert handler.translate_path("/commons/@inator/ui/product-history.css") == str(server.COMMONS_UI_ROOT / "product-history.css")
     assert handler.translate_path("/commons/@inator/ui/../../../../pyproject.toml") != str(server.ROOT / "pyproject.toml")
+    assert handler.translate_path("/commons/@inator/engine/pipeline-contract.js") == str(server.COMMONS_ENGINE_ROOT / "pipeline-contract.js")
+    assert handler.translate_path("/commons/@inator/engine/../../../../pyproject.toml") != str(server.ROOT / "pyproject.toml")
 
 
 def test_pipeline_payload_does_not_resend_manuscript_source_text() -> None:

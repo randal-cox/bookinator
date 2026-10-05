@@ -40,6 +40,7 @@ ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = ROOT / "src"
 DOCS_ROOT = ROOT / "docs"
 COMMONS_UI_ROOT = ROOT / "node_modules" / "@inator" / "ui" / "src"
+COMMONS_ENGINE_ROOT = ROOT / "node_modules" / "@inator" / "engine" / "src"
 LOCAL_PACKAGES = ROOT / ".bookinator" / "packages"
 DATA_ROOT = Path(os.environ.get("BOOKINATOR_DATA_DIR", ROOT / ".bookinator"))
 SETTINGS_PATH = DATA_ROOT / "settings.json"
@@ -11542,6 +11543,11 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
             relative = route_path.removeprefix("/commons/@inator/ui").lstrip("/") or "index.js"
             candidate = (COMMONS_UI_ROOT / relative).resolve()
             if candidate.suffix in {".css", ".js"} and COMMONS_UI_ROOT.resolve() in candidate.parents:
+                return str(candidate)
+        if route_path == "/commons/@inator/engine" or route_path.startswith("/commons/@inator/engine/"):
+            relative = route_path.removeprefix("/commons/@inator/engine").lstrip("/") or "index.js"
+            candidate = (COMMONS_ENGINE_ROOT / relative).resolve()
+            if candidate.suffix == ".js" and COMMONS_ENGINE_ROOT.resolve() in candidate.parents:
                 return str(candidate)
         return super().translate_path(path)
 

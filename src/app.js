@@ -1,6 +1,7 @@
 import { articlePages } from "./pages.js";
-import { createProductHistoryTabs, normalizeProductAboutTab } from "/commons/@inator/ui/index.js";
+import { createAtomicPipelineWorkspace, createProductHistoryTabs, normalizeProductAboutTab } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
+import { createBookinatorPipelineSnapshot } from "./pipeline-adapter.js?v=commons-pipeline-202";
 import { createBookinatorAboutPage } from "./product-information.js?v=about-route-200";
 import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=about-layout-198";
 import { createBookinatorHelpPage } from "./product-docs.js?v=commons-routes-201";
@@ -44,11 +45,9 @@ const chapterFontScaleKey = "bookinator.chapter-font-scale.v1";
 const sourceAnalysisKey = "bookinator.source-analysis.v1";
 const smellSortKey = "bookinator.smell-sort.v1";
 const pipelineCoverageKey = "bookinator.pipeline-coverage.v1";
-const pipelinePageSizeKey = "bookinator.pipeline-page-size.v1";
 // Keep destructive category resets isolated from customer-facing controls so a
 // release build can turn them off without changing the analysis toolbars.
 const developmentControlsEnabled = true;
-const pipelinePageSizes = [5, 10, 25, 50, "all"];
 
 try {
   mountBookinatorShell();
@@ -68,10 +67,6 @@ const sourceAnalysisDefaults = {emotion: {enabled: true, threshold: 10, neutral:
 let sourceAnalysisPreferences = structuredClone(sourceAnalysisDefaults);
 let smellSortMode = localStorage.getItem(smellSortKey) === "type" ? "type" : "position";
 let pipelineCoverageMode = localStorage.getItem(pipelineCoverageKey) === "reviewed" ? "reviewed" : "analysis";
-const savedPipelinePageSize = localStorage.getItem(pipelinePageSizeKey);
-let pipelinePageSize = savedPipelinePageSize === "all" ? "all" : Number(savedPipelinePageSize);
-if (!pipelinePageSizes.includes(pipelinePageSize)) pipelinePageSize = 10;
-let pipelinePage = 1;
 let rememberedAnalysisTabs = {};
 let rememberedWorkspaceGroups = {};
 let rememberedPipelineDisclosures = {};
@@ -153,7 +148,6 @@ function saveSourceAnalysisPreferences() {
 const state = {
   books: [],
   selection: new Set(),
-  pipelineSelection: new Set(),
   rememberedSelection: [],
   sort: rememberedLibraryView.sort,
   draftIcon: null,
@@ -293,18 +287,12 @@ function updateSelectionAction() {
 
 function updateGlobalPipelineStatus() {
   const panel = document.querySelector("#library-pipeline-panel");
-  const toggle = document.querySelector("#toggle-library-pipeline");
-  if (!panel || !toggle) return;
+  if (!panel) return;
   const pipeline = state.globalPipeline || {};
   const waitingCount = Number(pipeline.waitingBooks || 0);
   const running = Boolean(pipeline.running);
   const enabled = Boolean(pipeline.enabled);
-  const currentRun = pipeline.currentRun || {};
-  const completed = Number(currentRun.completed ?? pipeline.completed ?? 0);
-  const total = Number(currentRun.total ?? pipeline.total ?? 0);
-  const percent = total ? Math.round(completed / total * 100) : 0;
   const etaSeconds = Number(pipeline.etaSeconds || 0);
-  const etaText = etaSeconds > 0 ? formatEta(etaSeconds) : waitingCount > 0 ? "Estimating from recent work…" : "No queued work remaining";
   const navigation = document.querySelector('[data-route="pipeline"]');
   const navigationStatus = navigation?.querySelector("small");
   const diagnosticCount = Number(pipeline.diagnosticCount || 0);
@@ -320,33 +308,6 @@ function updateGlobalPipelineStatus() {
       : "Queue current";
   panel.classList.toggle("running", running);
   panel.classList.toggle("urgent", !enabled && waitingCount > 0);
-  const runBooks = Number(currentRun.bookCount || 0);
-  const addedUnits = Number(currentRun.addedUnits || 0);
-  const deferredUnits = Number(currentRun.deferredUnits || 0);
-  const started = currentRun.startedAt ? new Date(currentRun.startedAt).toLocaleString() : "now";
-  const runFacts = [
-    `${runBooks} ${runBooks === 1 ? "book" : "books"} · started ${started}`,
-    addedUnits ? `${addedUnits.toLocaleString()} ${addedUnits === 1 ? "step" : "steps"} added after the run began` : "The starting scope is preserved",
-    deferredUnits ? `${deferredUnits.toLocaleString()} deferred by shelving` : "",
-  ].filter(Boolean).join(" · ");
-  document.querySelector("#library-pipeline-progress").innerHTML = progressPanel({
-    label: "Current run",
-    completed,
-    total,
-    unit: "steps",
-    percent,
-    statusCopy: etaText,
-    basisCopy: runFacts,
-    activity: resolvedActivity(),
-    fallbackActivity: "Bookinator is checking the global queue",
-    className: "library-overall-progress",
-  });
-  toggle.hidden = !enabled && waitingCount === 0;
-  toggle.classList.toggle("danger", enabled);
-  toggle.setAttribute("aria-pressed", String(enabled));
-  toggle.title = enabled ? "Stop after the current local model response" : "Start the global analysis queue";
-  toggle.querySelector("small").textContent = enabled ? "Stop" : "Start";
-  toggle.querySelector("svg").innerHTML = enabled ? '<rect x="6" y="6" width="12" height="12" rx="1"/>' : '<path d="m8 5 11 7-11 7Z"/>';
   const coverage = pipeline.libraryCoverage || {};
   const coverageTotal = Number(coverage.totalBooks || 0);
   const coverageComplete = pipelineCoverageMode === "reviewed" ? Number(coverage.reviewedComplete || 0) : Number(coverage.analysisComplete || 0);
@@ -474,75 +435,36 @@ function pipelineTasks() {
   return tasks.map((task, index) => ({...task, rank: index + 1}));
 }
 
-function updatePipelineSelectionActions(tasks) {
-  const selected = tasks.filter((task) => state.pipelineSelection.has(task.id));
-  const label = document.querySelector("#pipeline-selection-count");
-  if (label) label.textContent = `${selected.length} selected`;
-  document.querySelectorAll("[data-pipeline-selection-action]").forEach((button) => {
-    const action = button.dataset.pipelineSelectionAction;
-    button.disabled = !selected.length
-      || (action === "top" && !selected.some((task) => task.state === "ready" && !task.required))
-      || (action === "pause" && !selected.some((task) => !["paused", "pausing"].includes(task.state) && !task.required))
-      || (action === "resume" && !selected.some((task) => ["paused", "pausing"].includes(task.state)));
-  });
+let pipelineWorkspace = null;
+
+function currentPipelineSnapshot() {
+  return createBookinatorPipelineSnapshot({ books: state.books, pipeline: state.globalPipeline, tasks: pipelineTasks() });
 }
 
 function renderPipelineQueue() {
   const list = document.querySelector("#pipeline-book-list");
+  const progress = document.querySelector("#library-pipeline-progress");
   const summary = document.querySelector("#pipeline-queue-summary");
-  const footer = document.querySelector("#pipeline-queue-footer");
-  if (!list || !summary) return;
-  const tasks = pipelineTasks();
-  const visibleIds = new Set(tasks.map((task) => task.id));
-  for (const id of state.pipelineSelection) if (!visibleIds.has(id)) state.pipelineSelection.delete(id);
-  summary.textContent = tasks.length
-    ? `${tasks.length} remaining ${tasks.length === 1 ? "job" : "jobs"}. Ready work leads; dependent work stays visible behind it.`
-    : "No analysis jobs are waiting.";
-  updatePipelineSelectionActions(tasks);
-  if (!tasks.length) {
-    list.innerHTML = '<div class="pipeline-empty"><strong>The queue is clear.</strong><span>New manuscripts appear briefly for inventory; unshelved books remain for analysis.</span></div>';
-    if (footer) footer.hidden = true;
+  if (!list || !progress || !summary) return;
+  const snapshot = currentPipelineSnapshot();
+  summary.textContent = snapshot.units.length
+    ? `${snapshot.units.length} remaining ${snapshot.units.length === 1 ? "step" : "steps"}. Eligible work leads; blocked work stays visible behind it.`
+    : "No analysis steps are waiting.";
+  if (pipelineWorkspace) {
+    pipelineWorkspace.update(snapshot);
     return;
   }
-  const pageLimit = pipelinePageSize === "all" ? Math.max(tasks.length, 1) : pipelinePageSize;
-  const pageCount = Math.ceil(tasks.length / pageLimit);
-  pipelinePage = Math.max(1, Math.min(pipelinePage, pageCount));
-  const pageStart = (pipelinePage - 1) * pageLimit;
-  const pageTasks = tasks.slice(pageStart, pageStart + pageLimit);
-  const allSelected = pageTasks.every((task) => state.pipelineSelection.has(task.id));
-  const someSelected = pageTasks.some((task) => state.pipelineSelection.has(task.id));
-  list.innerHTML = `<div class="pipeline-task-heading"><label><input type="checkbox" data-select-all-pipeline-tasks${allSelected ? " checked" : ""}><span class="sr-only">Select all pipeline jobs on this page</span></label><span>#</span><span>Book</span><span>Job</span><span>Status</span></div>${pageTasks.map((task) => {
-    const running = task.state === "running";
-    const statusLabel = running ? "Running" : task.state === "pausing" ? "Pausing" : task.state === "ready" ? "Ready" : task.state === "paused" ? "Paused" : "Waiting";
-    return `<article class="pipeline-book-row pipeline-task-row ${escapeHtml(task.state)}">
-      <label class="pipeline-task-selector"><input type="checkbox" data-select-pipeline-task="${escapeHtml(task.id)}"${state.pipelineSelection.has(task.id) ? " checked" : ""}><span class="sr-only">Select ${escapeHtml(task.label)} for ${escapeHtml(task.book.title)}</span></label>
-      <span class="pipeline-queue-rank" aria-label="Queue position ${task.rank}">${task.rank}</span>
-      <div class="pipeline-book-identity"><span class="book-cover${running ? " is-running" : ""}" data-pipeline-task-icon="${escapeHtml(task.id)}" aria-hidden="true"></span><div><strong>${escapeHtml(task.book.title)}</strong><small>${escapeHtml(task.book.author || "Author not specified")} · ${escapeHtml((task.book.priority || "normal").replace(/^./, (letter) => letter.toUpperCase()))}</small></div></div>
-      <span class="pipeline-book-status"><strong>${escapeHtml(task.label)}</strong><small>${escapeHtml(task.detail)}</small></span>
-      <span class="pipeline-task-state ${escapeHtml(task.state)}"><i aria-hidden="true"></i><strong>${statusLabel}</strong>${task.required ? "<small>Required intake</small>" : ""}</span>
-    </article>`;
-  }).join("")}`;
-  if (footer) footer.hidden = false;
-  const sizeMenu = document.querySelector("#pipeline-page-size");
-  if (sizeMenu) sizeMenu.value = String(pipelinePageSize);
-  const range = document.querySelector("#pipeline-page-range");
-  if (range) range.textContent = `${pageStart + 1}–${pageStart + pageTasks.length} of ${tasks.length}`;
-  const previous = document.querySelector("#pipeline-page-previous");
-  const next = document.querySelector("#pipeline-page-next");
-  if (previous) previous.disabled = pipelinePage === 1;
-  if (next) next.disabled = pipelinePage === pageCount;
-  const selectAll = list.querySelector("[data-select-all-pipeline-tasks]");
-  selectAll.indeterminate = someSelected && !allSelected;
-  selectAll.addEventListener("change", () => {
-    if (selectAll.checked) pageTasks.forEach((task) => state.pipelineSelection.add(task.id));
-    else pageTasks.forEach((task) => state.pipelineSelection.delete(task.id));
-    renderPipelineQueue();
+  pipelineWorkspace = createAtomicPipelineWorkspace({
+    progressMount: progress,
+    queueMount: list,
+    snapshot,
+    supportedActions: ["move-top", "raise", "lower", "pause", "resume"],
+    showTidy: false,
+    showTiming: false,
+    showStartHere: false,
+    labels: { appName: "Bookinator", runName: "Current run", project: "Project" },
+    onAction: handleCommonsPipelineAction
   });
-  pageTasks.forEach((task) => renderIcon(list.querySelector(`[data-pipeline-task-icon="${CSS.escape(task.id)}"]`), task.book.icon, task.book.title, task.book.author));
-  list.querySelectorAll("[data-select-pipeline-task]").forEach((checkbox) => checkbox.addEventListener("change", () => {
-    checkbox.checked ? state.pipelineSelection.add(checkbox.dataset.selectPipelineTask) : state.pipelineSelection.delete(checkbox.dataset.selectPipelineTask);
-    renderPipelineQueue();
-  }));
 }
 
 function diagnosticTab(stage) {
@@ -1785,6 +1707,7 @@ async function refreshLibraryBooks({poll = false} = {}) {
   else {
     updateGlobalPipelineStatus();
     updateLocalQueueStatus();
+    if (!document.querySelector("#pipeline-page")?.hidden) renderPipelineQueue();
   }
   if (poll && (state.globalPipeline.running || (state.globalPipeline.enabled && state.globalPipeline.waitingBooks > 0))) {
     state.libraryTimer = setTimeout(() => refreshLibraryBooks({poll: true}), 1800);
@@ -1798,14 +1721,24 @@ async function postLibraryAction(path, payload = {}) {
   return result;
 }
 
-async function handlePipelineSelectionAction(action) {
-  const selected = pipelineTasks().filter((task) => state.pipelineSelection.has(task.id));
-  if (!selected.length) return;
+async function handleCommonsPipelineAction({action, unitIds = []}) {
+  if (action === "start" || action === "stop") {
+    try {
+      await postLibraryAction(`/api/library/pipeline/${action}`);
+      await refreshLibraryBooks({poll: true});
+    } catch (error) {
+      await confirmAction({context: "Queue unchanged", title: `Bookinator could not ${action} the queue`, message: error.message, acceptLabel: "Close"});
+    }
+    return {snapshot: currentPipelineSnapshot()};
+  }
+  const selectedIds = new Set(unitIds);
+  const selected = pipelineTasks().filter((task) => selectedIds.has(task.id));
+  if (!selected.length) return {snapshot: currentPipelineSnapshot()};
   const books = [...new Map(selected.map((task) => [task.book.id, task.book])).values()];
   try {
-    if (action === "top") {
+    if (action === "move-top") {
       const ready = selected.filter((task) => task.state === "ready" && !task.required);
-      if (!ready.length) return;
+      if (!ready.length) return {snapshot: currentPipelineSnapshot()};
       for (const task of [...ready].reverse()) {
         await postLibraryAction("/api/library/pipeline/prioritize", {bookId: task.book.id, action: task.action});
       }
@@ -1824,39 +1757,17 @@ async function handlePipelineSelectionAction(action) {
         await postLibraryAction("/api/library/pipeline/task-state", {bookId: task.book.id, action: task.action, paused: pausing});
       }
     }
-    state.pipelineSelection.clear();
     await refreshLibraryBooks({poll: true});
   } catch (error) {
     await confirmAction({context: "Queue unchanged", title: "Bookinator could not update those jobs", message: error.message, acceptLabel: "Close"});
   }
+  return {snapshot: currentPipelineSnapshot()};
 }
-
-document.querySelector(".pipeline-queue-actions")?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-pipeline-selection-action]");
-  if (button && !button.disabled) handlePipelineSelectionAction(button.dataset.pipelineSelectionAction);
-});
-
-document.querySelector("#pipeline-page-size")?.addEventListener("change", (event) => {
-  const requested = event.currentTarget.value === "all" ? "all" : Number(event.currentTarget.value);
-  pipelinePageSize = pipelinePageSizes.includes(requested) ? requested : 10;
-  pipelinePage = 1;
-  localStorage.setItem(pipelinePageSizeKey, String(pipelinePageSize));
-  renderPipelineQueue();
-});
 
 document.querySelector("#pipeline-attention-button")?.addEventListener("click", () => {
   document.querySelector(".pipeline-diagnostics-section")?.scrollIntoView({behavior: "smooth", block: "start"});
 });
 
-document.querySelector("#pipeline-page-previous")?.addEventListener("click", () => {
-  pipelinePage = Math.max(1, pipelinePage - 1);
-  renderPipelineQueue();
-});
-
-document.querySelector("#pipeline-page-next")?.addEventListener("click", () => {
-  pipelinePage += 1;
-  renderPipelineQueue();
-});
 
 function localIsoDate(date = new Date()) {
   return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
@@ -1912,18 +1823,6 @@ document.querySelector("#delete-books").addEventListener("click", async () => {
   } catch (error) {
     await refreshLibraryBooks();
     await confirmAction({context: "Delete failed", title: "Bookinator could not finish deleting", message: error.message || "The selected book is still in the library.", acceptLabel: "Close"});
-  }
-});
-
-document.querySelector("#toggle-library-pipeline").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  if (button.disabled) return;
-  button.disabled = true;
-  try {
-    await postLibraryAction(state.globalPipeline.enabled ? "/api/library/pipeline/stop" : "/api/library/pipeline/start");
-    await refreshLibraryBooks({poll: true});
-  } finally {
-    button.disabled = false;
   }
 });
 
@@ -2265,9 +2164,9 @@ function showPipelinePage() {
   document.querySelector("#welcome-dialog").hidden = true;
   mountBookinatorShell({active: "pipeline", selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   updateFooterRoute();
+  updateGlobalPipelineStatus();
   renderPipelineQueue();
   renderPipelineDiagnostics();
-  updateGlobalPipelineStatus();
   document.title = "Bookinator · Pipeline";
 }
 

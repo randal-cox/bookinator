@@ -13,6 +13,11 @@
     <link rel="stylesheet" href="/commons/@inator/ui/product-shell.css?v=0.4.1-dev.54" />
     <link rel="stylesheet" href="/commons/@inator/ui/workspace.css" />
     <link rel="stylesheet" href="/commons/@inator/ui/workspace-backup.css" />
+    <link rel="stylesheet" href="/commons/@inator/ui/tokens.css" />
+    <link rel="stylesheet" href="/commons/@inator/ui/dialog.css" />
+    <link rel="stylesheet" href="/commons/@inator/ui/action-bar.css" />
+    <link rel="stylesheet" href="/commons/@inator/ui/list-view.css" />
+    <link rel="stylesheet" href="/commons/@inator/ui/pipeline.css" />
     <link rel="stylesheet" href="/styles.css?v=about-layout-198" />
   </head>
   <body>
@@ -69,10 +74,6 @@
 
         <section class="library-pipeline-panel" id="library-pipeline-panel" aria-label="Global analysis queue">
           <div id="library-pipeline-progress" aria-live="polite"></div>
-          <button class="library-pipeline-toggle action-button" id="toggle-library-pipeline" type="button" hidden>
-            <span class="command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></svg></span>
-            <small>Start</small>
-          </button>
           <section class="pipeline-library-coverage" aria-labelledby="library-coverage-title">
             <div class="pipeline-library-coverage-copy">
               <p id="library-coverage-title">Library coverage</p>
@@ -90,17 +91,8 @@
         </section>
 
         <section class="pipeline-queue-section" aria-labelledby="pipeline-queue-title">
-          <header><div><h2 id="pipeline-queue-title">Work in priority order</h2><p id="pipeline-queue-summary">Checking eligible tasks…</p></div><div class="pipeline-queue-actions" aria-label="Selected pipeline tasks"><button type="button" data-pipeline-selection-action="top" disabled title="Put the first selected ready task at the head of the queue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M12 19V8m-4 4 4-4 4 4"/></svg><small>Top</small></button><button type="button" data-pipeline-selection-action="raise" disabled title="Raise the priority of the selected tasks' books"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 15 5-5 5 5"/></svg><small>Raise</small></button><button type="button" data-pipeline-selection-action="lower" disabled title="Lower the priority of the selected tasks' books"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg><small>Lower</small></button><button type="button" data-pipeline-selection-action="pause" disabled title="Pause the selected tasks after any active response finishes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><small>Pause</small></button><button type="button" data-pipeline-selection-action="resume" disabled title="Return the selected paused tasks to normal scheduling"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><small>Resume</small></button></div></header>
+          <header><div><h2 id="pipeline-queue-title">Work in priority order</h2><p id="pipeline-queue-summary">Checking eligible tasks…</p></div></header>
           <div class="pipeline-book-list" id="pipeline-book-list" aria-live="polite"></div>
-          <footer class="pipeline-queue-footer" id="pipeline-queue-footer" hidden>
-            <strong id="pipeline-selection-count">0 selected</strong>
-            <div class="pipeline-pagination">
-              <label>Rows per page <select id="pipeline-page-size"><option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="all">All</option></select></label>
-              <span id="pipeline-page-range">0–0 of 0</span>
-              <button id="pipeline-page-previous" type="button" title="Previous page" aria-label="Previous page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
-              <button id="pipeline-page-next" type="button" title="Next page" aria-label="Next page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
-            </div>
-          </footer>
         </section>
 
         <section class="pipeline-diagnostics-section" aria-labelledby="pipeline-diagnostics-title">
