@@ -2,7 +2,7 @@ import { articlePages, roadmapItems } from "./pages.js";
 import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
 import { createBookinatorAboutPage } from "./product-information.js";
-import { mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=machine-workspace-181";
+import { mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=navigation-hydration-183";
 import { createBookinatorDocsFlow } from "./product-docs.js";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
 import { isTemporalDossierObservation } from "./dossier-index.js";
@@ -8162,7 +8162,7 @@ async function hydrateLibrary() {
   }
   render();
   if (state.globalPipeline.running || (state.globalPipeline.enabled && state.globalPipeline.waitingBooks > 0)) refreshLibraryBooks({poll: true});
-  if (location.hash.startsWith("#book/")) route();
+  route();
 }
 
 hydrateLibrary();

@@ -2945,6 +2945,7 @@ def test_machine_is_low_frequency_workspace_navigation() -> None:
     assert 'data-inator-product-header' in page
     assert "mountInatorAppShell" in shell
     assert "createWorkspaceCapabilityRegistry" in shell
+    assert 'brand: {href: "#/", label: "Bookinator"' in shell
     assert '{href: "#/books", route: "books", label: "Books", detail: "Library"}' in shell
     assert 'id: "machine"' in shell
     assert 'detail: "Readiness and local models"' in shell
@@ -2969,6 +2970,10 @@ def test_machine_is_low_frequency_workspace_navigation() -> None:
     assert 'status === "blocked" ? "!"' in app
     assert 'data-setup-instructions=' in app
     assert 'check.action === "install-pdf-reader"' in app
+    hydrate = app.split("async function hydrateLibrary()", 1)[1]
+    assert "render();" in hydrate
+    assert "route();" in hydrate
+    assert 'location.hash.startsWith("#book/")' not in hydrate
 
 
 def test_workspace_identity_and_shelf_separators_follow_primary_navigation() -> None:

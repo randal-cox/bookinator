@@ -139,7 +139,7 @@ export function mountBookinatorShell({active = "books", selectedBook = null} = {
     active,
     headerMount: document.querySelector("[data-inator-product-header]"),
     footerMount: document.querySelector("[data-inator-product-footer]"),
-    brand: {href: "#/books", label: "Bookinator", image: {src: "/assets/bookinator.svg", width: 47, height: 47, alt: ""}},
+    brand: {href: "#/", label: "Bookinator", image: {src: "/assets/bookinator.svg", width: 47, height: 47, alt: ""}},
     navigationLabel: "Bookinator",
     navigation: [
       {href: "#/books", route: "books", label: "Books", detail: "Library"},
