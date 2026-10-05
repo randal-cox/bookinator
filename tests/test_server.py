@@ -709,9 +709,9 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert 'id="library-pipeline-panel"' not in page[page.index('id="books-page"'):page.index('id="pipeline-page"')]
     assert "createAtomicPipelineWorkspace" in app
     assert 'supportedActions: ["move-top", "raise", "lower", "pause", "resume"]' in app
-    assert 'import { definePipelineSnapshot } from "/commons/@inator/engine/pipeline-contract.js"' in adapter
-    assert 'priority: projectPriority[book.priority] || "normal"' in adapter
-    assert 'ready: "waiting", waiting: "blocked"' in adapter
+    assert 'definePipelineSnapshot, pipelineControlIntent' in adapter
+    assert 'definePipelineSnapshot(pipeline.snapshot || emptySnapshot)' in adapter
+    assert 'expectedRevision: snapshot?.revision' in adapter
     assert 'data-pipeline-selection-action=' not in page
     assert 'data-pipeline-selection-action="remove"' not in page
     assert 'id="pipeline-page-size"' not in page
@@ -721,12 +721,10 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert 'class="pipeline-queue-footer"' not in page
     assert 'state.pipelineSelection' not in app
     assert 'scrollIntoView({behavior: "smooth", block: "start"})' in app
-    assert 'function pipelineTasks()' in app
-    assert 'activity.bookId === item.bookId' in app
-    assert '{...item, action: activityAction, task: activity.task || item.task}' in app
-    assert 'action: "whole-dossier"' in app
-    assert 'action: "questions"' in app
-    assert 'postLibraryAction("/api/library/pipeline/task-state"' in app
+    assert 'function pipelineTasks()' not in app
+    assert 'pipelineTaskDefinitions' not in app
+    assert 'fetch("/api/library/pipeline/control"' in app
+    assert 'createBookinatorPipelineControlIntent({action, unitIds, snapshot})' in app
     assert 'id="library-pipeline-progress"' in page
     assert 'runName: "Current run"' in app
     assert 'id="restart-current-run"' in page
@@ -740,6 +738,109 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert 'id="pipeline-diagnostics-list"' in page
     assert "function renderPipelineDiagnostics()" in app
     assert "function progressActivity(" in app
+
+
+def test_python_emits_complete_commons_pipeline_state_matrix() -> None:
+    books = [
+        {"id": "project-a", "title": "Alpha", "author": "A", "priority": "high", "pipeline": {"nextAction": "summarize", "pausedActions": ["emotions"]}},
+        {"id": "project-b", "title": "Beta", "author": "B", "priority": "shelved", "pipeline": {"nextAction": "tags", "pausedActions": []}},
+        {"id": "project-c", "title": "Gamma", "author": "C", "priority": "normal", "pipeline": {"nextAction": "whole-summary", "pausedActions": []}},
+    ]
+    ledgers = [
+        (books[0], {
+            "chapterMapSuspicious": True, "chapterMapApproved": False,
+            "stages": [
+                {"id": "summaries", "status": "pending"},
+                {"id": "emotions", "status": "pending"},
+                {"id": "smells", "status": "failed", "failedAt": "2026-10-05T12:00:00Z"},
+                {"id": "llm-review", "status": "stale", "attempts": [{"id": "old-review", "status": "complete", "disposition": "stale"}]},
+            ],
+        }),
+        (books[1], {"stages": [{"id": "tags", "status": "pending"}]}),
+        (books[2], {
+            "stages": [],
+            "wholeBookSummary": {"status": "running", "startedAt": "2026-10-05T12:01:00Z"},
+        }),
+    ]
+    queue = [
+        {"bookId": "project-c", "action": "whole-summary", "task": "Whole-book summary", "state": "running", "rank": 1},
+        {"bookId": "project-a", "action": "summarize", "task": "Chapter summaries", "state": "queued", "rank": 2},
+    ]
+    run = {"id": "run-1", "startedAt": "2026-10-05T12:00:00Z", "completed": 4, "total": 10, "bookCount": 3, "deferredUnits": 1}
+
+    with patch.object(server, "load_queue_actions", return_value={"project-b": "tags"}):
+        snapshot = server.build_commons_pipeline_snapshot(books, ledgers, queue, run, enabled=True, running=True)
+        repeated = server.build_commons_pipeline_snapshot(books, ledgers, queue, run, enabled=True, running=True)
+
+    units = {unit["id"]: unit for unit in snapshot["units"]}
+    projects = {project["id"]: project for project in snapshot["projects"]}
+    assert snapshot["schema"] == "inator.pipeline-snapshot.v1"
+    assert snapshot["revision"] == repeated["revision"]
+    assert snapshot["state"] == "running"
+    assert projects["project-b"]["priority"] == "deferred"
+    assert projects["project-b"]["deferred"] is True
+    assert units["project-a::summarize"]["status"] == "waiting"
+    assert units["project-a::summarize"]["gate"]["state"] == "waiting"
+    assert units["project-a::emotions"]["status"] == "paused"
+    assert units["project-a::emotions"]["policy"]["paused"] is True
+    assert units["project-a::smells"]["status"] == "failed"
+    assert units["project-a::smells"]["policy"]["recovery"] == "retry-attempt"
+    assert units["project-a::llm-review"]["status"] == "stale"
+    assert units["project-a::llm-review"]["attempts"][0]["disposition"] == "stale"
+    assert units["project-b::tags"]["status"] == "waiting"
+    assert units["project-b::tags"]["policy"]["pinned"] is True
+    assert units["project-c::whole-summary"]["status"] == "running"
+    assert units["project-c::whole-summary"]["currentAttemptId"]
+    assert sum(bool(unit.get("currentAttemptId")) for unit in snapshot["units"]) == 1
+
+
+def test_commons_pipeline_control_is_revision_checked_and_atomic(tmp_path: Path) -> None:
+    snapshot = {
+        "revision": 41,
+        "units": [
+            {"id": "project-a::summarize", "projectId": "project-a", "action": "summarize", "status": "waiting", "policy": {"required": False}, "product": {"bookId": "project-a", "action": "summarize"}},
+            {"id": "project-b::tags", "projectId": "project-b", "action": "tags", "status": "waiting", "policy": {"required": False}, "product": {"bookId": "project-b", "action": "tags"}},
+        ],
+    }
+    current = {"snapshot": snapshot}
+    refreshed = {"snapshot": {**snapshot, "revision": 42}}
+    intent = {"schema": "inator.pipeline-control-intent.v1", "action": "move-top", "unitIds": ["project-a::summarize", "project-b::tags"], "expectedRevision": 41}
+
+    with patch.object(server, "global_pipeline_state", side_effect=[current, refreshed]), patch.object(server, "prioritize_pipeline_action") as prioritize:
+        result = server.apply_pipeline_control_intent(intent)
+
+    assert result is refreshed
+    assert prioritize.call_args_list == [
+        (("project-b", "tags"),),
+        (("project-a", "summarize"),),
+    ]
+
+    with patch.object(server, "global_pipeline_state", return_value=current), patch.object(server, "prioritize_pipeline_action") as prioritize:
+        with pytest.raises(server.PipelineRevisionConflict):
+            server.apply_pipeline_control_intent({**intent, "expectedRevision": 40})
+    prioritize.assert_not_called()
+
+
+def test_commons_pause_intent_persists_in_isolation(tmp_path: Path) -> None:
+    snapshot = {
+        "revision": 7,
+        "units": [{
+            "id": "project-a::emotions", "projectId": "project-a", "action": "emotions", "status": "waiting",
+            "policy": {"required": False}, "product": {"bookId": "project-a", "action": "emotions"},
+        }],
+    }
+    current = {"snapshot": snapshot}
+    refreshed = {"snapshot": {**snapshot, "revision": 8}}
+    intent = {"schema": "inator.pipeline-control-intent.v1", "action": "pause", "unitIds": ["project-a::emotions"], "expectedRevision": 7}
+    server.QUEUE_ACTIONS.clear()
+
+    with patch.object(server, "global_pipeline_state", side_effect=[current, refreshed]), \
+         patch.object(server, "TASK_PAUSES_PATH", tmp_path / "pauses.json"), \
+         patch.object(server, "QUEUE_ACTIONS_PATH", tmp_path / "actions.json"):
+        result = server.apply_pipeline_control_intent(intent)
+
+    assert result is refreshed
+    assert json.loads((tmp_path / "pauses.json").read_text()) == {"project-a": ["emotions"]}
 
 
 def test_pipeline_panel_can_start_one_book_completely_over() -> None:
@@ -3448,11 +3549,12 @@ def test_markdown_roman_chapter_numbers_with_titles_form_a_spine() -> None:
 
 def test_leaving_book_workspace_invalidates_delayed_analysis_refresh() -> None:
     app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    server_source = (Path(__file__).parents[1] / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     assert "function leaveBookWorkspace()" in app
     assert "state.workspaceRequestId += 1;" in app
     assert 'else if (collection === "books" || !articlePages[collection]) showBooksPage();' in app
-    assert "The local worker owns this job." in app
-    assert "if (!pipeline.nextAction && !queued && !pausedActions.size) return;" in app
+    assert "The local worker owns this job." in server_source
+    assert "function pipelineTasks()" not in app
     assert 'definition.resultKey ? {status: "pending"' not in app
 
 

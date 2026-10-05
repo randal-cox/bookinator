@@ -1,7 +1,7 @@
 import { articlePages } from "./pages.js";
 import { createAtomicPipelineWorkspace, createProductHistoryTabs, normalizeProductAboutTab } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
-import { createBookinatorPipelineSnapshot } from "./pipeline-adapter.js?v=commons-pipeline-202";
+import { createBookinatorPipelineControlIntent, createBookinatorPipelineSnapshot } from "./pipeline-adapter.js?v=commons-pipeline-203";
 import { createBookinatorAboutPage } from "./product-information.js?v=about-route-200";
 import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=about-layout-198";
 import { createBookinatorHelpPage } from "./product-docs.js?v=commons-routes-201";
@@ -356,89 +356,10 @@ async function saveBookPriority(book, nextPriority) {
   return payload.book;
 }
 
-const pipelineTaskDefinitions = [
-  {action: "summarize", stageId: "summaries", label: "Chapter summaries"},
-  {action: "whole-summary", resultKey: "wholeBookSummary", label: "Whole-book summary"},
-  {action: "dossiers", stageId: "dossiers", label: "Chapter dossiers"},
-  {action: "whole-dossier", resultKey: "wholeBookDossier", label: "Whole-book dossier"},
-  {action: "questions", resultKey: "questionTracker", label: "Questions & payoffs"},
-  {action: "cumulative-context", stageId: "cumulative-context", label: "Cumulative context", optional: true},
-  {action: "llm-review", stageId: "llm-review", label: "LLM Review", optional: true},
-  {action: "whole-llm-review", stageId: "whole-book-llm-review", resultKey: "wholeBookLlmReview", label: "Whole-book LLM Review", optional: true},
-  {action: "emotions", stageId: "emotions", label: "Chapter emotions"},
-  {action: "tags", stageId: "tags", label: "Chapter tags"},
-  {action: "smells", stageId: "smells", label: "Smells"},
-];
-
-function pipelineTasks() {
-  const activity = state.globalPipeline?.activity || {};
-  const activityAction = ({preparing: "prepare", summarizing: "summarize"})[activity.phase] || activity.phase || "";
-  const serverQueue = new Map((state.globalPipeline?.queue || []).map((item) => [item.bookId,
-    activity.state === "running" && activity.bookId === item.bookId && pipelineTaskDefinitions.some((definition) => definition.action === activityAction)
-      ? {...item, action: activityAction, task: activity.task || item.task}
-      : item
-  ]));
-  const tasks = [];
-  state.books.forEach((book) => {
-    const pipeline = book.pipeline || {};
-    const queued = serverQueue.get(book.id);
-    const priority = book.priority || "normal";
-    const pausedActions = new Set(pipeline.pausedActions || []);
-    if (priority === "shelved" && pipeline.nextAction !== "prepare") return;
-    if (pipeline.nextAction === "prepare") {
-      tasks.push({id: `${book.id}::prepare`, book, action: "prepare", label: "Manuscript inventory", detail: "Extract text, measure the manuscript, and propose its chapter map.", state: queued?.state === "running" ? "running" : "ready", required: true, bookRank: queued?.rank || 0, order: -1});
-      return;
-    }
-    // Reviewer sign-off belongs to the book's completion meter, not the
-    // machine queue. A book with no scheduler action and no explicit queue
-    // ownership has no work to display here, even if an older server omitted
-    // compact rollup records from the library response.
-    if (!pipeline.nextAction && !queued && !pausedActions.size) return;
-    const stages = new Map((pipeline.stages || []).map((stage) => [stage.id, stage]));
-    pipelineTaskDefinitions.forEach((definition, order) => {
-      const stage = stages.get(definition.stageId);
-      if (definition.optional && !stage) return;
-      const result = definition.resultKey ? pipeline[definition.resultKey] : null;
-      const record = result && typeof result === "object" ? result : stage;
-      const status = String(record?.status || (definition.resultKey ? "pending" : ""));
-      if (!record || record.disabled || ["complete", "failed", "warning"].includes(status)) return;
-      const paused = pausedActions.has(definition.action);
-      const ownsWorker = queued?.state === "running" && (queued.action === definition.action || String(queued.task || "").toLocaleLowerCase() === definition.label.toLocaleLowerCase());
-      const running = !paused && ownsWorker;
-      const pausing = paused && ownsWorker;
-      const ready = running || pipeline.nextAction === definition.action;
-      tasks.push({
-        id: `${book.id}::${definition.action}`, book, action: definition.action, label: definition.label,
-        detail: String(record.detail || (ready ? "Ready for the local worker." : "Waiting for prerequisite work.")),
-        state: pausing ? "pausing" : paused ? "paused" : running ? "running" : ready ? "ready" : "waiting", required: false,
-        bookRank: queued?.rank || 9999, order,
-      });
-    });
-    if (queued?.action && !tasks.some((task) => task.book.id === book.id && task.action === queued.action)) {
-      const definition = pipelineTaskDefinitions.find((item) => item.action === queued.action);
-      const label = definition?.label || String(queued.task || queued.action).replaceAll("-", " ").replace(/^./, (letter) => letter.toUpperCase());
-      tasks.push({
-        id: `${book.id}::${queued.action}`, book, action: queued.action, label,
-        detail: queued.state === "running" ? "The local worker owns this job." : "Ready for the local worker.",
-        state: queued.state === "running" ? "running" : "ready", required: false,
-        bookRank: queued.rank || 9999, order: definition ? pipelineTaskDefinitions.indexOf(definition) : pipelineTaskDefinitions.length,
-      });
-    }
-  });
-  const priorityOrder = {high: 0, normal: 1, low: 2, shelved: 3};
-  const stateOrder = {running: 0, pausing: 1, ready: 2, waiting: 3, paused: 4};
-  tasks.sort((left, right) => stateOrder[left.state] - stateOrder[right.state]
-    || (left.action === "prepare" ? -1 : right.action === "prepare" ? 1 : 0)
-    || priorityOrder[left.book.priority || "normal"] - priorityOrder[right.book.priority || "normal"]
-    || left.bookRank - right.bookRank || left.order - right.order
-    || left.book.title.localeCompare(right.book.title));
-  return tasks.map((task, index) => ({...task, rank: index + 1}));
-}
-
 let pipelineWorkspace = null;
 
 function currentPipelineSnapshot() {
-  return createBookinatorPipelineSnapshot({ books: state.books, pipeline: state.globalPipeline, tasks: pipelineTasks() });
+  return createBookinatorPipelineSnapshot({pipeline: state.globalPipeline});
 }
 
 function renderPipelineQueue() {
@@ -1721,45 +1642,28 @@ async function postLibraryAction(path, payload = {}) {
   return result;
 }
 
-async function handleCommonsPipelineAction({action, unitIds = []}) {
-  if (action === "start" || action === "stop") {
-    try {
-      await postLibraryAction(`/api/library/pipeline/${action}`);
-      await refreshLibraryBooks({poll: true});
-    } catch (error) {
-      await confirmAction({context: "Queue unchanged", title: `Bookinator could not ${action} the queue`, message: error.message, acceptLabel: "Close"});
-    }
-    return {snapshot: currentPipelineSnapshot()};
-  }
-  const selectedIds = new Set(unitIds);
-  const selected = pipelineTasks().filter((task) => selectedIds.has(task.id));
-  if (!selected.length) return {snapshot: currentPipelineSnapshot()};
-  const books = [...new Map(selected.map((task) => [task.book.id, task.book])).values()];
+async function handleCommonsPipelineAction({action, unitIds = [], snapshot = currentPipelineSnapshot()}) {
+  const intent = createBookinatorPipelineControlIntent({action, unitIds, snapshot});
   try {
-    if (action === "move-top") {
-      const ready = selected.filter((task) => task.state === "ready" && !task.required);
-      if (!ready.length) return {snapshot: currentPipelineSnapshot()};
-      for (const task of [...ready].reverse()) {
-        await postLibraryAction("/api/library/pipeline/prioritize", {bookId: task.book.id, action: task.action});
-      }
-    } else if (action === "raise" || action === "lower") {
-      const levels = ["high", "normal", "low"];
-      for (const book of books) {
-        const current = levels.includes(book.priority) ? book.priority : "normal";
-        const index = levels.indexOf(current);
-        const next = levels[Math.max(0, Math.min(levels.length - 1, index + (action === "raise" ? -1 : 1)))];
-        if (next !== current) await saveBookPriority(book, next);
-      }
-    } else if (action === "pause" || action === "resume") {
-      const pausing = action === "pause";
-      const changed = selected.filter((task) => !task.required && (pausing ? !["paused", "pausing"].includes(task.state) : ["paused", "pausing"].includes(task.state)));
-      for (const task of changed) {
-        await postLibraryAction("/api/library/pipeline/task-state", {bookId: task.book.id, action: task.action, paused: pausing});
-      }
+    const response = await fetch("/api/library/pipeline/control", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(intent)
+    });
+    const payload = await response.json();
+    if (payload.pipeline) state.globalPipeline = payload.pipeline;
+    if (!response.ok) {
+      if (payload.code === "stale-pipeline-snapshot" && payload.snapshot) renderPipelineQueue();
+      throw new Error(payload.error || "The pipeline control was not applied.");
     }
     await refreshLibraryBooks({poll: true});
   } catch (error) {
-    await confirmAction({context: "Queue unchanged", title: "Bookinator could not update those jobs", message: error.message, acceptLabel: "Close"});
+    await confirmAction({
+      context: "Queue unchanged",
+      title: action === "start" || action === "stop" ? `Bookinator could not ${action} the queue` : "Bookinator could not update those jobs",
+      message: error.message,
+      acceptLabel: "Close"
+    });
   }
   return {snapshot: currentPipelineSnapshot()};
 }

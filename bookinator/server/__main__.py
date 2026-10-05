@@ -86,6 +86,22 @@ PAUSABLE_PIPELINE_ACTIONS = {
     "gliner-signals", "cumulative-context", "llm-review", "whole-llm-review", "emotions", "tags", "smells",
 }
 BOOK_PRIORITY_ORDER = {"high": 0, "normal": 1, "low": 2, "shelved": 3}
+PIPELINE_SNAPSHOT_SCHEMA = "inator.pipeline-snapshot.v1"
+PIPELINE_CONTROL_INTENT_SCHEMA = "inator.pipeline-control-intent.v1"
+PIPELINE_PROJECT_PRIORITIES = {"high": "high", "normal": "normal", "low": "low", "shelved": "deferred"}
+PIPELINE_TASK_DEFINITIONS = (
+    {"action": "summarize", "stageId": "summaries", "label": "Chapter summaries"},
+    {"action": "whole-summary", "resultKey": "wholeBookSummary", "label": "Whole-book summary"},
+    {"action": "dossiers", "stageId": "dossiers", "label": "Chapter dossiers"},
+    {"action": "whole-dossier", "resultKey": "wholeBookDossier", "label": "Whole-book dossier"},
+    {"action": "questions", "resultKey": "questionTracker", "label": "Questions & payoffs"},
+    {"action": "cumulative-context", "stageId": "cumulative-context", "label": "Cumulative context", "optional": True},
+    {"action": "llm-review", "stageId": "llm-review", "label": "LLM Review", "optional": True},
+    {"action": "whole-llm-review", "stageId": "whole-book-llm-review", "resultKey": "wholeBookLlmReview", "label": "Whole-book LLM Review", "optional": True},
+    {"action": "emotions", "stageId": "emotions", "label": "Chapter emotions"},
+    {"action": "tags", "stageId": "tags", "label": "Chapter tags"},
+    {"action": "smells", "stageId": "smells", "label": "Smells"},
+)
 if LOCAL_PACKAGES.exists():
     sys.path.insert(0, str(LOCAL_PACKAGES))
 from bookinator.prose_cruft import analyze as analyze_prose_smells
@@ -1421,9 +1437,218 @@ def compact_pipeline_payload(pipeline: dict[str, object]) -> dict[str, object]:
     return visible
 
 
+def pipeline_attempts_for_snapshot(unit_id: str, record: dict[str, object], status: str) -> tuple[list[dict[str, object]], str | None, str | None]:
+    """Expose product attempt evidence without inventing a second ledger."""
+    attempts = []
+    sources = record.get("attempts")
+    for index, source in enumerate(sources if isinstance(sources, list) else []):
+        if not isinstance(source, dict):
+            continue
+        attempt_id = str(source.get("id") or source.get("attemptId") or f"{unit_id}:attempt:{index + 1}")
+        attempt_status = str(source.get("status") or "unknown")
+        disposition = str(source.get("disposition") or (attempt_status if attempt_status in {"stale", "superseded"} else "candidate"))
+        attempts.append({
+            **source,
+            "id": attempt_id,
+            "attemptId": attempt_id,
+            "status": attempt_status,
+            "disposition": disposition if disposition in {"candidate", "accepted", "stale", "superseded", "rejected"} else "candidate",
+        })
+    if not attempts and status in {"running", "stopping", "failed", "stale", "superseded"}:
+        attempt_id = f"{unit_id}:current"
+        attempts.append({
+            "id": attempt_id,
+            "attemptId": attempt_id,
+            "status": "running" if status in {"running", "stopping"} else status,
+            "startedAt": record.get("startedAt"),
+            "completedAt": record.get("completedAt") or record.get("failedAt"),
+            "inputSignature": record.get("inputSignature"),
+            "workerId": record.get("workerId") or "bookinator-local",
+            "disposition": status if status in {"stale", "superseded"} else "candidate",
+        })
+    attempt_ids = {str(attempt["id"]) for attempt in attempts}
+    accepted = str(record.get("acceptedAttemptId") or "") or None
+    current = str(record.get("currentAttemptId") or "") or None
+    if not current and status in {"running", "stopping"} and attempts:
+        current = str(attempts[-1]["id"])
+    return attempts, accepted if accepted in attempt_ids else None, current if current in attempt_ids else None
+
+
+def build_commons_pipeline_snapshot(
+    books: list[dict[str, object]],
+    pipeline_records: list[tuple[dict[str, object], dict[str, object]]],
+    queue: list[dict[str, object]],
+    current_run: dict[str, object],
+    *,
+    enabled: bool,
+    running: bool,
+) -> dict[str, object]:
+    """Translate authoritative scheduler state into the Commons protocol."""
+    queue_by_book = {str(item.get("bookId") or ""): item for item in queue}
+    records_by_book = {str(book.get("id") or ""): pipeline for book, pipeline in pipeline_records}
+    pinned_actions = load_queue_actions()
+    projects = []
+    priority_by_project: dict[str, str] = {}
+    units = []
+    for book in books:
+        book_id = str(book.get("id") or "")
+        if not book_id:
+            continue
+        priority = normalize_book_priority(book.get("priority"))
+        priority_by_project[book_id] = priority
+        projects.append({
+            "id": book_id,
+            "label": str(book.get("title") or "Untitled project"),
+            "detail": str(book.get("author") or "Author not specified"),
+            "priority": PIPELINE_PROJECT_PRIORITIES[priority],
+            "deferred": priority == "shelved",
+        })
+        compact = book.get("pipeline") if isinstance(book.get("pipeline"), dict) else {}
+        ledger = records_by_book.get(book_id, {})
+        next_action = str(compact.get("nextAction") or "")
+        paused_actions = {str(action) for action in compact.get("pausedActions", [])}
+        queued = queue_by_book.get(book_id, {})
+        stages = {
+            str(stage.get("id") or ""): stage
+            for stage in ledger.get("stages", compact.get("stages", []))
+            if isinstance(stage, dict)
+        }
+
+        definitions = list(PIPELINE_TASK_DEFINITIONS)
+        if next_action == "prepare":
+            definitions.insert(0, {
+                "action": "prepare", "label": "Manuscript inventory", "required": True,
+                "detail": "Extract text, measure the manuscript, and propose its chapter map.",
+            })
+        for order, definition in enumerate(definitions):
+            action = str(definition["action"])
+            result_key = str(definition.get("resultKey") or "")
+            stage_id = str(definition.get("stageId") or "")
+            record = ledger.get(result_key) if result_key else stages.get(stage_id)
+            if action == "prepare":
+                record = {"status": "pending", "detail": definition["detail"]}
+            if definition.get("optional") and not record:
+                continue
+            if not isinstance(record, dict) or record.get("disabled"):
+                continue
+            record_status = str(record.get("status") or "pending")
+            if record_status in {"complete", "warning", "cancelled"}:
+                continue
+            owns_worker = queued.get("state") == "running" and str(queued.get("action") or "") == action
+            paused = action in paused_actions
+            gate_waiting = action != "prepare" and bool(ledger.get("chapterMapSuspicious")) and not bool(ledger.get("chapterMapApproved"))
+            if owns_worker and paused:
+                status = "stopping"
+            elif paused:
+                status = "paused"
+            elif owns_worker:
+                status = "running"
+            elif record_status in {"failed", "stale", "superseded"}:
+                status = record_status
+            elif next_action == action:
+                status = "waiting"
+            else:
+                status = "blocked"
+            unit_id = f"{book_id}::{action}"
+            attempts, accepted_attempt_id, current_attempt_id = pipeline_attempts_for_snapshot(unit_id, record, status)
+            units.append({
+                "id": unit_id,
+                "workUnitId": unit_id,
+                "projectId": book_id,
+                "label": str(definition["label"]),
+                "detail": str(record.get("detail") or ("Ready for the local worker." if status == "waiting" else "Waiting for prerequisite work.")),
+                "method": action,
+                "action": action,
+                "provider": "local",
+                "sequence": len(units) + 1,
+                "rank": int(queued.get("rank") or 9999) * 100 + order,
+                "status": status,
+                "dependencyIds": [],
+                "attempts": attempts,
+                "acceptedAttemptId": accepted_attempt_id,
+                "currentAttemptId": current_attempt_id,
+                "inputSignature": record.get("inputSignature"),
+                "policy": {
+                    "required": bool(definition.get("required")),
+                    "paused": paused,
+                    "pinned": pinned_actions.get(book_id) == action,
+                    "stopAfter": False,
+                    "notifyOnComplete": False,
+                    "retry": "explicit",
+                    "recovery": "retry-attempt" if status == "failed" else "manual",
+                    "safeStopBoundary": "attempt",
+                },
+                "gate": {
+                    "state": "waiting" if gate_waiting else "not-required",
+                    "prompt": "Review and approve the proposed chapter map before derived analysis." if gate_waiting else None,
+                },
+                "product": {"bookId": book_id, "action": action},
+            })
+
+        queued_action = str(queued.get("action") or "")
+        queued_id = f"{book_id}::{queued_action}"
+        if queued_action and not any(unit["id"] == queued_id for unit in units):
+            unit_status = "running" if queued.get("state") == "running" else "waiting"
+            attempts, _, current_attempt_id = pipeline_attempts_for_snapshot(queued_id, {}, unit_status)
+            units.append({
+                "id": queued_id, "workUnitId": queued_id, "projectId": book_id,
+                "label": str(queued.get("task") or queued_action.replace("-", " ").title()),
+                "detail": "The local worker owns this job." if unit_status == "running" else "Ready for the local worker.",
+                "method": queued_action, "action": queued_action, "provider": "local",
+                "sequence": len(units) + 1, "rank": int(queued.get("rank") or 9999) * 100 + len(definitions),
+                "status": unit_status, "dependencyIds": [], "attempts": attempts,
+                "acceptedAttemptId": None, "currentAttemptId": current_attempt_id,
+                "policy": {"required": False, "paused": False, "pinned": pinned_actions.get(book_id) == queued_action, "stopAfter": False, "notifyOnComplete": False, "retry": "explicit", "recovery": "manual", "safeStopBoundary": "attempt"},
+                "gate": {"state": "not-required"}, "product": {"bookId": book_id, "action": queued_action},
+            })
+
+    status_order = {"running": 0, "stopping": 1, "waiting": 2, "paused": 3, "blocked": 4, "failed": 5, "stale": 6, "superseded": 7}
+
+    def unit_sort_key(unit: dict[str, object]) -> tuple[object, ...]:
+        project_priority = priority_by_project[str(unit["projectId"])]
+        dispatchable = unit["status"] == "waiting" and project_priority != "shelved" and unit["gate"]["state"] not in {"waiting", "rejected"}
+        tier = 0 if unit["status"] in {"running", "stopping"} else 1 if dispatchable else 2
+        return tier, BOOK_PRIORITY_ORDER[project_priority], status_order.get(str(unit["status"]), 99), unit["rank"], unit["sequence"], unit["id"]
+
+    units.sort(key=unit_sort_key)
+    for sequence, unit in enumerate(units, 1):
+        unit["sequence"] = sequence
+    completed = max(0, int(current_run.get("completed") or 0))
+    total = max(completed, int(current_run.get("total") or 0), len(units))
+    run_id = str(current_run.get("id") or current_run.get("startedAt") or "bookinator-current-run")
+    revision_basis = {
+        "enabled": enabled,
+        "running": running,
+        "projects": [(project["id"], project["priority"]) for project in projects],
+        "units": [(unit["id"], unit["status"], unit["rank"], unit["policy"]["paused"], unit["policy"]["pinned"], unit["gate"]["state"], unit.get("currentAttemptId")) for unit in units],
+    }
+    revision = int(hashlib.sha256(json.dumps(revision_basis, sort_keys=True).encode("utf-8")).hexdigest()[:12], 16)
+    started = str(current_run.get("startedAt") or "")
+    run_projects = max(0, int(current_run.get("bookCount") or 0))
+    basis = f"{run_projects} {'project' if run_projects == 1 else 'projects'}"
+    if started:
+        basis += f" · started {started}"
+    if int(current_run.get("deferredUnits") or 0):
+        basis += f" · {int(current_run['deferredUnits'])} deferred by project policy"
+    return {
+        "schema": PIPELINE_SNAPSHOT_SCHEMA,
+        "id": run_id,
+        "runId": run_id,
+        "revision": revision,
+        "state": "running" if running else "ready" if enabled else "stopped",
+        "projects": projects,
+        "units": units,
+        "progress": {"completed": completed, "total": total, "basis": basis, "referenceAt": started or None},
+        "controls": {"start": True, "stop": True, "moveTop": True, "projectPriority": True, "pause": True, "resume": True},
+        "completion": {"machine": "complete" if total and completed == total else "incomplete", "review": "product-owned"},
+    }
+
+
 def global_pipeline_state(
     books: list[dict[str, object]] | None = None,
     pipeline_records: list[tuple[dict[str, object], dict[str, object]]] | None = None,
+    *,
+    wake: bool = True,
 ) -> dict[str, object]:
     library = books if books is not None else load_library()
     actionable = [
@@ -1502,8 +1727,9 @@ def global_pipeline_state(
     ))
     for rank, item in enumerate(queue, 1):
         item["rank"] = rank
+    enabled = pipeline_is_enabled()
     state = {
-        "enabled": pipeline_is_enabled(),
+        "enabled": enabled,
         "running": running,
         "waitingBooks": len(actionable),
         "completed": completed,
@@ -1517,11 +1743,14 @@ def global_pipeline_state(
         "diagnostics": diagnostics,
         "queue": queue,
     }
+    state["snapshot"] = build_commons_pipeline_snapshot(
+        library, pipeline_records, queue, current_run, enabled=enabled, running=running
+    )
     # The browser polls this endpoint while the workspace is open. If a queue
     # worker disappeared between two durable chapter-steps, use that ordinary
     # status poll as a lightweight watchdog. The wake happens off-request so a
     # slow disk inventory never makes the library UI wait for the scheduler.
-    if state["enabled"] and actionable and not running:
+    if wake and state["enabled"] and actionable and not running:
         schedule_global_pipeline_wake()
     return state
 
@@ -8285,6 +8514,131 @@ def start_global_pipeline() -> list[tuple[str, str]]:
     return automatic
 
 
+def stop_global_pipeline() -> None:
+    """Request a safe stop and persist interrupted work as resumable."""
+    set_pipeline_enabled(False)
+    QUEUE_CANCEL_EVENT.set()
+    with QUEUE_LOCK:
+        QUEUE_ACTIONS.clear()
+        save_queue_actions({})
+    for event in PIPELINE_CANCEL_EVENTS.values():
+        event.set()
+    for book_id in list(PIPELINE_CANCEL_EVENTS):
+        cancel_active_model_response(book_id)
+    for book in load_library():
+        pipeline = load_pipeline(book)
+        if pipeline.get("status") == "running":
+            for chapter in pipeline.get("chapters", []):
+                if chapter.get("status") == "running":
+                    chapter.update({"status": "pending", "interruptedAt": utc_now(), "error": "Stopped before completion. Resume retries this chapter."})
+                for prefix in ("gliner", "emotion", "tag", "smell"):
+                    if chapter.get(f"{prefix}Status") == "running":
+                        chapter.update({f"{prefix}Status": "pending", f"{prefix}Error": "Stopped before completion. Resume retries this chapter."})
+            for chunk in pipeline.get("chunks", []):
+                if chunk.get("dossierStatus") == "running":
+                    chunk.update({"dossierStatus": "pending", "dossierError": "Stopped before completion. Resume retries this chunk."})
+                    try:
+                        artifact = json.loads((chunk_artifacts_path(book) / f"{int(chunk.get('sequence')):04d}.json").read_text(encoding="utf-8"))
+                        artifact.update({"dossierStatus": "pending", "dossierError": chunk["dossierError"]})
+                        write_chunk_artifact(book, int(chunk.get("sequence")), artifact)
+                    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                        pass
+            pipeline.update({"status": "paused", "phase": "paused", "stopRequested": False, "message": "Reader stopped. Completed chapters are safe; Resume retries the interrupted chapter.", "updatedAt": utc_now()})
+            write_pipeline(book, pipeline)
+        elif pipeline.get("status") == "queued":
+            pipeline.update({"status": "paused", "phase": "paused", "stopRequested": False, "message": "Stopped before the local reader began. Continue whenever you are ready.", "updatedAt": utc_now()})
+            write_pipeline(book, pipeline)
+
+
+def change_pipeline_project_priority(book_id: str, direction: str) -> dict[str, object]:
+    book = find_book(book_id)
+    if not book:
+        raise ValueError("Choose a valid project.")
+    levels = ["high", "normal", "low", "shelved"]
+    current = normalize_book_priority(book.get("priority"))
+    offset = -1 if direction == "raise" else 1
+    priority = levels[max(0, min(len(levels) - 1, levels.index(current) + offset))]
+    saved = save_book({**book, "priority": priority})
+    if priority != "shelved" and pipeline_is_enabled():
+        action = next_pipeline_action(saved, load_pipeline(saved))
+        if action:
+            prioritize_pipeline_action(book_id, action)
+    return saved
+
+
+class PipelineRevisionConflict(ValueError):
+    def __init__(self, state: dict[str, object]):
+        super().__init__("The pipeline changed. Review the refreshed queue and try again.")
+        self.state = state
+
+
+def apply_pipeline_control_intent(intent: dict[str, object]) -> dict[str, object]:
+    """Apply one versioned Commons command against one observed revision."""
+    if intent.get("schema") != PIPELINE_CONTROL_INTENT_SCHEMA:
+        raise ValueError("Choose the supported pipeline control protocol.")
+    action = str(intent.get("action") or "")
+    supported = {"start", "stop", "move-top", "raise", "lower", "pause", "resume"}
+    if action not in supported:
+        raise ValueError("Choose a supported pipeline action.")
+    raw_unit_ids = intent.get("unitIds", [])
+    if not isinstance(raw_unit_ids, list) or any(not isinstance(unit_id, str) or not unit_id for unit_id in raw_unit_ids):
+        raise ValueError("Pipeline unit ids must be non-empty strings.")
+    unit_ids = list(dict.fromkeys(raw_unit_ids))
+    current = global_pipeline_state(wake=False)
+    snapshot = current["snapshot"]
+    expected_revision = intent.get("expectedRevision")
+    if expected_revision is None or isinstance(expected_revision, bool):
+        raise ValueError("A pipeline snapshot revision is required.")
+    try:
+        expected_revision = int(expected_revision)
+    except (TypeError, ValueError):
+        raise ValueError("A valid pipeline snapshot revision is required.") from None
+    if expected_revision != snapshot["revision"]:
+        raise PipelineRevisionConflict(current)
+
+    units_by_id = {str(unit["id"]): unit for unit in snapshot["units"]}
+    if action not in {"start", "stop"} and not unit_ids:
+        raise ValueError("Select at least one pipeline unit.")
+    unknown = [unit_id for unit_id in unit_ids if unit_id not in units_by_id]
+    if unknown:
+        raise ValueError("One or more selected pipeline units no longer exist.")
+    selected = [units_by_id[unit_id] for unit_id in unit_ids]
+
+    if action == "start":
+        start_global_pipeline()
+    elif action == "stop":
+        stop_global_pipeline()
+    elif action == "move-top":
+        for unit in reversed(selected):
+            product = unit.get("product", {})
+            prioritize_pipeline_action(str(product.get("bookId") or unit["projectId"]), str(product.get("action") or unit.get("action") or ""))
+    elif action in {"raise", "lower"}:
+        for project_id in dict.fromkeys(str(unit["projectId"]) for unit in selected):
+            change_pipeline_project_priority(project_id, action)
+    elif action in {"pause", "resume"}:
+        paused = action == "pause"
+        for unit in selected:
+            product = unit.get("product", {})
+            book_id = str(product.get("bookId") or unit["projectId"])
+            unit_action = str(product.get("action") or unit.get("action") or "")
+            if unit.get("policy", {}).get("required") or unit_action not in PAUSABLE_PIPELINE_ACTIONS:
+                continue
+            set_pipeline_action_paused(book_id, unit_action, paused)
+            if paused:
+                with QUEUE_LOCK:
+                    if QUEUE_ACTIONS.get(book_id) == unit_action:
+                        QUEUE_ACTIONS.pop(book_id, None)
+                    durable = load_queue_actions()
+                    if durable.get(book_id) == unit_action:
+                        durable.pop(book_id, None)
+                        save_queue_actions(durable)
+            else:
+                save_queue([*load_queue(), book_id])
+        if action == "resume" and pipeline_is_enabled():
+            start_global_pipeline()
+    return global_pipeline_state()
+
+
 def prioritize_pipeline_action(book_id: str, action: str) -> dict[str, object]:
     """Durably put one book first and ensure the single local worker is awake."""
     global QUEUE_THREAD
@@ -12037,9 +12391,25 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
                 return
             self.send_json(result, HTTPStatus.CREATED)
             return
-        if route.path == "/api/library/pipeline/start":
-            automatic = start_global_pipeline()
-            self.send_json({"started": True, "queued": len(automatic), "pipeline": global_pipeline_state()}, HTTPStatus.ACCEPTED)
+        if route.path == "/api/library/pipeline/control":
+            try:
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                if length <= 0 or length > 256 * 1024:
+                    raise ValueError("Invalid pipeline control request size.")
+                intent = json.loads(self.rfile.read(length))
+                if not isinstance(intent, dict):
+                    raise ValueError("Invalid pipeline control request.")
+                pipeline = apply_pipeline_control_intent(intent)
+            except PipelineRevisionConflict as error:
+                self.send_json({
+                    "error": str(error), "code": "stale-pipeline-snapshot",
+                    "snapshot": error.state["snapshot"], "pipeline": error.state,
+                }, HTTPStatus.CONFLICT)
+                return
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                self.send_json({"error": str(error) or "Invalid pipeline control request."}, HTTPStatus.BAD_REQUEST)
+                return
+            self.send_json({"applied": True, "snapshot": pipeline["snapshot"], "pipeline": pipeline})
             return
         if route.path == "/api/library/pipeline/current-run/restart":
             library = load_library()
@@ -12066,38 +12436,6 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
                 return
             self.send_json({"started": True, "prioritized": book_id, "action": action, "queueProtocol": 2}, HTTPStatus.ACCEPTED)
             return
-        if route.path == "/api/library/pipeline/task-state":
-            try:
-                length = int(self.headers.get("Content-Length", "0") or 0)
-                payload = json.loads(self.rfile.read(length))
-                book_id = str(payload.get("bookId") or "")
-                action = str(payload.get("action") or "")
-                paused = bool(payload.get("paused"))
-            except (ValueError, TypeError, json.JSONDecodeError):
-                self.send_json({"error": "Invalid pipeline task request."}, HTTPStatus.BAD_REQUEST)
-                return
-            if not find_book(book_id):
-                self.send_json({"error": "Book not found."}, HTTPStatus.NOT_FOUND)
-                return
-            try:
-                paused_actions = set_pipeline_action_paused(book_id, action, paused)
-            except ValueError as error:
-                self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
-                return
-            if paused:
-                with QUEUE_LOCK:
-                    if QUEUE_ACTIONS.get(book_id) == action:
-                        QUEUE_ACTIONS.pop(book_id, None)
-                    durable = load_queue_actions()
-                    if durable.get(book_id) == action:
-                        durable.pop(book_id, None)
-                        save_queue_actions(durable)
-            else:
-                save_queue([*load_queue(), book_id])
-                if pipeline_is_enabled():
-                    start_global_pipeline()
-            self.send_json({"bookId": book_id, "action": action, "paused": paused, "pausedActions": paused_actions, "pipeline": global_pipeline_state()})
-            return
         start_over_match = re.fullmatch(r"/api/books/([A-Za-z0-9_-]{8,80})/pipeline/start-over", route.path)
         if start_over_match:
             book_id = start_over_match.group(1)
@@ -12121,38 +12459,7 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
             self.send_json({"startedOver": True, "bookId": book_id, "action": "prepare", "queueProtocol": 2}, HTTPStatus.ACCEPTED)
             return
         if route.path == "/api/library/pipeline/stop":
-            set_pipeline_enabled(False)
-            QUEUE_CANCEL_EVENT.set()
-            with QUEUE_LOCK:
-                QUEUE_ACTIONS.clear()
-                save_queue_actions({})
-            for event in PIPELINE_CANCEL_EVENTS.values():
-                event.set()
-            for book_id in list(PIPELINE_CANCEL_EVENTS):
-                cancel_active_model_response(book_id)
-            for book in load_library():
-                pipeline = load_pipeline(book)
-                if pipeline.get("status") == "running":
-                    for chapter in pipeline.get("chapters", []):
-                        if chapter.get("status") == "running":
-                            chapter.update({"status": "pending", "interruptedAt": utc_now(), "error": "Stopped before completion. Resume retries this chapter."})
-                        for prefix in ("gliner", "emotion", "tag", "smell"):
-                            if chapter.get(f"{prefix}Status") == "running":
-                                chapter.update({f"{prefix}Status": "pending", f"{prefix}Error": "Stopped before completion. Resume retries this chapter."})
-                    for chunk in pipeline.get("chunks", []):
-                        if chunk.get("dossierStatus") == "running":
-                            chunk.update({"dossierStatus": "pending", "dossierError": "Stopped before completion. Resume retries this chunk."})
-                            try:
-                                artifact = json.loads((chunk_artifacts_path(book) / f"{int(chunk.get('sequence')):04d}.json").read_text(encoding="utf-8"))
-                                artifact.update({"dossierStatus": "pending", "dossierError": chunk["dossierError"]})
-                                write_chunk_artifact(book, int(chunk.get("sequence")), artifact)
-                            except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                                pass
-                    pipeline.update({"status": "paused", "phase": "paused", "stopRequested": False, "message": "Reader stopped. Completed chapters are safe; Resume retries the interrupted chapter.", "updatedAt": utc_now()})
-                    write_pipeline(book, pipeline)
-                elif pipeline.get("status") == "queued":
-                    pipeline.update({"status": "paused", "phase": "paused", "stopRequested": False, "message": "Stopped before the local reader began. Continue whenever you are ready.", "updatedAt": utc_now()})
-                    write_pipeline(book, pipeline)
+            stop_global_pipeline()
             self.send_json({"stopping": True}, HTTPStatus.ACCEPTED)
             return
         retry_failed_match = re.fullmatch(r"/api/books/([A-Za-z0-9_-]{8,80})/pipeline/retry-failed", route.path)
