@@ -10,7 +10,7 @@
     "@inator/dev-tools": "file:.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz"
   },
   "dependencies": {
-    "@inator/ui": "file:.inator/packages/inator-ui-0.4.1-dev.49.tgz"
+    "@inator/ui": "file:.inator/packages/inator-ui-0.4.1-dev.50.tgz"
   },
   "engines": {
     "node": ">=22"
