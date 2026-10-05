@@ -368,9 +368,10 @@ function renderPipelineQueue() {
   const summary = document.querySelector("#pipeline-queue-summary");
   if (!list || !progress || !summary) return;
   const snapshot = currentPipelineSnapshot();
-  summary.textContent = snapshot.units.length
-    ? `${snapshot.units.length} remaining ${snapshot.units.length === 1 ? "step" : "steps"}. Eligible work leads; blocked work stays visible behind it.`
-    : "No analysis steps are waiting.";
+  const active = Number(snapshot.progress?.active || 0);
+  summary.textContent = active
+    ? `${active.toLocaleString()} active atomic ${active === 1 ? "operation" : "operations"} in ${snapshot.units.length.toLocaleString()} scheduling ${snapshot.units.length === 1 ? "group" : "groups"}. Expand a Step to inspect the work counted by progress.`
+    : "No analysis operations are waiting.";
   if (pipelineWorkspace) {
     pipelineWorkspace.update(snapshot);
     return;
@@ -1642,7 +1643,7 @@ async function postLibraryAction(path, payload = {}) {
   return result;
 }
 
-async function handleCommonsPipelineAction({action, unitIds = [], snapshot = currentPipelineSnapshot()}) {
+async function handleCommonsPipelineAction({action, unitIds = [], snapshot = currentPipelineSnapshot(), notify = true}) {
   const intent = createBookinatorPipelineControlIntent({action, unitIds, snapshot});
   try {
     const response = await fetch("/api/library/pipeline/control", {
@@ -1657,15 +1658,36 @@ async function handleCommonsPipelineAction({action, unitIds = [], snapshot = cur
       throw new Error(payload.error || "The pipeline control was not applied.");
     }
     await refreshLibraryBooks({poll: true});
+    return {snapshot: currentPipelineSnapshot(), applied: true};
   } catch (error) {
-    await confirmAction({
-      context: "Queue unchanged",
-      title: action === "start" || action === "stop" ? `Bookinator could not ${action} the queue` : "Bookinator could not update those jobs",
-      message: error.message,
-      acceptLabel: "Close"
-    });
+    if (notify) {
+      await confirmAction({
+        context: "Queue unchanged",
+        title: action === "start" || action === "stop" ? `Bookinator could not ${action} the queue` : "Bookinator could not update those jobs",
+        message: error.message,
+        acceptLabel: "Close"
+      });
+    }
+    return {snapshot: currentPipelineSnapshot(), applied: false, error};
   }
-  return {snapshot: currentPipelineSnapshot()};
+}
+
+async function handleBookinatorPipelineCommand({command, projectId = "", snapshot = currentPipelineSnapshot()}) {
+  const response = await fetch("/api/library/pipeline/product-command", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      schema: "bookinator.pipeline-product-command.v1",
+      command,
+      projectId,
+      expectedRevision: snapshot.revision,
+    })
+  });
+  const payload = await response.json();
+  if (payload.pipeline) state.globalPipeline = payload.pipeline;
+  if (!response.ok) throw new Error(payload.error || "The Bookinator pipeline command was not applied.");
+  await refreshLibraryBooks({poll: true});
+  return payload;
 }
 
 document.querySelector("#pipeline-attention-button")?.addEventListener("click", () => {
@@ -1741,7 +1763,7 @@ document.querySelector("#restart-current-run").addEventListener("click", async (
   if (button.disabled) return;
   button.disabled = true;
   try {
-    const result = await postLibraryAction("/api/library/pipeline/current-run/restart");
+    const result = await handleBookinatorPipelineCommand({command: "restart-current-run"});
     state.globalPipeline = result.pipeline || state.globalPipeline;
     updateGlobalPipelineStatus();
   } catch (error) {
@@ -7649,7 +7671,7 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
       const stopButton = event.currentTarget;
       stopButton.disabled = true;
       stopButton.setAttribute("aria-busy", "true");
-      await fetch("/api/library/pipeline/stop", {method: "POST"});
+      await handleCommonsPipelineAction({action: "stop"});
       await new Promise((resolve) => setTimeout(resolve, 200));
       state.pipelineSignature = "";
       showBookPage(book.id, activeTab);
@@ -7726,23 +7748,15 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
         const rebuild = await confirmAction({context: "Rebuild manuscript", title: "Re-extract this book?", message: "Bookinator will recreate the canonical Markdown, chapter objects, and source chunks from the saved manuscript. Dependent summaries and dossiers will be marked stale, then regenerated automatically from the proposed map.", acceptLabel: "Rebuild manuscript"});
         if (!rebuild) return;
       }
-      const originalLabel = actionButton.querySelector("small").textContent;
       actionButton.disabled = true;
       actionButton.setAttribute("aria-busy", "true");
-      const start = await fetch("/api/library/pipeline/prioritize", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({bookId: book.id, action})});
-      const result = await start.json();
-      if (!start.ok) {
+      try {
+        await handleBookinatorPipelineCommand({command: action, projectId: book.id});
+      } catch (error) {
         actionButton.disabled = false;
         actionButton.querySelector("small").textContent = "Retry";
         actionButton.removeAttribute("aria-busy");
-        body.insertAdjacentHTML("afterbegin", `<p class="pipeline-error">${escapeHtml(result.error || "Could not start the pipeline.")}</p>`);
-        return;
-      }
-      if (result.queueProtocol !== 2) {
-        actionButton.disabled = false;
-        actionButton.querySelector("small").textContent = originalLabel;
-        actionButton.removeAttribute("aria-busy");
-        body.insertAdjacentHTML("afterbegin", '<p class="pipeline-error"><strong>Bookinator’s server needs a restart.</strong> The page is newer than the running local server, so no pipeline worker claimed this request. Stop <code>./bin/serve</code>, run it again, then press Continue.</p>');
+        body.insertAdjacentHTML("afterbegin", `<p class="pipeline-error">${escapeHtml(error.message || "Could not start the pipeline.")}</p>`);
         return;
       }
       state.pipelineSignature = "";
@@ -7909,10 +7923,9 @@ document.querySelector("#restart-pipeline-stage")?.addEventListener("click", asy
   if (!confirmed) return;
   event.currentTarget.disabled = true;
   try {
-    await fetch("/api/library/pipeline/stop", {method: "POST"});
-    const response = await fetch("/api/library/pipeline/prioritize", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({bookId, action})});
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "This pipeline step could not be restarted.");
+    const stopped = await handleCommonsPipelineAction({action: "stop", notify: false});
+    if (!stopped.applied) throw stopped.error;
+    await handleBookinatorPipelineCommand({command: action, projectId: bookId});
     closeDialog("reading-details-dialog");
     state.pipelineSignature = "";
     await showBookPage(bookId, document.querySelector("#book-page").dataset.activeTab || "pipeline");

@@ -1,4 +1,4 @@
-import { definePipelineSnapshot, pipelineControlIntent } from "/commons/@inator/engine/pipeline-contract.js";
+import { assertPipelineSnapshotConformance, definePipelineSnapshot, pipelineControlIntent } from "/commons/@inator/engine/pipeline-contract.js";
 
 const emptySnapshot = Object.freeze({
   schema: "inator.pipeline-snapshot.v1",
@@ -14,7 +14,9 @@ const emptySnapshot = Object.freeze({
 });
 
 export function createBookinatorPipelineSnapshot({pipeline = {}} = {}) {
-  return definePipelineSnapshot(pipeline.snapshot || emptySnapshot);
+  const snapshot = definePipelineSnapshot(pipeline.snapshot || emptySnapshot);
+  assertPipelineSnapshotConformance(snapshot);
+  return snapshot;
 }
 
 export function createBookinatorPipelineControlIntent({action, unitIds = [], snapshot} = {}) {

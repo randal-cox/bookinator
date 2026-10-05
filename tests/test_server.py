@@ -709,8 +709,9 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert 'id="library-pipeline-panel"' not in page[page.index('id="books-page"'):page.index('id="pipeline-page"')]
     assert "createAtomicPipelineWorkspace" in app
     assert 'supportedActions: ["move-top", "raise", "lower", "pause", "resume"]' in app
-    assert 'definePipelineSnapshot, pipelineControlIntent' in adapter
+    assert 'assertPipelineSnapshotConformance, definePipelineSnapshot, pipelineControlIntent' in adapter
     assert 'definePipelineSnapshot(pipeline.snapshot || emptySnapshot)' in adapter
+    assert 'assertPipelineSnapshotConformance(snapshot)' in adapter
     assert 'expectedRevision: snapshot?.revision' in adapter
     assert 'data-pipeline-selection-action=' not in page
     assert 'data-pipeline-selection-action="remove"' not in page
@@ -725,6 +726,11 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert 'pipelineTaskDefinitions' not in app
     assert 'fetch("/api/library/pipeline/control"' in app
     assert 'createBookinatorPipelineControlIntent({action, unitIds, snapshot})' in app
+    assert 'fetch("/api/library/pipeline/product-command"' in app
+    assert 'schema: "bookinator.pipeline-product-command.v1"' in app
+    assert '/api/library/pipeline/prioritize' not in app
+    assert '/api/library/pipeline/current-run/restart' not in app
+    assert 'fetch("/api/library/pipeline/stop"' not in app
     assert 'id="library-pipeline-progress"' in page
     assert 'runName: "Current run"' in app
     assert 'id="restart-current-run"' in page
@@ -792,6 +798,51 @@ def test_python_emits_complete_commons_pipeline_state_matrix() -> None:
     assert units["project-c::whole-summary"]["status"] == "running"
     assert units["project-c::whole-summary"]["currentAttemptId"]
     assert sum(bool(unit.get("currentAttemptId")) for unit in snapshot["units"]) == 1
+    assert snapshot["progress"]["active"] == sum(len(unit["children"]) for unit in snapshot["units"])
+    assert snapshot["progress"]["total"] - snapshot["progress"]["completed"] == snapshot["progress"]["active"]
+
+
+def test_commons_snapshot_expands_control_groups_into_the_atomic_denominator() -> None:
+    book = {"id": "project-a", "title": "Alpha", "priority": "high", "pipeline": {"nextAction": "summarize", "pausedActions": []}}
+    pipeline = {
+        "stages": [
+            {"id": "chapter-archive", "status": "complete"},
+            {"id": "summaries", "status": "pending"},
+            {"id": "dossiers", "status": "pending"},
+            {"id": "emotions", "status": "pending"},
+            {"id": "tags", "status": "pending"},
+        ],
+        "chapters": [
+            {"sequence": 1, "title": "Chapter 1", "status": "complete", "emotionStatus": "complete", "tagStatus": "pending"},
+            {"sequence": 2, "title": "Chapter 2", "status": "pending", "emotionStatus": "pending", "tagStatus": "pending"},
+        ],
+        "chunks": [
+            {"sequence": 1, "chapterSequence": 1, "dossierStatus": "complete"},
+            {"sequence": 2, "chapterSequence": 2, "dossierStatus": "pending"},
+        ],
+    }
+    run = {
+        "id": "atomic-run", "completed": 0, "total": 5, "bookCount": 1,
+        "books": {"project-a": {"baselineCompleted": 5, "targetTotal": 10}},
+    }
+    queue = [{"bookId": "project-a", "action": "summarize", "task": "Chapter summaries", "state": "queued", "rank": 1}]
+
+    with patch.object(server, "load_queue_actions", return_value={}):
+        snapshot = server.build_commons_pipeline_snapshot([book], [(book, pipeline)], queue, run, enabled=True, running=False)
+
+    children = [child for unit in snapshot["units"] for child in unit["children"]]
+    assert snapshot["progress"] == {
+        "completed": 0, "total": 5, "active": 5, "scope": "current-run", "unit": "atomic operation", "basis": "1 project", "referenceAt": None,
+    }
+    assert len(children) == 5
+    assert {child["id"] for child in children} == {
+        "project-a::summarize::chapter-2",
+        "project-a::dossiers::chunk-2",
+        "project-a::emotions::chapter-2",
+        "project-a::tags::chapter-1",
+        "project-a::tags::chapter-2",
+    }
+    assert next(unit for unit in snapshot["units"] if unit["id"] == "project-a::summarize")["children"][0]["status"] == "waiting"
 
 
 def test_commons_pipeline_control_is_revision_checked_and_atomic(tmp_path: Path) -> None:
@@ -841,6 +892,29 @@ def test_commons_pause_intent_persists_in_isolation(tmp_path: Path) -> None:
 
     assert result is refreshed
     assert json.loads((tmp_path / "pauses.json").read_text()) == {"project-a": ["emotions"]}
+
+
+def test_bookinator_product_pipeline_commands_share_the_observed_revision() -> None:
+    snapshot = {"revision": 9, "units": []}
+    current = {"snapshot": snapshot}
+    refreshed = {"snapshot": {**snapshot, "revision": 10}}
+    intent = {
+        "schema": "bookinator.pipeline-product-command.v1",
+        "command": "summarize",
+        "projectId": "project-a",
+        "expectedRevision": 9,
+    }
+
+    with patch.object(server, "global_pipeline_state", side_effect=[current, refreshed]), patch.object(server, "prioritize_pipeline_action") as prioritize:
+        result = server.apply_pipeline_product_command(intent)
+
+    assert result is refreshed
+    prioritize.assert_called_once_with("project-a", "summarize")
+
+    with patch.object(server, "global_pipeline_state", return_value=current), patch.object(server, "prioritize_pipeline_action") as prioritize:
+        with pytest.raises(server.PipelineRevisionConflict):
+            server.apply_pipeline_product_command({**intent, "expectedRevision": 8})
+    prioritize.assert_not_called()
 
 
 def test_pipeline_panel_can_start_one_book_completely_over() -> None:
@@ -1310,6 +1384,12 @@ def test_current_run_tracks_only_work_remaining_at_start_and_expands_explicitly(
         assert expanded["total"] == 8
         assert expanded["addedUnits"] == 2
         assert json.loads(path.read_text(encoding="utf-8"))["books"]["book-two"]["baselineCompleted"] == 1
+
+
+def test_current_run_retains_deferred_projects_as_visible_ineligible_work() -> None:
+    book = {"id": "deferred", "priority": "shelved", "pipeline": {"nextAction": ""}}
+    pipeline = {"pipelineProgress": {"completed": 2, "total": 5}}
+    assert server.current_run_candidate(book, pipeline) is True
 
 
 def test_library_coverage_separates_machine_analysis_from_reviewer_signoff() -> None:
