@@ -29,7 +29,7 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
 
     assert 'data-inator-product-footer' in index
     assert 'href: "#help/start"' in shell
-    assert 'label: "Resources"' in shell
+    assert 'resources: "docs/presentations/catalog.json"' in shell
     assert 'title: "Milestones, not machinery"' in pages
     assert '/commons/@inator/ui/product-history.css' in index
     assert 'createProductHistoryView' in app
@@ -45,16 +45,15 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
     assert "status:" not in footer_config
 
 
-def test_footer_information_architecture_is_about_docs_and_resources():
+def test_footer_information_architecture_uses_the_strict_commons_rollup():
     shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
-    labels = ['href: "#help/start"', 'label: "Resources"']
-    positions = [shell.index(label) for label in labels]
-    assert positions == sorted(positions)
     assert 'href: "#about/premise"' in shell
     assert 'href: "#help/start"' in shell
-    assert 'defineProductShellPolicy' in shell
+    assert 'createStandardProductShellPolicy' in shell
+    assert 'defineProductInformationContract' in shell
     assert 'productShellFooterLinks' in shell
-    assert 'roles: ["developer", "team"]' in shell
+    assert 'label: "Resources"' not in shell
+    assert 'omit:' not in shell
 
 
 def test_docs_use_shared_editorial_flow_without_replacing_product_prose():

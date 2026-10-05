@@ -2,7 +2,7 @@ import { articlePages, roadmapItems } from "./pages.js";
 import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
 import { createBookinatorAboutPage } from "./product-information.js?v=resources-flow-193";
-import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=commons-practice-187";
+import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=about-layout-198";
 import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-186";
 import { createBookinatorResourcePage } from "./product-resources.js?v=resources-flow-193";
 

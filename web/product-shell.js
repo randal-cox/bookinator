@@ -1,7 +1,8 @@
 import {
   createWorkspaceCapabilityRegistry,
   createWorkspaceHost,
-  defineProductShellPolicy,
+  createStandardProductShellPolicy,
+  defineProductInformationContract,
   mountInatorAppShell,
   normalizeWorkspaceIdentity,
   productShellFooterLinks
@@ -93,18 +94,33 @@ function createBackupAdapter() {
   };
 }
 
-export const bookinatorShellPolicy = defineProductShellPolicy({
+const bookinatorInformation = defineProductInformationContract({
+  productId: "book.inator",
+  records: {
+    about: "web/product-information.js",
+    help: "web/product-docs.js",
+    privacy: "web/product-practice.js",
+    security: "web/product-practice.js",
+    milestones: "web/product-history.js",
+    releases: "web/product-history.js",
+    roadmap: "web/pages.js",
+    resources: "docs/presentations/catalog.json"
+  }
+});
+
+export const bookinatorShellPolicy = createStandardProductShellPolicy({
+  information: bookinatorInformation,
   capabilities: ["resources", "security"],
   routes: {
     about: {href: "#about/premise", route: "about"},
     help: {href: "#help/start", route: "help"},
     privacy: {href: "#privacy", route: "privacy"},
-    security: {href: "#security", route: "security"}
+    security: {href: "#security", route: "security"},
+    milestones: {href: "#releases/milestones", route: "releases"},
+    releases: {href: "#releases/history", route: "releases"},
+    roadmap: {href: "#roadmap/priorities", route: "roadmap"},
+    resources: {href: "#resources/library", route: "resources"}
   },
-  omit: ["milestones", "releases", "roadmap", "resources"],
-  extensions: [
-    {id: "resources", href: "#resources/library", route: "resources", label: "Resources", group: "resources", after: "help", roles: ["developer", "team"], capability: "resources"}
-  ]
 });
 
 export function createBookinatorWorkspaceRegistry(identity = loadBookinatorIdentity()) {
