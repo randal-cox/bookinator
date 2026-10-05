@@ -1,10 +1,31 @@
 import { articlePages, roadmapItems } from "./pages.js";
 import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
-import { createBookinatorAboutPage } from "./product-information.js?v=about-trust-191";
+import { createBookinatorAboutPage } from "./product-information.js?v=resources-flow-193";
 import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=commons-practice-187";
 import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-186";
-import { createBookinatorResourcePage } from "./product-resources.js?v=commons-help-186";
+import { createBookinatorResourcePage } from "./product-resources.js?v=resources-flow-193";
+
+const routeScrollPositions = new Map();
+let restoringRouteScroll = false;
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+document.addEventListener("click", (event) => {
+  if (event.target instanceof Element && event.target.closest('a[href^="#"]')) {
+    routeScrollPositions.set(location.hash || "#books", window.scrollY);
+    history.replaceState({...history.state, bookinatorScrollY: window.scrollY}, "");
+  }
+}, {capture: true});
+window.addEventListener("scroll", () => {
+  if (!restoringRouteScroll) routeScrollPositions.set(location.hash || "#books", window.scrollY);
+}, {passive: true});
+function restoreArticleScroll() {
+  const top = history.state?.bookinatorScrollY ?? routeScrollPositions.get(location.hash || "#books") ?? 0;
+  restoringRouteScroll = true;
+  requestAnimationFrame(() => {
+    window.scrollTo({top, behavior: "auto"});
+    requestAnimationFrame(() => { restoringRouteScroll = false; });
+  });
+}
 import { createBookinatorPracticePage } from "./product-practice.js?v=commons-practice-187";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
 import { isTemporalDossierObservation } from "./dossier-index.js";
@@ -2250,7 +2271,7 @@ function showPipelinePage() {
   document.title = "Bookinator · Pipeline";
 }
 
-function showArticlePage(collection, requestedTab) {
+async function showArticlePage(collection, requestedTab) {
   leaveBookWorkspace();
   const page = collection === "help"
     ? { kicker: "Bookinator help", title: "Help", intro: "Orientation, everyday tasks, reference, and common questions.", tabs: { start: ["Start here", ""], tasks: ["Everyday tasks", ""], reference: ["Reference", ""], faq: ["FAQ", ""] } }
@@ -2285,9 +2306,9 @@ function showArticlePage(collection, requestedTab) {
     ? `<section class="shared-product-history" aria-label="Bookinator ${productHistoryMode}"><div data-product-history="${productHistoryMode}"></div></section>`
     : "";
   if (!productHistoryMode) {
-    if (collection === "about") void createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
+    if (collection === "about") await createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
     else if (collection === "help") createBookinatorHelpPage({ root: articleBody, guideTabs: articlePages.guide.tabs, referenceTabs: articlePages.docs.tabs, initialSection: activeTab });
-    else if (collection === "resources") void createBookinatorResourcePage({ root: articleBody });
+    else if (collection === "resources") await createBookinatorResourcePage({ root: articleBody });
     else if (collection === "privacy" || collection === "security") {
       const destination = bookinatorShellPolicy.destinations.find(({ id }) => id === collection);
       createBookinatorPracticePage({ root: articleBody, destination });
@@ -2308,7 +2329,7 @@ function showArticlePage(collection, requestedTab) {
   }));
   updateFooterRoute(collection);
   document.title = `Bookinator · ${page.title}`;
-  scrollTo({top: 0, behavior: "auto"});
+  restoreArticleScroll();
 }
 
 function roadmapRating(value, kind) {

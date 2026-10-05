@@ -9,7 +9,6 @@ Start at [`presentations/index.html`](presentations/index.html).
 - `briefs/one-pager.html` — printable product overview
 - `pitch-authors-editors/` — 16-slide, 20-minute audience deck and presenter view
 - `briefs/elevator-pitches.html` — short and audience-specific descriptions
-- `briefs/wish-list.html` — prioritized things the project should want, and ambitions it should refuse
 - `presentations/catalog.json` — machine-readable resource catalog
 
 ## Presenting the deck

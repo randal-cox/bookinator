@@ -22,10 +22,10 @@ def test_resource_catalog_describes_current_materials():
         "why-bookinator",
         "one-pager",
         "elevator-pitches",
-        "wish-list",
     ]
-    assert resources[-1]["title"] == "Next bets and evaluation"
-    assert resources[-1]["statusLabel"] == "Working direction"
+    assert resources[0]["posterUrl"] == "/assets/bookinator.svg"
+    assert resources[1]["icon"] == "flyer"
+    assert resources[2]["icon"] == "elevator"
     assert all("free forever" not in json.dumps(resource).lower() for resource in resources)
 
     for resource in resources:
@@ -58,7 +58,6 @@ def test_audience_deck_separates_working_product_from_future_work():
 def test_briefs_use_precise_claims_and_explicit_aspirations():
     overview = read(BRIEFS / "one-pager.html")
     pitches = read(BRIEFS / "elevator-pitches.html")
-    bets = read(BRIEFS / "wish-list.html")
 
     assert "Business Source License 1.1" in overview
     assert "Questions &amp; Payoffs" in overview
@@ -68,10 +67,7 @@ def test_briefs_use_precise_claims_and_explicit_aspirations():
     assert "Do not say “free forever.”" in pitches
     assert "Do not claim revision comparison" in pitches
 
-    assert "Proved in 0.1.0" in bets
-    assert "Next" in bets
-    assert "Aspirations" in bets
-    assert "directions, not release promises" in bets
+    assert not (BRIEFS / "wish-list.html").exists()
 
 
 def test_resource_catalog_bypasses_stale_browser_cache():
