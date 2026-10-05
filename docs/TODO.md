@@ -746,7 +746,7 @@ optimization.
 
 ### Urgent: split the browser application into owned modules
 
-`web/app.js` has outgrown safe single-file maintenance. Prune it into cohesive
+`src/app.js` has outgrown safe single-file maintenance. Prune it into cohesive
 modules without changing behavior: workspace navigation and routing; pipeline
 and queue presentation; chapter reader and annotations; Analysis renderers;
 Explore reports and exports; library/import; dialogs and shared controls. Keep

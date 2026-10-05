@@ -128,7 +128,7 @@ function bindSharedAboutDisclosure(disclosure) {
   }, { capture: true });
 }
 
-export async function createBookinatorAboutPage({ root, tabs } = {}) {
+export async function createBookinatorAboutPage({ root, tabs, initialTab = "product", onSelect = null } = {}) {
   const renderSequence = ++aboutRenderSequence;
   root.innerHTML = '<p class="book-about-loading" role="status">Preparing the current Bookinator record…</p>';
   const system = await aboutSystemInventory();
@@ -138,7 +138,7 @@ export async function createBookinatorAboutPage({ root, tabs } = {}) {
   const controller = createProductAboutPage({
     root, productLabel: bookinatorAbout.product.name, productContent: createProductDocsFlow({ sections }), about: bookinatorAbout,
     citationRegistry: createModelCitationRegistry(system), trust: createBookinatorTrust(system), trustIntroContent: () => trustIntro(system),
-    recordIds: Object.keys(recordRoutes)
+    recordIds: Object.keys(recordRoutes), initialTab, onSelect
   });
   activeAboutController = controller;
   bindSharedAboutDisclosure(controller.trustDisclosure);

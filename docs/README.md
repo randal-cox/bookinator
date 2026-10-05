@@ -19,7 +19,7 @@ Start at [`presentations/index.html`](presentations/index.html).
 - `N`: open presenter notes
 - `F`: full screen
 
-Serve the repository over HTTP rather than opening files directly so module imports and the catalog request work. From the project root, `./bin/serve` is sufficient; then open `/docs/presentations/` on the displayed local URL. The Bookinator server exposes only the public `web/` and `docs/` trees; project data remains outside the static routes.
+Serve the repository over HTTP rather than opening files directly so module imports and the catalog request work. From the project root, `./bin/serve` is sufficient; then open `/docs/presentations/` on the displayed local URL. The Bookinator server exposes only the public `src/` and `docs/` trees; project data remains outside the static routes.
 
 ## Hosting
 

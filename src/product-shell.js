@@ -97,13 +97,13 @@ function createBackupAdapter() {
 const bookinatorInformation = defineProductInformationContract({
   productId: "book.inator",
   records: {
-    about: "web/product-information.js",
-    help: "web/product-docs.js",
-    privacy: "web/product-practice.js",
-    security: "web/product-practice.js",
-    milestones: "web/product-history.js",
-    releases: "web/product-history.js",
-    roadmap: "web/pages.js",
+    about: "src/product-information.js",
+    help: "src/product-docs.js",
+    privacy: "src/product-practice.js",
+    security: "src/product-practice.js",
+    milestones: "src/product-history.js",
+    releases: "src/product-history.js",
+    roadmap: "src/pages.js",
     resources: "docs/presentations/catalog.json"
   }
 });

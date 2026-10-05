@@ -21,11 +21,11 @@ def test_milestone_document_records_first_release_at_product_level():
 
 
 def test_releases_use_shared_history_and_footer_uses_abbreviated_information_menu():
-    index = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
-    pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
-    app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
-    history = (ROOT / "web" / "product-history.js").read_text(encoding="utf-8")
-    shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
+    index = (ROOT / "src" / "index.html").read_text(encoding="utf-8")
+    pages = (ROOT / "src" / "pages.js").read_text(encoding="utf-8")
+    app = (ROOT / "src" / "app.js").read_text(encoding="utf-8")
+    history = (ROOT / "src" / "product-history.js").read_text(encoding="utf-8")
+    shell = (ROOT / "src" / "product-shell.js").read_text(encoding="utf-8")
 
     assert 'data-inator-product-footer' in index
     assert 'href: "#help/start"' in shell
@@ -46,7 +46,7 @@ def test_releases_use_shared_history_and_footer_uses_abbreviated_information_men
 
 
 def test_footer_information_architecture_uses_the_strict_commons_rollup():
-    shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
+    shell = (ROOT / "src" / "product-shell.js").read_text(encoding="utf-8")
     assert 'href: "#about/premise"' in shell
     assert 'href: "#help/start"' in shell
     assert 'createStandardProductShellPolicy' in shell
@@ -57,10 +57,10 @@ def test_footer_information_architecture_uses_the_strict_commons_rollup():
 
 
 def test_docs_use_shared_editorial_flow_without_replacing_product_prose():
-    index = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
-    app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
-    pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
-    docs = (ROOT / "web" / "product-docs.js").read_text(encoding="utf-8")
+    index = (ROOT / "src" / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "src" / "app.js").read_text(encoding="utf-8")
+    pages = (ROOT / "src" / "pages.js").read_text(encoding="utf-8")
+    docs = (ROOT / "src" / "product-docs.js").read_text(encoding="utf-8")
 
     assert '/commons/@inator/ui/product-information.css' in index
     assert 'createBookinatorHelpPage' in app
@@ -76,19 +76,21 @@ def test_docs_use_shared_editorial_flow_without_replacing_product_prose():
 
 
 def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
-    app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
-    pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
-    information = (ROOT / "web" / "product-information.js").read_text(encoding="utf-8")
+    app = (ROOT / "src" / "app.js").read_text(encoding="utf-8")
+    pages = (ROOT / "src" / "pages.js").read_text(encoding="utf-8")
+    information = (ROOT / "src" / "product-information.js").read_text(encoding="utf-8")
 
     assert "createBookinatorAboutPage" in app
     assert "createProductAboutPage" in information
+    assert 'initialTab: requestedTab === "ecosystem" ? "ecosystem" : "product"' in app
+    assert '"#about/ecosystem"' in app
     assert "createProductDocsFlow" in information
     assert "about: bookinatorAbout" in information
     assert "recordIds: Object.keys(recordRoutes)" in information
     for destination in ("milestones", "roadmap", "security", "privacy"):
         assert f'{destination}:' in information
-    practice = (ROOT / "web" / "product-practice.js").read_text(encoding="utf-8")
-    shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
+    practice = (ROOT / "src" / "product-practice.js").read_text(encoding="utf-8")
+    shell = (ROOT / "src" / "product-shell.js").read_text(encoding="utf-8")
     assert "createProductPracticeViewForFooter" in practice
     assert "defineProductPrivacy" in practice
     assert "defineProductSecurity" in practice
@@ -98,13 +100,13 @@ def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
     assert 'security: {href: "#security"' in shell
 
 
-def test_ui_conformance_scans_bookinators_actual_web_root():
+def test_ui_conformance_scans_bookinators_actual_source_root():
     package = (ROOT / "package.json").read_text(encoding="utf-8")
-    assert 'inator audit-ui web --baseline .inator/ui-audit-baseline.json' in package
+    assert 'inator audit-ui src --baseline .inator/ui-audit-baseline.json' in package
 
 
 def test_about_guide_and_docs_describe_the_current_product():
-    pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
+    pages = (ROOT / "src" / "pages.js").read_text(encoding="utf-8")
 
     assert 'title: "A book remembers more than any prompt can hold"' in pages
     assert 'title: "From manuscript to editorial map"' in pages
@@ -115,9 +117,9 @@ def test_about_guide_and_docs_describe_the_current_product():
 
 
 def test_about_exposes_shared_trust_live_model_citations_and_editorial_artwork():
-    information = (ROOT / "web" / "product-information.js").read_text(encoding="utf-8")
-    pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
-    styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
+    information = (ROOT / "src" / "product-information.js").read_text(encoding="utf-8")
+    pages = (ROOT / "src" / "pages.js").read_text(encoding="utf-8")
+    styles = (ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert "defineTrustSurface" in information
     assert "defineCitationRegistry" in information
@@ -125,7 +127,7 @@ def test_about_exposes_shared_trust_live_model_citations_and_editorial_artwork()
     assert "citationRegistry: createModelCitationRegistry(system)" in information
     assert "trust: createBookinatorTrust(system)" in information
     assert "book-analysis-paper-landscape.png" in pages
-    assert (ROOT / "web" / "assets" / "book-analysis-paper-landscape.png").is_file()
+    assert (ROOT / "src" / "assets" / "book-analysis-paper-landscape.png").is_file()
     assert "data-inator-icon" in pages
     assert ".article-body.inator-about-page .capability-bands p" in styles
     assert "activeAboutController?.destroy()" in information

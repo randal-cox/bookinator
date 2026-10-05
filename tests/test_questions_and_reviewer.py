@@ -228,8 +228,8 @@ def test_front_matter_never_promotes_editorial_questions() -> None:
 
 def test_reviewer_interface_exposes_real_annotation_controls() -> None:
     root = Path(server.__file__).parents[2]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    index = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    index = (root / "src" / "index.html").read_text(encoding="utf-8")
     assert 'activeTab === "reviewer"' in app
     assert "data-review-chapter" in app
     assert 'id="annotate-selection"' in index
@@ -295,14 +295,14 @@ def test_reviewer_interface_exposes_real_annotation_controls() -> None:
 
 def test_emotions_tags_and_smells_have_deterministic_whole_book_disclosures() -> None:
     root = Path(server.__file__).parents[2]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     todo = (root / "docs" / "TODO.md").read_text(encoding="utf-8")
 
     assert "function tagRollupData(pipeline)" in app
     assert "function smellRollupData(pipeline)" in app
     assert "function normalizeSmellRollupKey(value)" in app
-    smell_labels = (root / "web" / "smell-labels.js").read_text(encoding="utf-8")
+    smell_labels = (root / "src" / "smell-labels.js").read_text(encoding="utf-8")
     assert 'key.includes("oxford comma")' in smell_labels
     assert '["missing oxford comma", "Oxford comma"]' in smell_labels
     assert "function emotionRollupData(pipeline)" in app
@@ -337,8 +337,8 @@ def test_emotions_tags_and_smells_have_deterministic_whole_book_disclosures() ->
 
 def test_chapter_length_is_an_explore_report_not_a_chapter_map_tab() -> None:
     root = Path(server.__file__).parents[2]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert "function chapterLengthRollupMarkup(pipeline)" in app
     assert "function chapterLengthReportMarkup(pipeline)" in app

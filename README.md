@@ -133,7 +133,7 @@ README. Start Bookinator, then use the footer links:
 - **Resources** includes the one-pager, presentations, and project briefs.
 
 Serve these pages through `./bin/serve`; do not open the HTML files directly.
-The server exposes only the public `web/` and `docs/` trees. Local manuscripts
+The server exposes only the public `src/` and `docs/` trees. Local manuscripts
 and analysis records are not served as static files.
 
 ## Local data and privacy
@@ -153,7 +153,7 @@ Create the development environment and run the tests with:
 ```sh
 uv sync
 .venv/bin/python -m pytest -q
-node --check web/app.js
+node --check src/app.js
 ```
 
 The repository also contains a documented public-domain demo corpus, product

@@ -37,7 +37,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-WEB_ROOT = ROOT / "web"
+APP_ROOT = ROOT / "src"
 DOCS_ROOT = ROOT / "docs"
 COMMONS_UI_ROOT = ROOT / "node_modules" / "@inator" / "ui" / "src"
 LOCAL_PACKAGES = ROOT / ".bookinator" / "packages"
@@ -11521,7 +11521,7 @@ def assigned_model_roles(model: str, available_models: list[str] | None = None) 
 
 class BookinatorHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
+        super().__init__(*args, directory=str(APP_ROOT), **kwargs)
 
     def end_headers(self) -> None:
         if not self.path.startswith("/api/"):

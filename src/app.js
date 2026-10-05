@@ -1,7 +1,7 @@
 import { articlePages, roadmapItems } from "./pages.js";
 import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
-import { createBookinatorAboutPage } from "./product-information.js?v=resources-flow-193";
+import { createBookinatorAboutPage } from "./product-information.js?v=about-route-200";
 import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=about-layout-198";
 import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-199";
 import { createBookinatorResourcePage } from "./product-resources.js?v=resources-flow-193";
@@ -2306,7 +2306,15 @@ async function showArticlePage(collection, requestedTab) {
     ? `<section class="shared-product-history" aria-label="Bookinator ${productHistoryMode}"><div data-product-history="${productHistoryMode}"></div></section>`
     : "";
   if (!productHistoryMode) {
-    if (collection === "about") await createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
+    if (collection === "about") await createBookinatorAboutPage({
+      root: articleBody,
+      tabs: page.tabs,
+      initialTab: requestedTab === "ecosystem" ? "ecosystem" : "product",
+      onSelect(selected) {
+        const nextHash = selected === "ecosystem" ? "#about/ecosystem" : `#about/${activeTab}`;
+        if (location.hash !== nextHash) history.replaceState(history.state, "", nextHash);
+      }
+    });
     else if (collection === "help") createBookinatorHelpPage({ root: articleBody, guideTabs: articlePages.guide.tabs, referenceTabs: articlePages.docs.tabs, initialSection: activeTab });
     else if (collection === "resources") await createBookinatorResourcePage({ root: articleBody });
     else if (collection === "privacy" || collection === "security") {

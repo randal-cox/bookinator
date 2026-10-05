@@ -5,13 +5,13 @@
   "description": "Local-first AI-assisted manuscript analysis",
   "scripts": {
     "inator:doctor": "inator doctor",
-    "ui:check": "inator audit-ui web --baseline .inator/ui-audit-baseline.json"
+    "ui:check": "inator audit-ui src --baseline .inator/ui-audit-baseline.json"
   },
   "devDependencies": {
     "@inator/dev-tools": "file:.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz"
   },
   "dependencies": {
-    "@inator/ui": "file:.inator/packages/inator-ui-0.4.1-dev.56.tgz"
+    "@inator/ui": "file:.inator/packages/inator-ui-0.4.1-dev.57.tgz"
   },
   "engines": {
     "node": ">=22"

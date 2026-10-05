@@ -554,9 +554,9 @@ def test_local_executable_checks_canonical_homebrew_location_when_path_is_restri
 
 def test_analysis_ui_does_not_offer_per_task_model_overrides() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert "data-open-task-model" not in app
     assert "openTaskModelDialog" not in app
     assert "reader-model-dialog" not in page
@@ -665,14 +665,14 @@ def test_completed_retry_drops_stale_child_and_stage_errors() -> None:
 
 
 def test_non_running_attempt_does_not_accrue_duration_forever() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     duration = app.split("function liveDurationMarkup", 1)[1].split("let readingDetailsClock", 1)[0]
     assert 'const running = status === "running" && Boolean(startedAt)' in duration
     assert 'const end = running ? new Date() : new Date(completedAt)' in duration
 
 
 def test_failed_analysis_dialog_calls_its_rerun_action_retry() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'row.dataset.analysisStatus === "failed" ? "Retry" : "Refresh"' in app
     assert 'retrying ? "Retry failed analysis"' in app
     assert 'retrying ? "Retry this result?"' in app
@@ -682,8 +682,8 @@ def test_failed_analysis_dialog_calls_its_rerun_action_retry() -> None:
 
 
 def test_analysis_navigation_remembers_each_books_last_workspace_tab() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    shell = (Path(__file__).parents[1] / "web" / "product-shell.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    shell = (Path(__file__).parents[1] / "src" / "product-shell.js").read_text(encoding="utf-8")
     assert 'const analysisTabsKey = "bookinator.analysis-tabs.v1"' in app
     assert "function rememberedAnalysisTab(bookId)" in app
     assert "rememberAnalysisTab(bookId, activeTab)" in app
@@ -693,15 +693,15 @@ def test_analysis_navigation_remembers_each_books_last_workspace_tab() -> None:
 
 def test_library_uses_one_global_queue_control_and_priority_membership() -> None:
     root = Path(__file__).parents[1]
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
     assert 'id="toggle-library-pipeline"' in page
     assert 'id="global-pipeline-status"' not in page
     assert 'id="queue-books"' not in page
     assert 'id="dequeue-books"' not in page
     assert "Add to pipeline" not in app
     assert "Remove from pipeline" not in app
-    shell = (root / "web" / "product-shell.js").read_text(encoding="utf-8")
+    shell = (root / "src" / "product-shell.js").read_text(encoding="utf-8")
     assert '{href: "#/pipeline", route: "pipeline", label: "Pipeline"' in shell
     assert 'id="pipeline-page"' in page
     assert page.index('id="pipeline-page"') < page.index('id="library-pipeline-panel"')
@@ -747,7 +747,7 @@ def test_library_uses_one_global_queue_control_and_priority_membership() -> None
 
 def test_pipeline_panel_can_start_one_book_completely_over() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
     server_source = (root / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
 
     assert 'action: "start-over", label: "Start over"' in app
@@ -757,15 +757,15 @@ def test_pipeline_panel_can_start_one_book_completely_over() -> None:
 
 
 def test_duplicate_library_titles_show_source_and_project_identity() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'class="duplicate-book-identity ${book.sourceAvailable ? "with-source" : "without-source"}' in app
     assert '${book.sourceAvailable ? "Original source" : "No source"} · project ${escapeHtml(String(book.id).slice(0, 8))}' in app
 
 
 def test_library_cover_opens_book_and_shelving_offers_a_safe_handoff() -> None:
     root = Path(__file__).parents[1]
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
     cover_markup = app[app.index('<div class="book-identity">'):app.index('<div class="book-identity">') + 700]
     assert 'data-open-book="${escapeHtml(book.id)}"' in cover_markup
     assert 'data-edit-book="${escapeHtml(book.id)}"' not in cover_markup
@@ -962,8 +962,8 @@ def test_prepared_shelved_book_does_not_enter_expensive_queue() -> None:
 
 def test_library_marks_only_the_global_worker_book_as_running() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert "function bookOwnsActiveWorker(book)" in app
     assert 'if (activity.bookId) return activity.bookId === book.id;' in app
@@ -976,8 +976,8 @@ def test_library_marks_only_the_global_worker_book_as_running() -> None:
 
 def test_library_view_preferences_survive_reload_and_priority_colors_are_semantic() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert 'const libraryViewKey = "bookinator.library-view.v1";' in app
     assert "function saveLibraryViewPreferences()" in app
@@ -1300,7 +1300,7 @@ def test_retry_failed_analysis_is_selective_and_preserves_run_history(tmp_path: 
 
 
 def test_gliner_is_a_visible_elementary_step_before_chapter_reading() -> None:
-    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).resolve().parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     gliner_definition = '{id: "gliner-signals", label: "GLiNER signals"'
     reading_definition = '{id: "chapter-reading", label: "Chapter Reading"'
 
@@ -1564,7 +1564,7 @@ def test_reset_after_development_boundary_preserves_earlier_results_and_clears_l
 
 
 def test_pipeline_exposes_one_book_level_failed_work_recovery_control() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert "function failedAnalysisCount(pipeline)" in app
     assert 'action: "retry-failed"' in app
     assert 'context: "Pipeline recovery"' in app
@@ -1594,7 +1594,7 @@ def test_development_launcher_delegates_to_the_shared_inator_launcher() -> None:
 
 def test_server_exposes_the_installed_commons_ui_through_a_narrow_static_facade() -> None:
     handler = server.BookinatorHandler.__new__(server.BookinatorHandler)
-    handler.directory = str(server.WEB_ROOT)
+    handler.directory = str(server.APP_ROOT)
 
     assert handler.translate_path("/commons/@inator/ui/index.js") == str(server.COMMONS_UI_ROOT / "index.js")
     assert handler.translate_path("/commons/@inator/ui/product-history.css") == str(server.COMMONS_UI_ROOT / "product-history.css")
@@ -1613,7 +1613,7 @@ def test_pipeline_payload_does_not_resend_manuscript_source_text() -> None:
 
 def test_book_workspace_does_not_rebuild_or_redownload_the_library_while_polling() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
     server = (root / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     pipeline_route = server.split('pipeline_match = re.fullmatch(r"/api/books/', 1)[1].split("super().do_GET()", 1)[0]
 
@@ -2093,8 +2093,8 @@ def test_pipeline_task_pause_is_durable_and_reversible(tmp_path: Path) -> None:
 
 def test_library_ui_has_one_word_sorted_length_column() -> None:
     root = Path(server.__file__).parents[2]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert 'sortButton("length", "Length")' in app
     assert 'if (state.sort.key === "length")' in app
@@ -2105,8 +2105,8 @@ def test_library_ui_has_one_word_sorted_length_column() -> None:
 
 def test_book_icon_text_uses_contrast_aware_foreground() -> None:
     root = Path(server.__file__).parents[2]
-    icon_picker = (root / "web" / "icon-picker.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    icon_picker = (root / "src" / "icon-picker.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert "export function iconTextAppearance(background)" in icon_picker
     assert 'element.style.setProperty("--icon-foreground", textAppearance.foreground)' in icon_picker
@@ -2167,7 +2167,7 @@ def test_pending_whole_book_summary_keeps_last_completed_synthesis_visible() -> 
 
 
 def test_inferences_are_pipeline_owned_and_have_a_timing_view() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'timingChartControl("inferences")' in app
     assert 'view === "inferences"' in app
     assert 'const statusLabel = ({ready: "Ready", pending: "Queued", blocked: "Waiting", partial: "Partial"})[status]' in app
@@ -2182,10 +2182,10 @@ def test_public_docs_exist_inside_the_docs_root() -> None:
 
 def test_roadmap_uses_shared_history_while_preserving_detailed_product_candidates() -> None:
     root = Path(__file__).parents[1]
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    pages = (root / "web" / "pages.js").read_text(encoding="utf-8")
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    pages = (root / "src" / "pages.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'data-inator-product-footer' in page
     assert "export const roadmapItems" in pages
     assert "Sharper summary and dossier questions" in pages
@@ -2214,8 +2214,8 @@ def test_roadmap_uses_shared_history_while_preserving_detailed_product_candidate
 
 def test_model_free_report_is_wired_to_a_privacy_safe_manifest() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    exporter = (root / "web" / "portable-report.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    exporter = (root / "src" / "portable-report.js").read_text(encoding="utf-8")
     assert 'from "./portable-report.js?v=' in app
     assert 'from "./smell-labels.js?v=canonical-labels-170"' in exporter
     assert "data-download-portable-report" in app
@@ -2232,7 +2232,7 @@ def test_model_free_report_is_wired_to_a_privacy_safe_manifest() -> None:
     if not node:
         pytest.skip("Node is required for the portable report behavior test")
     script = r'''
-      import {auditPortableReport, buildPortableReportManifest, buildPortableReportHtml, reportExportFilename} from "./web/portable-report.js";
+      import {auditPortableReport, buildPortableReportManifest, buildPortableReportHtml, reportExportFilename} from "./src/portable-report.js";
       const pipeline = {
         chapters: [{sequence: 1, title: "CHAPTER 1", text: "SECRET SOURCE", markdown: "# SECRET", summary: "Safe summary", status: "complete", wordCount: 100, durationSeconds: 60, emotionStatus: "complete", emotion: {distribution: {fear: .62, disgust: .21}}, tagStatus: "complete", tag: {signals: [{id: "third-limited", family: "perspective", score: .91}, {id: "horror", family: "genre", score: .82}]}, llmReviewStatus: "complete", llmReview: {editorialVerdict: "no_material_concerns", editorialSummary: "A confident opening.", editorialStrengths: ["Atmosphere"], commercialStrengths: ["Clear audience"], commercialRisks: ["Niche appeal"], likelyReaders: ["Gothic readers"], dimensions: {narrative_engagement: {applicable: true, score: 4}}},
           smell: {candidates: [{id: "finding", sentence: "Selected sentence", userStatus: "reported", judgment: {issue: "Concern", reason: "Reason", severity: "medium"}}]} }],
@@ -2282,7 +2282,7 @@ def test_model_free_report_is_wired_to_a_privacy_safe_manifest() -> None:
 
 
 def test_confirmation_dialog_enter_activates_its_default_action() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'event.key !== "Enter"' in app
     assert 'installDefaultDialogAction(backdrop, approve)' in app
     assert "accept.focus();" in app
@@ -2305,7 +2305,7 @@ def test_editorial_question_and_title_research_priorities_are_documented() -> No
 
 
 def test_workspace_groups_end_with_their_human_judgment_views() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     tabs = source.split("const workspaceTabs = [", 1)[1].split("];", 1)[0]
     expected = ["pipeline", "chapters", "summaries", "dossiers", "emotions", "tags", "smells", "context", "llm-review", "inferences", "report", "overview", "chapter-length", "reviewer-report", "smell-report", "emotion-map", "tag-report", "connections", "questions", "reviewer", "assessment"]
     positions = [tabs.index(f'{{id: "{tab}"') for tab in expected]
@@ -2313,7 +2313,7 @@ def test_workspace_groups_end_with_their_human_judgment_views() -> None:
     assert tabs.lstrip().startswith('{id: "identity", label: "Identity"},')
     assert tabs.rstrip().endswith('{id: "assessment", label: "Assessment"},')
     assert '{id: "report", label: "Share"}' in tabs
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'const workspaceGroups = {' in source
     assert 'analysis: ["pipeline", "chapters", "summaries", "dossiers", "emotions", "tags", "smells", "context", "llm-review", "inferences", "reviewer"]' in source
     assert 'explore: ["report", "overview", "chapter-length", "reviewer-report", "emotion-map", "tag-report", "connections", "questions", "smell-report", "llm-review-report", "assessment"]' in source
@@ -2334,9 +2334,9 @@ def test_workspace_groups_end_with_their_human_judgment_views() -> None:
 
 def test_identity_form_orders_icon_and_priority_before_llm_review() -> None:
     root = Path(__file__).parents[1]
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     form = page.split('<form id="book-form">', 1)[1].split("</form>", 1)[0]
 
     positions = [
@@ -2363,9 +2363,9 @@ def test_identity_form_orders_icon_and_priority_before_llm_review() -> None:
 
 def test_embedded_identity_form_autosaves_but_creation_dialog_still_submits() -> None:
     root = Path(__file__).parents[1]
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert 'id="identity-save-state" role="status" aria-live="polite"' in page
     assert "function scheduleIdentityAutosave()" in app
@@ -2436,9 +2436,9 @@ def test_save_book_rejects_duplicate_titles_but_allows_same_book_updates(tmp_pat
 
 def test_new_book_action_waits_for_identified_title_and_author() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'const ready = state.editingBookId ? hasTitle : Boolean(state.draftManuscriptId && hasTitle && hasAuthor);' in app
     assert 'state.draftManuscriptId = null;\n  titleInput.value = "";\n  authorInput.value = "";\n  refreshBookSaveState();' in app
     assert 'id="save-book" type="submit" disabled' in page
@@ -2446,7 +2446,7 @@ def test_new_book_action_waits_for_identified_title_and_author() -> None:
 
 
 def test_new_manuscript_title_collision_prompts_before_resubmitting() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
 
     assert 'response.status === 409 && result.code === "title-collision" && !existing' in app
     assert 'context: "Duplicate book title"' in app
@@ -2461,8 +2461,8 @@ def test_new_manuscript_title_collision_prompts_before_resubmitting() -> None:
 
 def test_questions_and_payoffs_is_a_sortable_queued_workspace() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     server = (root / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     assert "Questions & payoffs" in app
     for key in ("status", "source", "resolution", "delta"):
@@ -2593,14 +2593,14 @@ def test_legacy_question_tracker_does_not_mask_richer_question_inputs() -> None:
 
 
 def test_incomplete_dossiers_rely_on_the_automatic_queue() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'pipelineControl({action: "dossiers", label: "Finish"' not in app
     assert 'title: "Finish the remaining dossiers before returning to other analysis"' not in app
     assert 'resetCategoryControl("dossier-restart", "dossier")' in app
 
 
 def test_analysis_categories_expose_development_reset_all_controls() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'label: "Reset all"' in app
     assert 'data-development-control' in app
     assert 'const developmentControlsEnabled = true' in app
@@ -2613,7 +2613,7 @@ def test_analysis_categories_expose_development_reset_all_controls() -> None:
 
 
 def test_summary_and_dossier_tabs_require_their_whole_book_entries() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'summaries: (stageComplete("summaries") || chapterSummariesComplete) && wholeSummaryComplete' in app
     assert 'dossiers: (stageComplete("dossiers") || chunkDossiersComplete) && wholeDossierComplete' in app
     assert 'pipeline.wholeBookSummary?.status === "complete"' in app
@@ -2623,7 +2623,7 @@ def test_summary_and_dossier_tabs_require_their_whole_book_entries() -> None:
 
 
 def test_whole_book_dossier_discloses_the_reconciled_memory() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert "function wholeBookDossierMarkup(dossier)" in app
     for field in ("facts", "events", "entities", "locations", "current_times", "questions", "promises", "timeline_observations", "contradictions"):
         assert f"dossier.{field}" in app
@@ -2631,7 +2631,7 @@ def test_whole_book_dossier_discloses_the_reconciled_memory() -> None:
 
 
 def test_whole_book_summary_and_dossier_statuses_share_run_details() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     row = app[app.index("function wholeBookAnalysisRow"):app.index("function chapterMapRow")]
     assert 'const inspectable = ["chapters", "summaries", "dossiers", "llm-review"].includes(kind)' in row
     assert 'analysisStatusControl({' in row
@@ -2682,8 +2682,8 @@ def test_hydrated_dossier_cannot_stay_running_while_tags_are_active() -> None:
 
 def test_book_icon_paste_uses_shared_image_pipeline_without_hijacking_text_fields() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
     assert 'addDialog.addEventListener("paste"' in app
     assert "isTextEditingTarget(event.target)" in app
     assert 'useBookMarkImage(image, "Pasted from clipboard")' in app
@@ -2692,7 +2692,7 @@ def test_book_icon_paste_uses_shared_image_pipeline_without_hijacking_text_field
 
 def test_dossier_time_sections_are_grouped_and_promises_include_reader_contracts() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
     server = (root / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     assert 'label: "Time and chronology"' in app
     assert 'label: "Current scene time"' in app
@@ -2704,8 +2704,8 @@ def test_dossier_time_sections_are_grouped_and_promises_include_reader_contracts
 
 def test_connections_workspace_uses_dry_inspectable_entity_location_and_time_indices() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'function dossierIndexGroups(pipeline, field, book = {})' in app
     assert 'dossierIndexGroups(pipeline, "entities", book)' in app
     assert 'dossierIndexGroups(pipeline, "locations", book)' in app
@@ -2777,15 +2777,15 @@ def test_connections_workspace_uses_dry_inspectable_entity_location_and_time_ind
 
 def test_time_index_filters_non_temporal_timeline_commentary_without_rewriting_dossiers() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    index_logic = (root / "web" / "dossier-index.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    index_logic = (root / "src" / "dossier-index.js").read_text(encoding="utf-8")
     assert 'field === "timeline_observations" && !isTemporalDossierObservation(value)' in app
     assert "export function isTemporalDossierObservation(value)" in index_logic
     assert "Dossiers remain untouched" in index_logic
 
 
 def test_workspace_headings_share_collapse_with_explicit_report_exceptions() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert "function collapseAnalysisControl()" in app
     assert 'data-collapse-analysis' in app
     section_heading = app.split("function workspaceSectionHeading", 1)[1].split("function taskProgress", 1)[0]
@@ -2801,8 +2801,8 @@ def test_workspace_headings_share_collapse_with_explicit_report_exceptions() -> 
 
 def test_reviewer_notes_are_active_or_archived_without_author_acceptance_ui() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    portable = (root / "web" / "portable-report.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    portable = (root / "src" / "portable-report.js").read_text(encoding="utf-8")
 
     reviewer_ui = app.split("function reviewerWorkspaceMarkup", 1)[1].split("function reviewerReportMarkup", 1)[0]
     reviewer_report = app.split("function reviewerReportMarkup", 1)[1].split("const shareSectionDefinitions", 1)[0]
@@ -2821,8 +2821,8 @@ def test_reviewer_notes_are_active_or_archived_without_author_acceptance_ui() ->
 
 def test_explore_reports_are_separate_from_inference_jobs_and_export_shareable_artifacts() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     inference_branch = app.split('} else if (activeTab === "inferences") {', 1)[1].split('} else if (activeTab === "summaries") {', 1)[0]
     assert "dossierBookIndexMarkup" not in inference_branch
     assert "questionTrackerTable" not in inference_branch
@@ -2901,7 +2901,7 @@ def test_explore_reports_are_separate_from_inference_jobs_and_export_shareable_a
 
 
 def test_every_implemented_explore_report_has_html_and_pdf_selectors() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     definitions = app.split("const shareSectionDefinitions = [", 1)[1].split("];", 1)[0]
     expected = {
         "overview", "chapter-length", "reviewer-report", "emotion-map", "tag-report",
@@ -2918,8 +2918,8 @@ def test_every_implemented_explore_report_has_html_and_pdf_selectors() -> None:
 
 def test_workspace_task_explanations_use_shared_rich_icon_tooltip() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'data-tooltip-heading="${escapeHtml(explanationTitle)}"' in app
     assert 'workspaceSectionHeading({icon, title, subtitle, actions, metrics, explanationTitle, explanation, collapse})' in app
     assert 'tooltip.classList.toggle("rich", Boolean(heading))' in app
@@ -2930,7 +2930,7 @@ def test_workspace_task_explanations_use_shared_rich_icon_tooltip() -> None:
 
 
 def test_chapter_source_control_lives_with_source_metrics_not_identity() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     disclosure = app.split("function analysisDisclosure", 1)[1].split("function openAnalysisDetails", 1)[0]
     chapter_map = app.split("function chapterMapRow", 1)[1].split("function analysisDisclosure", 1)[0]
     assert "function chapterSourceMetadata" in app
@@ -2941,9 +2941,9 @@ def test_chapter_source_control_lives_with_source_metrics_not_identity() -> None
 
 def test_machine_is_low_frequency_workspace_navigation() -> None:
     root = Path(__file__).parents[1]
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    shell = (root / "web" / "product-shell.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    shell = (root / "src" / "product-shell.js").read_text(encoding="utf-8")
     assert 'data-inator-product-header' in page
     assert "mountInatorAppShell" in shell
     assert "createWorkspaceCapabilityRegistry" in shell
@@ -2982,8 +2982,8 @@ def test_machine_is_low_frequency_workspace_navigation() -> None:
 
 def test_workspace_identity_and_shelf_separators_follow_primary_navigation() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert '<p class="workspace-page-title">Analysis</p>' in app
     assert "Book workspace</p>" not in app
     assert 'if (["pipeline", "report"].includes(tab.id)) classes.push("shelf-divider-after")' in app
@@ -2991,7 +2991,7 @@ def test_workspace_identity_and_shelf_separators_follow_primary_navigation() -> 
 
 
 def test_chapter_boundary_demotion_is_guarded_and_persistently_reversible() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert "Not a chapter…" in app
     assert "This does not delete any manuscript text." in app
     assert "function chapterBoundaryRecoveryMarkup(pipeline)" in app
@@ -3000,8 +3000,8 @@ def test_chapter_boundary_demotion_is_guarded_and_persistently_reversible() -> N
 
 
 def test_chapter_inspection_is_embedded_in_the_whole_book_disclosure() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'label: "Map"' in app
     assert 'subtitle: "Organized"' in app
     assert 'chapterHeadingInspectionMarkup(pipeline, book)' in app
@@ -3099,7 +3099,7 @@ def test_global_pipeline_does_not_load_books_while_holding_queue_lock() -> None:
 
 
 def test_pipeline_steps_own_their_inspectable_run_records() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'data-show-stage-details' in source
     assert 'pipeline-stage-details-template' in source
     assert '["Processing time", liveDurationMarkup' in source
@@ -3110,8 +3110,8 @@ def test_pipeline_steps_own_their_inspectable_run_records() -> None:
 
 def test_pipeline_ledger_exposes_elementary_work_in_chapter_order() -> None:
     root = Path(__file__).parents[1]
-    source = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    source = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     ledger = source.split("function chapterPipelineLedger", 1)[1].split("function openPipelineStageDetails", 1)[0]
 
     assert 'id: "summaries", label: "Summary"' in ledger
@@ -3134,8 +3134,8 @@ def test_pipeline_ledger_exposes_elementary_work_in_chapter_order() -> None:
 
 def test_pipeline_ledger_major_regions_are_collapsible_and_keep_status_visible() -> None:
     root = Path(__file__).parents[1]
-    source = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    source = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert 'function pipelineLedgerDisclosure' in source
     assert 'key: "pipeline-section-intake"' in source
@@ -3160,7 +3160,7 @@ def test_pipeline_ledger_major_regions_are_collapsible_and_keep_status_visible()
 
 
 def test_source_document_stage_shows_format_size_and_download_control() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'function formatByteSize(bytes)' in source
     assert 'class="pipeline-source-facts"' in source
     assert 'class="pipeline-source-download"' in source
@@ -3192,8 +3192,8 @@ def test_original_source_document_is_preserved_with_download_metadata() -> None:
 
 
 def test_whole_book_rows_are_special_reusable_analysis_rows() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'function wholeBookAnalysisRow' in source
     assert 'class="analysis-row chapter-summary whole-book-analysis' in source
     assert 'wholeBookAnalysisRow(pipeline, "chapters", book)' in source
@@ -3213,7 +3213,7 @@ def test_whole_book_rows_are_special_reusable_analysis_rows() -> None:
 
 
 def test_summary_workspace_does_not_render_structured_activity_as_text() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     task_view = source.split("function workspaceTaskView", 1)[1].split("function provisionalAnalysisNotice", 1)[0]
     summary_view = source.split('const summaryTitle = "Chapter summaries"', 1)[1].split("} else {", 1)[0]
     assert "activity =" not in task_view
@@ -3222,7 +3222,7 @@ def test_summary_workspace_does_not_render_structured_activity_as_text() -> None
 
 
 def test_chapter_map_overview_contains_names_and_pattern_while_chapter_rows_stay_outside() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'label: "Map"' in source
     assert 'subtitle: "Organized"' in source
     inspection = source.split("function chapterHeadingInspectionMarkup", 1)[1].split("function chapterBoundaryRecoveryMarkup", 1)[0]
@@ -3234,7 +3234,7 @@ def test_chapter_map_overview_contains_names_and_pattern_while_chapter_rows_stay
 
 
 def test_chapter_map_rows_have_authoritative_status_badges() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'const mapStatus = frontMatter ? "Excluded"' in source
     assert 'pipeline.chapterMapApproved ? "Approved" : "Proposed"' in source
     assert 'const mapReady = chapterMapReadyForReview(pipeline)' in source
@@ -3250,8 +3250,8 @@ def test_chapter_map_rows_have_authoritative_status_badges() -> None:
 
 
 def test_analysis_rows_share_the_three_column_layout_contract() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'function analysisRowColumns({identity, metadata = "", reporting = ""})' in source
     assert source.count("analysisRowColumns({identity, metadata:") >= 3
     assert 'class="analysis-row-columns"' in source
@@ -3263,8 +3263,8 @@ def test_analysis_rows_share_the_three_column_layout_contract() -> None:
 
 def test_running_details_show_live_duration_and_restart_controls() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
     server = (root / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     assert "function liveDurationMarkup" in app
     assert "data-live-duration" in app
@@ -3461,7 +3461,7 @@ def test_markdown_roman_chapter_numbers_with_titles_form_a_spine() -> None:
 
 
 def test_leaving_book_workspace_invalidates_delayed_analysis_refresh() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert "function leaveBookWorkspace()" in app
     assert "state.workspaceRequestId += 1;" in app
     assert 'else if (collection === "books" || !articlePages[collection]) showBooksPage();' in app
@@ -3554,7 +3554,7 @@ def test_pipeline_dependency_graph_cascades_structure_but_not_summary_siblings()
 
 
 def test_timing_charts_cover_preparation_rollups_and_optional_review_work() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     timing = app.split("function timingChartRows", 1)[1].split("function openTimingChart", 1)[0]
     server = (Path(__file__).parents[1] / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     prepare = server.split("def prepare_manuscript_pipeline", 1)[1].split("def reset_summary_run", 1)[0]
@@ -3574,7 +3574,7 @@ def test_timing_charts_cover_preparation_rollups_and_optional_review_work() -> N
 
 
 def test_timing_chart_can_toggle_between_pipeline_and_elapsed_order() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     chart = app.split("function openTimingChart", 1)[1].split("function workspaceTaskView", 1)[0]
 
     assert "data-timing-order" in chart
@@ -3585,7 +3585,7 @@ def test_timing_chart_can_toggle_between_pipeline_and_elapsed_order() -> None:
 
 
 def test_timing_chart_uses_fallback_durations_and_standard_information_dialog() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     duration = app.split("function pipelineStageDuration", 1)[1].split("function pipelineStageStatus", 1)[0]
     chart = app.split("function openTimingChart", 1)[1].split("function workspaceTaskView", 1)[0]
     information = app.split("function showInformationDialog", 1)[1].split("function installDefaultDialogAction", 1)[0]
@@ -4175,7 +4175,7 @@ def test_dossier_refresh_source_updates_pipeline_index_and_chunk_artifact() -> N
 
 
 def test_refresh_ui_immediately_relabels_an_accepted_failure_as_waiting() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'const statusLabel = label || (normalized === "pending" ? "Waiting" : signalLabel(normalized));' in app
     assert "function markAnalysisResultWaiting(kind, id)" in app
     assert "markAnalysisResultWaiting(kind, id);" in app
@@ -4203,7 +4203,7 @@ def test_front_matter_dossier_cannot_turn_titles_into_story_obligations() -> Non
 
 
 def test_front_matter_signal_views_explain_why_they_are_not_scored() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     server = (Path(__file__).parents[1] / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     assert "Front matter is structural evidence, not narrative prose." in app
     assert "front-matter-not-applicable" in server
@@ -4212,8 +4212,8 @@ def test_front_matter_signal_views_explain_why_they_are_not_scored() -> None:
 
 def test_emotion_peaks_open_exact_classifier_windows_in_chapter_source() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert "function emotionPeakSourceMarkup(chapter, focus)" in app
     assert 'data-view-emotion-peak' in app
     assert 'segment.characterStart' in app
@@ -4232,8 +4232,8 @@ def test_emotion_peaks_open_exact_classifier_windows_in_chapter_source() -> None
 
 def test_chapter_tags_are_grouped_into_functional_hunks() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert "Atmosphere & meaning" in app
     assert "Structure & perspective" in app
     assert "Experience & momentum" in app
@@ -4255,8 +4255,8 @@ def test_chapter_tags_are_grouped_into_functional_hunks() -> None:
 
 
 def test_smell_rollup_collapses_detector_aliases_into_editor_facing_families() -> None:
-    normalizer = (Path(__file__).parents[1] / "web" / "smell-labels.js").read_text(encoding="utf-8")
-    lexical = (Path(__file__).parents[1] / "web" / "lexical-labels.js").read_text(encoding="utf-8")
+    normalizer = (Path(__file__).parents[1] / "src" / "smell-labels.js").read_text(encoding="utf-8")
+    lexical = (Path(__file__).parents[1] / "src" / "lexical-labels.js").read_text(encoding="utf-8")
     for alias in ("clause count", "clause load", "clause load proxy", "clause complexity", "complexity", "nested structure", "many clauses"):
         assert f'["{alias}", "Complex sentence"]' in normalizer
     for alias in ("length", "sentence length", "long sentence", "very long sentence"):
@@ -4266,14 +4266,14 @@ def test_smell_rollup_collapses_detector_aliases_into_editor_facing_families() -
     assert 'export function smellIssueLabels(item = {})' in normalizer
     assert 'split(/[,;|]+/)' in normalizer
     assert 'join(" · ")' in normalizer
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     assert 'smellIssueLabels(item).forEach((label) =>' in app
     assert 'totalFindings: findings.length' in app
 
 
 def test_smells_share_one_sort_control_and_open_the_annotation_reader() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'function smellSortControlMarkup()' in app
     assert 'data-smell-sort="position"' in app
     assert 'data-smell-sort="type"' in app
@@ -4287,11 +4287,11 @@ def test_smells_share_one_sort_control_and_open_the_annotation_reader() -> None:
 def test_app_modularization_is_an_urgent_documented_task() -> None:
     todo = (Path(__file__).parents[1] / "docs" / "TODO.md").read_text(encoding="utf-8")
     assert "### Urgent: split the browser application into owned modules" in todo
-    assert "`web/app.js` has outgrown safe single-file maintenance" in todo
+    assert "`src/app.js` has outgrown safe single-file maintenance" in todo
 
 
 def test_emotion_presentation_keeps_full_map_but_filters_low_signal_icons() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     emotion_view = app.split("function emotionResultMarkup", 1)[1].split("function tagResultMarkup", 1)[0]
     overlays = app.split("function chapterTextOverlays", 1)[1].split("function annotatedChapterTextMarkup", 1)[0]
     assert "const EMOTION_DISTRIBUTION_DISPLAY_THRESHOLD = .05" in app
@@ -4316,7 +4316,7 @@ def test_emotion_presentation_keeps_full_map_but_filters_low_signal_icons() -> N
     assert "data-analysis-neutral" in app
     assert 'emotion-${escapeHtml(region.label)}' in app
     assert 'data-emotion-region-score=' in app
-    assert ".show-emotion-regions .emotion-region:not(.below-cutoff)" in (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    assert ".show-emotion-regions .emotion-region:not(.below-cutoff)" in (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'copy?.classList.toggle("show-emotion-regions", emotion.enabled)' in app
     assert 'data-emotion-peak-excerpt' in emotion_view
     assert "function hydrateEmotionPeakPreview(button, bookId)" in app
@@ -4324,9 +4324,9 @@ def test_emotion_presentation_keeps_full_map_but_filters_low_signal_icons() -> N
 
 def test_chapter_reader_groups_analysis_and_text_controls_at_the_top() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
-    page = (root / "web" / "index.html").read_text(encoding="utf-8")
-    styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
+    page = (root / "src" / "index.html").read_text(encoding="utf-8")
+    styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
     assert 'id="chapter-analysis-controls"' in page
     assert 'class="chapter-control-cluster text"' in page
     assert "function chapterAnalysisControlsMarkup" in app
@@ -5378,7 +5378,7 @@ def test_optional_review_pipeline_alternates_review_then_context_by_chapter() ->
 
 
 def test_context_and_llm_review_reuse_standard_analysis_rows() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
     renderer = source.split("function optionalChapterRows", 1)[1].split("function llmReviewReportMarkup", 1)[0]
 
     assert "return analysisDisclosure({" in renderer
@@ -5435,7 +5435,7 @@ def test_completed_llm_review_can_be_refreshed_through_standard_analysis_contrac
 
 
 def test_old_server_refresh_rejection_explains_that_a_restart_is_needed() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
 
     assert 'staleOptionalReviewServer = ["context", "llm-review"].includes(kind)' in source
     assert "This running server predates review refresh" in source
@@ -5469,8 +5469,8 @@ def test_refreshing_context_invalidates_only_reviews_that_consumed_it(tmp_path: 
 
 
 def test_whole_book_rollups_reuse_standard_analysis_status_control() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
     renderer = source.split("function wholeBookAnalysisRow", 1)[1].split("function chapterMapRow", 1)[0]
 
     assert "analysisStatusControl({" in renderer
@@ -5957,8 +5957,8 @@ def test_llm_review_normalizes_an_empty_proposal_set_to_a_direct_clear_verdict()
 
 
 def test_llm_review_ui_renders_formal_verdict_and_strengths() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert "review.editorialSummary || review.chapterAssessment" in source
     assert "Strengths worth preserving" in source
@@ -5981,7 +5981,7 @@ def test_llm_review_ui_renders_formal_verdict_and_strengths() -> None:
 
 
 def test_tag_ui_explains_fixed_vocabulary_and_disambiguates_tension() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
 
     assert 'tension: "Narrative tension"' in source
     assert 'tense: "Tense atmosphere"' in source
@@ -6096,9 +6096,9 @@ def test_optional_analysis_artifacts_expose_exact_saved_input_and_output(tmp_pat
 
 
 def test_run_inspector_is_shared_by_standard_status_dialogs() -> None:
-    source = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
-    index = (Path(__file__).parents[1] / "web" / "index.html").read_text(encoding="utf-8")
-    styles = (Path(__file__).parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
+    index = (Path(__file__).parents[1] / "src" / "index.html").read_text(encoding="utf-8")
+    styles = (Path(__file__).parents[1] / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert "configureRunInspector" in source
     assert "showRunInspectorView" in source
@@ -6324,7 +6324,7 @@ def test_machine_review_lead_categories_can_be_corrected_without_creating_annota
 
 def test_soft_lead_promotion_has_an_explicit_server_capability_handshake() -> None:
     root = Path(__file__).parents[1]
-    app = (root / "web" / "app.js").read_text(encoding="utf-8")
+    app = (root / "src" / "app.js").read_text(encoding="utf-8")
 
     assert API_FEATURES["llmReviewCandidatePromotion"] == 2
     assert 'requireChapterMapApi("llmReviewCandidatePromotion"' in app
@@ -6471,7 +6471,7 @@ def test_smells_keep_local_candidates_but_do_not_claim_complete_when_editor_revi
 
 
 def test_pipeline_workspace_revalidates_cached_status_when_live_work_starts() -> None:
-    app = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    app = (Path(__file__).parents[1] / "src" / "app.js").read_text(encoding="utf-8")
 
     assert 'const cachedPipeline = tab !== "pipeline"' in app
     assert "function workspacePipelineNeedsPolling(bookId, pipeline)" in app
