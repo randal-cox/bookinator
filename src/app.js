@@ -1,5 +1,5 @@
 import { articlePages } from "./pages.js";
-import { createAtomicPipelineWorkspace, createProductHistoryTabs, normalizeProductAboutTab } from "/commons/@inator/ui/index.js";
+import { createAtomicPipelineWorkspace, createProductHistoryTabs, createWorkspaceCapabilityRegistry, createWorkspaceHost, machineWorkspaceCapability, modelsWorkspaceCapability, normalizeProductAboutTab } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
 import { createBookinatorPipelineControlIntent, createBookinatorPipelineSnapshot } from "./pipeline-adapter.js?v=commons-pipeline-203";
 import { createBookinatorAboutPage } from "./product-information.js?v=about-route-200";
@@ -447,18 +447,11 @@ function openPendingDiagnostic(bookId, activeTab, body) {
 
 function updateLocalQueueStatus() {
   const pipeline = state.globalPipeline || {};
-  const running = Boolean(pipeline.running);
-  const waiting = Number(pipeline.waitingBooks || 0);
-  const panelStatus = document.querySelector("#models-queue-status");
-  const activity = resolvedActivity();
-  if (panelStatus) {
-    panelStatus.classList.toggle("running", running);
-    panelStatus.querySelector("span").textContent = running
-      ? String(activity?.text || "Bookinator is alive · local model work is in progress")
-      : waiting
-        ? `${waiting} ${waiting === 1 ? "book is" : "books are"} waiting for local model work.`
-        : "The local model queue is quiet.";
-  }
+  return {
+    running: Boolean(pipeline.running),
+    waiting: Number(pipeline.waitingBooks || 0),
+    activity: resolvedActivity(),
+  };
 }
 
 function updateAnalysisNavigation() {
@@ -1783,21 +1776,6 @@ const setupInstructions = {
   ollama: ["Download and install Ollama from https://ollama.com/download for this operating system.", "Start Ollama and leave its local service running.", "Return to Models; Bookinator will verify the local API and then offer only models appropriate for this machine."],
 };
 
-function setupInstructionsMarkup(key) {
-  const steps = setupInstructions[key];
-  if (!steps) return "";
-  const external = key === "ollama" ? '<a class="component-install-link" href="https://ollama.com/download" target="_blank" rel="noreferrer">Open Ollama download ↗</a>' : key === "homebrew" ? '<a class="component-install-link" href="https://brew.sh" target="_blank" rel="noreferrer">Open Homebrew ↗</a>' : "";
-  return `<button class="component-instructions" type="button" data-setup-instructions="${escapeHtml(key)}" aria-expanded="false">Show instructions</button><div class="setup-instructions" hidden><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${external}</div>`;
-}
-
-function readinessCheckMarkup(check) {
-  const status = check.status || "warning";
-  const mark = status === "ready" ? "✓" : status === "blocked" ? "!" : status === "repairable" ? "↓" : "!";
-  const action = check.action === "install-pdf-reader" ? '<button class="component-install" id="install-pdf-reader" type="button">Install</button>' : check.action === "update-ollama" ? '<button class="component-install" id="update-ollama" type="button">Install or update</button>' : "";
-  const instructions = setupInstructionsMarkup(check.instructions);
-  return `<div class="system-check ${escapeHtml(status)}" data-readiness-check="${escapeHtml(check.id || "")}"><b aria-label="${status === "blocked" ? "Blocking problem" : status === "ready" ? "Ready" : "Needs attention"}">${mark}</b><div><strong>${escapeHtml(check.label || "Readiness check")} · ${escapeHtml(check.value || "")}</strong><small>${escapeHtml(check.detail || "")}</small>${action}${instructions}</div></div>`;
-}
-
 function legacyMachineChecks(system) {
   const memoryGiB = Number(system.memoryGiB || 0);
   const pythonVersion = String(system.python || "");
@@ -1813,258 +1791,161 @@ function legacyMachineChecks(system) {
   ];
 }
 
-function wireSetupInstructions(root = document) {
-  root.querySelectorAll("[data-setup-instructions]").forEach((button) => button.addEventListener("click", () => {
-    const instructions = button.nextElementSibling;
-    const opening = instructions.hidden;
-    instructions.hidden = !opening;
-    button.setAttribute("aria-expanded", String(opening));
-    button.textContent = opening ? "Hide instructions" : "Show instructions";
-  }));
-}
-
 function leaveBookWorkspace() {
   clearTimeout(state.pipelineTimer);
   state.pipelineTimer = null;
   state.workspaceRequestId += 1;
 }
 
+let systemWorkspaceHost = null;
+
+function bookMachineManifest(system) {
+  const observedAt = new Date().toISOString();
+  const categories = {
+    "operating-system": "Compatibility",
+    memory: "Capacity",
+    storage: "Capacity",
+  };
+  const checks = (system.readiness?.checks?.length ? system.readiness.checks : legacyMachineChecks(system)).map((check) => ({
+    id: check.id,
+    category: categories[check.id] || "Local components",
+    label: check.label,
+    required: check.status === "blocked",
+    status: check.status,
+    observedValue: check.value,
+    requirement: null,
+    explanation: check.detail,
+    observedAt,
+    freshness: {maxAgeSeconds: 60},
+    repairAction: check.action || check.instructions ? {id: check.action || check.instructions, label: check.action ? "Repair" : "Instructions"} : null,
+    bookinator: {action: check.action || "", instructions: check.instructions || ""},
+  }));
+  return {
+    schemaVersion: "inator-readiness.0.1-draft",
+    policy: {id: "bookinator-local-reading", version: "1"},
+    generatedAt: observedAt,
+    machine: {platform: system.platform || "unknown", release: "", architecture: system.architecture || "unknown"},
+    status: system.readiness?.status || (checks.some((check) => check.status === "blocked") ? "blocked" : "warning"),
+    checks,
+  };
+}
+
+function bookModelsModel(system) {
+  const installed = system.ollama?.models || [];
+  const roles = Object.entries(system.models?.roleLabels || {}).map(([id, label]) => ({
+    id,
+    label,
+    purpose: id === "primary" ? "Primary chapter reading, whole-book synthesis, and editorial analysis." : "Fast manuscript intake and inexpensive utilities.",
+    requiredCapabilities: ["chat", "structured-output"],
+    preferredFamilies: ["qwen"],
+    assignedModelId: system.models?.roles?.[id] || null,
+    compatibleModelIds: installed,
+  }));
+  const catalog = (system.models?.catalog || []).map((item) => ({
+    providerId: "ollama",
+    modelId: item.tag,
+    label: item.label,
+    purpose: item.use,
+    sizeBytes: Number(item.sizeGb) ? Number(item.sizeGb) * 2 ** 30 : null,
+    installed: installed.includes(item.tag),
+    sourceUrl: item.hf || "",
+  }));
+  return {
+    schemaVersion: "inator-model-workspace.0.2-draft",
+    provider: {
+      providerId: "ollama", providerVersion: system.ollama?.version || "unknown", location: "local",
+      operations: ["inventory", "install", "remove", "invoke"], features: {structuredOutput: true, streaming: true, cancellation: true, unload: false},
+      installed: system.ollama?.installed ?? null, running: system.ollama?.running ?? false, apiReachable: system.ollama?.running ?? false,
+      inferenceVerified: null, checkedAt: new Date().toISOString(), diagnostic: null,
+    },
+    inventory: installed.map((modelId) => ({providerId: "ollama", modelId, label: modelId, revision: null, digest: null, sizeBytes: catalog.find((item) => item.modelId === modelId)?.sizeBytes || null, parameters: null, quantization: null, contextTokens: null, provenance: null, installed: true, loaded: false, families: [modelId.split(":", 1)[0]], capabilities: ["chat", "structured-output"]})),
+    roles,
+    catalog,
+    components: [
+      {id: "gliner", label: "GLiNER entity specialist", modelId: system.glinerModel?.modelId, value: system.glinerModel?.provider || "Isolated Python", status: system.glinerModel?.ready ? "ready" : "warning", detail: system.glinerModel?.ready ? "Cached locally and ready for entity and classification work." : "The isolated runtime or pinned checkpoint needs attention."},
+      {id: "emotion", label: "Emotion classifier", modelId: system.emotionModel?.modelId, value: "Isolated Python", status: system.emotionModel?.ready ? "ready" : "warning", detail: system.emotionModel?.ready ? "Cached locally and ready for passage-level emotion scoring." : "The local runtime or pinned model needs installing."},
+    ],
+    hardwareAdvice: `${system.memoryGiB || "Unknown"} GB of unified memory. Use ${system.models?.roleRecommendations?.primary || "the recommended primary reader"} for deep reading and ${system.models?.roleRecommendations?.fast || "the assigned fast model"} for intake and utilities.`,
+    queue: null,
+  };
+}
+
+async function inspectBookSystem() {
+  const response = await fetch("/api/system", {cache: "no-store"});
+  const system = await response.json();
+  if (!response.ok) throw new Error(system.error || "Bookinator could not inspect this computer.");
+  return {system, machine: bookMachineManifest(system), models: bookModelsModel(system)};
+}
+
+async function handleBookMachineRepair(check) {
+  const action = check.bookinator?.action;
+  if (!action) {
+    const steps = setupInstructions[check.bookinator?.instructions] || [];
+    await confirmAction({context: "Local setup", title: check.label, message: steps.join(" ") || check.explanation, acceptLabel: "Close"});
+    return;
+  }
+  if (action === "update-ollama") {
+    const approved = await confirmAction({context: "Local dependency", title: "Install or update Ollama?", message: "Bookinator will ask Homebrew to install the current Ollama release. Existing models and completed analysis remain in place.", acceptLabel: "Install Ollama"});
+    if (!approved) return;
+    const response = await fetch("/api/setup/ollama", {method: "POST"}); const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Ollama could not be updated.");
+  } else if (action === "install-pdf-reader") {
+    const response = await fetch("/api/setup/pdf-reader", {method: "POST"}); const result = await response.json();
+    if (!response.ok) throw new Error(result.message || "The document reader could not be installed.");
+  }
+  await openSystemPanel("machine");
+}
+
+async function handleBookModelAction(intent, snapshot) {
+  if (intent.action === "inspect-model") {
+    const item = snapshot.models.catalog.find((candidate) => candidate.modelId === intent.modelId) || snapshot.models.inventory.find((candidate) => candidate.modelId === intent.modelId);
+    await confirmAction({context: "Local model", title: item?.label || intent.modelId, message: item?.purpose || `${intent.modelId} is installed locally through Ollama.`, acceptLabel: "Close"});
+    return;
+  }
+  if (intent.action === "assign-role") {
+    const label = snapshot.models.roles.find((role) => role.id === intent.roleId)?.label || intent.roleId;
+    const approved = await confirmAction({context: "Model assignment", title: `Change ${label}?`, message: intent.modelId ? `Use ${intent.modelId} for ${label.toLowerCase()}?` : `Clear the model assigned to ${label.toLowerCase()}?`, acceptLabel: intent.modelId ? "Assign model" : "Clear assignment"});
+    if (!approved) return;
+    const response = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({role: intent.roleId, model: intent.modelId})}); const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "The model assignment was not saved.");
+  } else if (intent.action === "plan-install") {
+    const item = snapshot.models.catalog.find((candidate) => candidate.modelId === intent.modelId);
+    const approved = await confirmAction({context: "Install local model", title: `Install ${item?.label || intent.modelId}?`, message: `Ollama will download ${intent.modelId}${item?.sizeBytes ? `, approximately ${(item.sizeBytes / 2 ** 30).toFixed(0)} GB` : ""}.`, acceptLabel: "Install model"});
+    if (!approved) return;
+    const response = await fetch("/api/models/pull", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model: intent.modelId})}); const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Ollama could not install that model.");
+  } else if (intent.action === "plan-remove") {
+    const approved = await confirmAction({context: "Remove local model", title: `Uninstall ${intent.modelId}?`, message: "This deletes the model weights from Ollama. Books and completed analysis remain in place.", acceptLabel: "Uninstall model"});
+    if (!approved) return;
+    const response = await fetch("/api/models/delete", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model: intent.modelId})}); const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Ollama could not uninstall that model.");
+  }
+  await openSystemPanel("models");
+}
+
 async function openSystemPanel(panelName) {
   leaveBookWorkspace();
-  document.querySelector("#books-page").hidden = true;
-  document.querySelector("#pipeline-page").hidden = true;
-  document.querySelector("#article-page").hidden = true;
-  document.querySelector("#book-page").hidden = true;
+  for (const id of ["books-page", "pipeline-page", "article-page", "book-page", "workspace-page"]) document.querySelector(`#${id}`).hidden = true;
   document.querySelector("#machine-page").hidden = false;
-  document.querySelector("#workspace-page").hidden = true;
   document.querySelector("#welcome-dialog").hidden = true;
   mountBookinatorShell({active: "machine", selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   updateFooterRoute();
-  const machinePanel = document.querySelector("#machine-panel");
-  const modelsPanel = document.querySelector("#models-panel");
-  const modelsSelected = panelName === "models";
-  machinePanel.hidden = modelsSelected;
-  modelsPanel.hidden = !modelsSelected;
-  document.querySelector("#system-title").textContent = modelsSelected ? "Models" : "Machine";
-  document.querySelector("#system-subtitle").textContent = modelsSelected ? "Local readers, specialists, and their assignments." : "Server and components on this computer.";
-  document.querySelectorAll(".system-dialog-tabs [data-system-panel]").forEach((tab) => {
-    if (tab.dataset.systemPanel === panelName) tab.setAttribute("aria-current", "page");
-    else tab.removeAttribute("aria-current");
+  systemWorkspaceHost?.destroy();
+  const mount = document.querySelector("#system-workspace-host");
+  mount.replaceChildren();
+  const snapshot = await inspectBookSystem();
+  const registry = createWorkspaceCapabilityRegistry({
+    extensions: [machineWorkspaceCapability({route: "machine"}), modelsWorkspaceCapability({route: "models"})],
   });
-  updateLocalQueueStatus();
-  document.title = `Bookinator · ${modelsSelected ? "Models" : "Machine"}`;
-  const checks = document.querySelector("#system-checks");
-  const modelChecks = document.querySelector("#model-checks");
-  try {
-    const response = await fetch("/api/system");
-    const system = await response.json();
-    const ollama = system.ollama;
-    const emotionModel = system.emotionModel || {ready: false, runtime: false, model: false};
-    const glinerModel = system.glinerModel || {ready: false, runtime: false, model: false, modelId: "fastino/gliner2.5-small-v1"};
-    const hasReadinessManifest = Array.isArray(system.readiness?.checks) && system.readiness.checks.length > 0;
-    const machineChecks = hasReadinessManifest ? system.readiness.checks : legacyMachineChecks(system);
-    const compatibilityNotice = hasReadinessManifest ? "" : '<div class="system-version-notice"><strong>Showing the checks this server can verify.</strong><span>Restart <code>./bin/serve</code> to add the complete OS, storage, and installer checks.</span></div>';
-    checks.innerHTML = `${compatibilityNotice}${machineChecks.map(readinessCheckMarkup).join("")}`;
-    const machineNavigation = document.querySelector('[data-route="machine"]');
-    const machineNavigationStatus = machineNavigation?.querySelector("small");
-    const blockedCount = hasReadinessManifest ? Number(system.readiness.blockedCount || 0) : machineChecks.filter((check) => check.status === "blocked").length;
-    const readinessStatus = hasReadinessManifest ? system.readiness.status : blockedCount ? "blocked" : "warning";
-    if (machineNavigationStatus) machineNavigationStatus.textContent = blockedCount ? `${blockedCount} blocking` : readinessStatus === "warning" ? "Needs attention" : "Local · Ready";
-    machineNavigation?.classList.toggle("blocked", blockedCount > 0);
-    machineNavigation?.classList.toggle("warning", !blockedCount && readinessStatus === "warning");
-    modelChecks.innerHTML = `
-      <div class="system-check ${glinerModel.ready ? "ready" : "warning"}" id="gliner-model-check"><b>${glinerModel.ready ? "✓" : "!"}</b><div><strong>${glinerModel.ready ? "GLiNER 2.5 specialist is ready" : "GLiNER 2.5 specialist needs attention"}</strong><small>${glinerModel.ready ? `${escapeHtml(glinerModel.modelId)} is cached and runs through its isolated local Python runtime, outside Ollama.` : "The isolated GLiNER runtime or its pinned Small checkpoint is unavailable; entity-signal work cannot run."}</small><div class="model-card-actions"><a class="component-install-link" href="https://huggingface.co/fastino/gliner2.5-small-v1" target="_blank" rel="noreferrer">Inspect model card ↗</a></div></div></div>
-      <div class="system-check ${emotionModel.ready ? "" : "warning"}" id="emotion-model-check"><b>${emotionModel.ready ? "✓" : "!"}</b><div><strong>${emotionModel.ready ? "Emotion classifier is ready" : "Emotion classifier needs installing"}</strong><small>${emotionModel.ready ? "Hartmann DistilRoBERTa is cached and runs locally." : "This installs PyTorch, Transformers, and the pinned Hartmann model inside Bookinator."}</small>${emotionModel.ready ? '<div class="model-card-actions"><a class="component-install-link" href="https://huggingface.co/j-hartmann/emotion-english-distilroberta-base" target="_blank" rel="noreferrer">Inspect model card ↗</a><button class="component-uninstall" data-manual-uninstall="emotion" type="button">Uninstall</button></div>' : '<button class="component-install" id="install-emotion-model" type="button">Install emotion classifier</button>'}</div></div>
-      <div class="system-check ${ollama.running ? "ready" : "blocked"}"><b>${ollama.running ? "✓" : "!"}</b><div><strong>${ollama.running ? "Ollama is awake" : ollama.installed ? "Ollama is installed but not running" : "Ollama is not installed"}</strong><small>${ollama.running ? `${ollama.models.length} local ${ollama.models.length === 1 ? "model" : "models"} available.` : "Ollama is required for chapter summaries and other LLM analysis."}</small>${ollama.running ? '<div class="model-card-actions"><a class="component-install-link" href="https://ollama.com/download" target="_blank" rel="noreferrer">Inspect Ollama ↗</a><button class="component-uninstall" data-manual-uninstall="ollama" type="button">Uninstall</button></div>' : setupInstructionsMarkup("ollama")}</div></div>`;
-    wireSetupInstructions(document.querySelector("#machine-page"));
-    document.querySelectorAll("[data-manual-uninstall]").forEach((button) => button.addEventListener("click", async () => {
-      const emotion = button.dataset.manualUninstall === "emotion";
-      await confirmAction({
-        context: "Manual uninstall",
-        title: emotion ? "Remove the emotion classifier" : "Remove Ollama",
-        message: emotion
-          ? "Bookinator cannot safely edit its Python environment while the server is running. Quit Bookinator, remove the emotion-model packages and cached j-hartmann model from the Bookinator environment, then relaunch. A guided maintenance command belongs here before release; for now, keeping it installed is harmless."
-          : "Quit Bookinator and Ollama first, then use Ollama’s official uninstall instructions for your operating system. Removing Ollama disables every local LLM pipeline until it is installed again; your books and completed analysis remain safe.",
-        acceptLabel: "Close",
-      });
-    }));
-    const workshop = document.querySelector("#model-workshop");
-    workshop.hidden = !ollama.running;
-    if (ollama.running) {
-      const modelMessage = document.querySelector("#model-message");
-      const showInstallStatus = (kind, title, detail = "", helpUrl = "", helpLabel = "Learn more") => {
-        modelMessage.hidden = false;
-        modelMessage.className = `model-install-status ${kind}`;
-        modelMessage.innerHTML = `<strong>${escapeHtml(title)}</strong>${detail ? `<span>${escapeHtml(detail)}</span>` : ""}${helpUrl ? `<span><a href="${escapeHtml(helpUrl)}" target="_blank" rel="noreferrer">${escapeHtml(helpLabel)} ↗</a></span>` : ""}`;
-      };
-      const addInstalledModelToRoleMenus = (modelName) => {
-        if (!ollama.models.includes(modelName)) ollama.models.push(modelName);
-        document.querySelectorAll("[data-model-role]").forEach((select) => {
-          if (![...select.options].some((option) => option.value === modelName)) select.add(new Option(modelName, modelName));
-        });
-      };
-      const installModel = async (modelName, button = null) => {
-        if (!modelName) return;
-        const originalLabel = button?.textContent || "Install model";
-        if (button) {
-          button.disabled = true;
-          button.textContent = "Installing…";
-          button.closest(".model-option")?.classList.add("installing");
-        }
-        showInstallStatus("working", `Installing ${modelName}`, "Ollama is downloading the model. Large models can take quite a while; you may close this panel while it works.");
-        try {
-          const pullResponse = await fetch("/api/models/pull", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model: modelName})});
-          const pulled = await pullResponse.json();
-          if (!pullResponse.ok) {
-            const failure = new Error(pulled.error || "Ollama could not install that model.");
-            failure.payload = pulled;
-            throw failure;
-          }
-          addInstalledModelToRoleMenus(pulled.model);
-          showInstallStatus("success", `${pulled.model} is installed`, "It is now available in the role selectors above. No Hugging Face key was required.");
-          if (button) button.textContent = "Installed";
-          return true;
-        } catch (error) {
-          const failure = error.payload || {};
-          showInstallStatus("error", error.message || "Model installation failed", failure.guidance || "Open Ollama and try again.", failure.helpUrl || "", failure.needsHuggingFaceToken ? "Create a Hugging Face read token" : "Open Ollama’s model library");
-          if (button) {
-            button.disabled = false;
-            button.textContent = originalLabel;
-          }
-          return false;
-        } finally {
-          button?.closest(".model-option")?.classList.remove("installing");
-        }
-      };
-      const uninstallModel = async (modelName, modelLabel, button) => {
-        const assignedRoles = Object.entries(system.models.roles || {}).filter(([, assigned]) => assigned === modelName).map(([role]) => system.models.roleLabels?.[role] || role);
-        const assignmentWarning = assignedRoles.length ? ` It is currently assigned to ${assignedRoles.join(", ")}. Those roles will stop working until you assign another installed model.` : "";
-        const approved = await confirmAction({
-          context: "Remove local model",
-          title: `Uninstall ${modelLabel}?`,
-          message: `This deletes the model weights from Ollama on this computer. Bookinator will keep manuscripts and completed analysis.${assignmentWarning}`,
-          acceptLabel: "Uninstall model",
-        });
-        if (!approved) return;
-        const originalLabel = button.textContent;
-        button.disabled = true;
-        button.textContent = "Uninstalling…";
-        try {
-          const response = await fetch("/api/models/delete", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model: modelName})});
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || "Ollama could not uninstall that model.");
-          await openSystemPanel("models");
-        } catch (error) {
-          button.disabled = false;
-          button.textContent = originalLabel;
-          showInstallStatus("error", error.message || "Model uninstall failed", assignedRoles.length ? "Stop the analysis queue or assign those roles to another installed model, then try again." : "Check that Ollama is running, then try again.");
-        }
-      };
-      const primaryRecommendation = system.models.roleRecommendations.primary;
-      const fastAssignment = system.models.roles.fast;
-      document.querySelector("#hardware-advice").innerHTML = `<strong>${system.memoryGiB} GB of unified memory gives Bookinator room to think.</strong>Use <b>${escapeHtml(primaryRecommendation)}</b> as the primary reader. <b>${escapeHtml(fastAssignment || "No model assigned")}</b> remains the fast intake model until the recorded speed-and-quality comparison is complete.`;
-      document.querySelector("#role-models").innerHTML = Object.entries(system.models.roleLabels).map(([role, label]) => `<div class="role-model-row"><label for="role-${role}">${escapeHtml(label)}</label><select id="role-${role}" data-model-role="${role}"><option value=""${system.models.roles[role] ? "" : " selected"}>Not assigned</option>${ollama.models.map((model) => `<option value="${escapeHtml(model)}"${model === system.models.roles[role] ? " selected" : ""}>${escapeHtml(model)}${model === system.models.roleRecommendations[role] ? " · recommended" : ""}</option>`).join("")}</select></div>`).join("");
-      document.querySelectorAll("[data-model-role]").forEach((select) => select.addEventListener("change", async () => {
-        const saveResponse = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({role: select.dataset.modelRole, model: select.value})});
-        const saved = await saveResponse.json();
-        showInstallStatus(saveResponse.ok ? "success" : "error", saveResponse.ok ? `${saved.model} is now assigned to ${system.models.roleLabels[saved.role].toLowerCase()}.` : saved.error);
-        if (!saveResponse.ok) return;
-        system.models.roles[select.dataset.modelRole] = saved.model;
-      }));
-      document.querySelector("#model-catalog").innerHTML = system.models.catalog.map((model) => {
-        const installed = ollama.models.includes(model.tag);
-        const facts = [
-          `${model.sizeGb} GB`,
-          model.tier,
-          model.memory,
-          model.license,
-        ].filter(Boolean).map(escapeHtml).join(" · ");
-        const source = model.hf ? `<a href="${escapeHtml(model.hf)}" target="_blank" rel="noreferrer">Inspect model card ↗</a>` : "";
-        const consent = model.userDownload ? "Bookinator does not distribute these weights. Install asks your local Ollama service to download them from Hugging Face." : "";
-        const action = installed
-          ? `<button class="component-uninstall" type="button" data-remove-model="${escapeHtml(model.tag)}" data-model-label="${escapeHtml(model.label)}">Uninstall</button>`
-          : `<button type="button" data-catalog-model="${escapeHtml(model.tag)}">${model.userDownload ? `Download ${model.sizeGb} GB` : "Install"}</button>`;
-        return `<article class="model-option${model.category ? ` ${escapeHtml(model.category)}` : ""}"><strong>${escapeHtml(model.label)} · ${escapeHtml(model.tag)}</strong><span>${facts}</span><small>${escapeHtml(model.use)}</small>${consent ? `<small>${escapeHtml(consent)}</small>` : ""}<div class="model-card-actions">${source}${action}</div></article>`;
-      }).join("");
-      const catalogByTag = new Map(system.models.catalog.map((model) => [model.tag, model]));
-      document.querySelector("#installed-models").innerHTML = ollama.models.map((modelName) => {
-        const known = catalogByTag.get(modelName);
-        const baseName = modelName.split(":", 1)[0];
-        const cardUrl = known?.hf || `https://ollama.com/library/${encodeURIComponent(baseName)}`;
-        return `<article class="model-option"><strong>${escapeHtml(known?.label || modelName)}</strong>${known?.label ? `<span>${escapeHtml(modelName)}</span>` : ""}<small>Installed locally in Ollama.</small><div class="model-card-actions"><a href="${escapeHtml(cardUrl)}" target="_blank" rel="noreferrer">Inspect model card ↗</a><button class="component-uninstall" type="button" data-remove-model="${escapeHtml(modelName)}" data-model-label="${escapeHtml(known?.label || modelName)}">Uninstall</button></div></article>`;
-      }).join("") || "<p>No Ollama models are installed.</p>";
-      document.querySelectorAll("[data-catalog-model]").forEach((button) => button.addEventListener("click", async () => {
-        if (await installModel(button.dataset.catalogModel, button)) await openSystemPanel("models");
-      }));
-      document.querySelectorAll("[data-remove-model]").forEach((button) => button.addEventListener("click", () => uninstallModel(button.dataset.removeModel, button.dataset.modelLabel || button.dataset.removeModel, button)));
-      const pullButton = document.querySelector("#pull-model");
-      pullButton.onclick = async () => {
-        const nameInput = document.querySelector("#model-name");
-        const modelName = nameInput.value.trim();
-        if (!modelName) return nameInput.focus();
-        pullButton.disabled = true;
-        pullButton.textContent = "Installing…";
-        const installed = await installModel(modelName);
-        pullButton.disabled = false;
-        pullButton.textContent = "Install model";
-        if (installed) nameInput.value = "";
-      };
-    }
-    const installButton = document.querySelector("#install-pdf-reader");
-    installButton?.addEventListener("click", async () => {
-      installButton.disabled = true;
-      installButton.textContent = "Installing locally…";
-      try {
-        const installResponse = await fetch("/api/setup/pdf-reader", {method: "POST"});
-        const installResult = await installResponse.json();
-        if (!installResponse.ok) throw new Error(installResult.message);
-        document.querySelector("#pdf-reader-check").outerHTML = '<div class="system-check"><b>✓</b><div><strong>PDF reader is ready</strong><small>Bookinator can inspect manuscript text and metadata.</small></div></div>';
-      } catch (error) {
-        installButton.disabled = false;
-        installButton.textContent = "Try installation again";
-        document.querySelector("#pdf-reader-check small").textContent = error.message;
-      }
-    });
-    const updateOllamaButton = document.querySelector("#update-ollama");
-    updateOllamaButton?.addEventListener("click", async () => {
-      const approved = await confirmAction({context: "Local dependency", title: "Install or update Ollama?", message: "Bookinator will ask Homebrew to install the current Ollama release. The analysis queue must be stopped first. Existing downloaded models and completed analysis will remain in place.", acceptLabel: "Install Ollama"});
-      if (!approved) return;
-      updateOllamaButton.disabled = true;
-      updateOllamaButton.textContent = "Updating…";
-      try {
-        const response = await fetch("/api/setup/ollama", {method: "POST"});
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Ollama could not be updated.");
-        await openSystemPanel("machine");
-      } catch (error) {
-        updateOllamaButton.disabled = false;
-        updateOllamaButton.textContent = "Try again";
-        await confirmAction({context: "Ollama update", title: "Ollama was not updated", message: error.message, acceptLabel: "Close"});
-      }
-    });
-    const emotionInstallButton = document.querySelector("#install-emotion-model");
-    emotionInstallButton?.addEventListener("click", async () => {
-      emotionInstallButton.disabled = true;
-      emotionInstallButton.textContent = "Installing locally…";
-      try {
-        const installResponse = await fetch("/api/setup/emotion-model", {method: "POST"});
-        const installResult = await installResponse.json();
-        if (!installResponse.ok) throw new Error(installResult.message);
-        document.querySelector("#emotion-model-check").outerHTML = '<div class="system-check"><b>✓</b><div><strong>Emotion classifier is ready</strong><small>Hartmann DistilRoBERTa is cached and runs locally.</small></div></div>';
-        await refreshLibraryBooks({poll: true});
-      } catch (error) {
-        emotionInstallButton.disabled = false;
-        emotionInstallButton.textContent = "Try installation again";
-        document.querySelector("#emotion-model-check small").textContent = error.message;
-      }
-    });
-  } catch {
-    checks.innerHTML = "<p>Bookinator could not inspect this computer. Restart <code>./bin/serve</code> and try again.</p>";
-    modelChecks.innerHTML = "<p>Bookinator could not inspect local models. Restart <code>./bin/serve</code> and try again.</p>";
-  }
+  const navigation = {machine: "#/machine", models: "#/machine/models"};
+  const refresh = async () => Object.assign(snapshot, await inspectBookSystem());
+  systemWorkspaceHost = createWorkspaceHost({mount, registry, adapters: {
+    machine: {manifest: snapshot.machine, navigation, onRefresh: async () => (await refresh()).machine, onRepair: handleBookMachineRepair},
+    models: {model: snapshot.models, navigation, onRefresh: async () => (await refresh()).models, onAction: (intent) => handleBookModelAction(intent, snapshot)},
+  }});
+  systemWorkspaceHost.navigate(panelName === "models" ? "models" : "machine");
+  document.title = `Bookinator · ${panelName === "models" ? "Models" : "Machine"}`;
 }
-
-document.querySelectorAll(".system-dialog-tabs [data-system-panel]").forEach((tab) => tab.addEventListener("click", () => openSystemPanel(tab.dataset.systemPanel)));
 
 function showBooksPage() {
   leaveBookWorkspace();
@@ -6694,8 +6575,13 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
     const retryFailedControl = failedCount
       ? pipelineControl({action: "retry-failed", label: `Retry ${failedCount} failed`, title: `Retry ${failedCount} failed analysis result${failedCount === 1 ? "" : "s"}`})
       : "";
+    const developmentLimit = Number(pipeline.developmentAnalysisLimit || 0);
+    const nextDevelopmentChapter = (pipeline.chapters || []).find((chapter) => Number(chapter.sequence || chapter.number || 0) > developmentLimit);
+    const advanceDevelopmentControl = (pipeline.developmentCheckpointLocked || pipeline.phase === "development-checkpoint") && nextDevelopmentChapter
+      ? pipelineControl({action: "advance-development-checkpoint", label: "Run next chapter", title: `Advance the bounded development run through ${displayHeading(nextDevelopmentChapter.title) || `section ${nextDevelopmentChapter.sequence}`}`})
+      : "";
     const startOverControl = pipelineControl({action: "start-over", label: "Start over", title: "Clear this book’s derived analysis and restart from source ingestion", danger: true});
-    const pipelineWorkspaceActions = taskHeadingActions({extra: `${timingChartControl("pipeline")}${retryFailedControl}${reconnectControl}${mapReviewControl}${rebuildControl}${startOverControl}`});
+    const pipelineWorkspaceActions = taskHeadingActions({extra: `${timingChartControl("pipeline")}${advanceDevelopmentControl}${retryFailedControl}${reconnectControl}${mapReviewControl}${rebuildControl}${startOverControl}`});
     if (activeTab === "identity") {
       restoreBookFormToDialog();
       body.innerHTML = workspaceTaskView({icon: "identity", title: "Book identity", subtitle: "Change how this manuscript is named, prioritized, and represented throughout Bookinator.", collapse: false, explanationTitle: "Identity travels with the book.", explanation: "These details appear in the library, workspace, exports, and reviewer handoffs. Editing them does not alter the manuscript or its analysis.", content: '<section class="workspace-identity-editor"><div data-book-identity-form-host></div></section>'});
@@ -7726,6 +7612,11 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
         showBookPage(book.id, activeTab);
         return;
       }
+      if (action === "advance-development-checkpoint") {
+        const nextLabel = displayHeading(nextDevelopmentChapter?.title) || "the next chapter";
+        const advance = await confirmAction({context: "Bounded development run", title: `Run ${nextLabel}?`, message: "Bookinator will preserve the completed checkpoint, admit exactly this next chapter to the pipeline, and run its eligible analysis through the shared scheduler.", acceptLabel: "Run chapter"});
+        if (!advance) return;
+      }
       if (action === "restart") {
         const restart = await confirmAction({context: "Development reset", title: "Reset every chapter summary?", message: "Bookinator will archive the model and timing details for the current summaries, clear the whole-book rollup, mark every chapter pending, and rebuild this category from the beginning. Unrelated analysis and human annotations remain untouched. If a model response is active, the reset will begin safely after it finishes.", acceptLabel: "Reset summaries"});
         if (!restart) return;
@@ -7948,7 +7839,6 @@ window.addEventListener("hashchange", async () => {
   }
   route();
 });
-route();
 if (!localStorage.getItem(introKey) && (!location.hash || location.hash === "#books")) showDialog("welcome-dialog");
 async function hydrateLibrary() {
   const browserBooks = JSON.parse(localStorage.getItem(storageKey) || "[]");

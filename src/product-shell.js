@@ -133,11 +133,22 @@ export function createBookinatorWorkspaceRegistry(identity = loadBookinatorIdent
     extensions: [{
       id: "machine",
       label: "Machine",
-      detail: "Readiness and local models",
+      detail: "Readiness and local software",
       icon: "machine",
       href: "#/machine",
       route: "machine",
       order: 240,
+      menu: {id: "local-system", label: "Local system", detail: "Machine, software, and models", icon: "machine", href: "#/machine", route: "machine"},
+      createView: () => null
+    }, {
+      id: "models",
+      label: "Models",
+      detail: "Providers, roles, and installed models",
+      icon: "models",
+      href: "#/machine/models",
+      route: "models",
+      order: 241,
+      menu: {id: "local-system", label: "Local system", detail: "Machine, software, and models", icon: "machine", href: "#/machine", route: "machine"},
       createView: () => null
     }]
   });

@@ -112,34 +112,7 @@
       </main>
 
       <main class="machine-page" id="machine-page" hidden>
-        <header class="machine-heading">
-          <div><p class="context">Local reading engine</p><h1 id="system-title">Machine</h1><p id="system-subtitle">Server and components on this computer.</p></div>
-        </header>
-        <nav class="system-dialog-tabs" aria-label="Local system views">
-          <button type="button" data-system-panel="machine" aria-current="page">Machine</button>
-          <button type="button" data-system-panel="models">Models</button>
-        </nav>
-        <section class="machine-page-body">
-          <section id="machine-panel" class="system-panel">
-            <div id="system-checks" class="system-checks"><p>Checking the machine…</p></div>
-          </section>
-          <section id="models-panel" class="system-panel" hidden>
-            <div class="models-queue-status" id="models-queue-status" aria-live="polite"><i aria-hidden="true"></i><span>Checking the analysis queue…</span></div>
-            <div id="model-checks" class="system-checks"><p>Checking local models…</p></div>
-            <section class="model-workshop" id="model-workshop" hidden>
-              <header><div><strong>Model workshop</strong><small>Choose one primary reader and one fast model for manuscript intake and inexpensive utilities.</small></div></header>
-              <div class="hardware-advice" id="hardware-advice"></div>
-              <div class="role-models" id="role-models"></div>
-              <details class="model-catalog"><summary>Recommended model catalog</summary><div id="model-catalog"></div></details>
-              <details class="model-catalog"><summary>Installed Ollama models</summary><div id="installed-models"></div></details>
-              <div id="model-message" class="model-install-status" role="status" aria-live="polite" hidden></div>
-              <section class="manual-model-install">
-                <header><strong>Install another Ollama model</strong><small>Use an exact name from the Ollama library. Recommended models install directly from the catalog above.</small></header>
-                <div class="model-pull"><input id="model-name" placeholder="For example, qwen3.8:27b" /><button id="pull-model" type="button">Install model</button></div>
-              </section>
-            </section>
-          </section>
-        </section>
+        <section class="machine-page-body" id="system-workspace-host"></section>
       </main>
 
       <main class="workspace-utility-page" id="workspace-page" hidden>
@@ -274,6 +247,6 @@
       </section>
     </div>
 
-    <script src="/app.js?v=commons-routes-203" type="module"></script>
+    <script src="/app.js?v=pipeline-checkpoint-204" type="module"></script>
   </body>
 </html>

@@ -539,6 +539,7 @@ def reconcile_orphaned_child_runs(pipeline: dict[str, object]) -> bool:
         "summarizing": {"summaries"},
         "dossiers": {"dossiers"},
         "chapter-reading": {"summaries", "dossiers", "llm-review"},
+        "chapter-reading-consistency": {"summaries", "dossiers", "llm-review"},
         "emotions": {"emotions"},
         "tags": {"tags"},
         "smells": {"smells"},
@@ -8802,6 +8803,31 @@ def apply_pipeline_product_command(intent: dict[str, object]) -> dict[str, objec
         sync_current_pipeline_run(pipeline_records, restart=True)
         return global_pipeline_state(library, pipeline_records)
     project_id = str(intent.get("projectId") or "")
+    if command == "advance-development-checkpoint":
+        book = find_book(project_id)
+        if not book:
+            raise ValueError("Choose a valid project.")
+        pipeline = load_pipeline(book)
+        try:
+            current_limit = int(pipeline.get("developmentAnalysisLimit") or 0)
+        except (TypeError, ValueError):
+            current_limit = 0
+        next_chapter = min(
+            (
+                chapter for chapter in pipeline.get("chapters", [])
+                if int(chapter.get("sequence") or chapter.get("number") or 0) > current_limit
+            ),
+            key=lambda chapter: int(chapter.get("sequence") or chapter.get("number") or 0),
+            default=None,
+        )
+        if current_limit < 1 or not next_chapter:
+            raise ValueError("This project has no later development chapter to run.")
+        sequence = int(next_chapter.get("sequence") or next_chapter.get("number") or 0)
+        label = str(next_chapter.get("title") or f"section {sequence}")
+        advance_development_checkpoint(pipeline, sequence, label)
+        write_pipeline(book, pipeline)
+        prioritize_pipeline_action(project_id, "chapter-pipeline")
+        return global_pipeline_state()
     if not project_id or command not in EXPLICIT_QUEUE_ACTIONS:
         raise ValueError("Choose a valid project and Bookinator pipeline command.")
     prioritize_pipeline_action(project_id, command)
@@ -8821,6 +8847,8 @@ def prioritize_pipeline_action(book_id: str, action: str) -> dict[str, object]:
     if base_action in paused_pipeline_actions(book_id):
         set_pipeline_action_paused(book_id, base_action, False)
     pipeline = load_pipeline(book)
+    if pipeline.get("developmentCheckpointLocked") or pipeline.get("phase") == "development-checkpoint":
+        raise ValueError("Run the next bounded development chapter before issuing an ordinary pipeline command.")
     if action != "prepare" and pipeline.get("chapterMapSuspicious") and not pipeline.get("chapterMapApproved"):
         raise ValueError("Review and resolve this book’s chapter map before starting derived analysis.")
     if action == "prepare":

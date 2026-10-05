@@ -649,6 +649,27 @@ def test_serial_stage_reconciles_competing_running_children() -> None:
     assert pipeline["chapters"][1]["tagStatus"] == "running"
 
 
+def test_chapter_reading_consistency_keeps_shared_children_running() -> None:
+    import bookinator.server.__main__ as server
+
+    pipeline = {
+        "status": "running", "phase": "chapter-reading-consistency",
+        "stages": [
+            {"id": "summaries", "status": "running"},
+            {"id": "dossiers", "status": "running"},
+            {"id": "llm-review", "status": "running"},
+        ],
+        "chapters": [{"sequence": 4, "status": "running", "llmReviewStatus": "running"}],
+        "chunks": [{"sequence": 4, "dossierStatus": "running"}],
+    }
+
+    assert server.reconcile_orphaned_child_runs(pipeline) is False
+    assert pipeline["chapters"][0]["status"] == "running"
+    assert pipeline["chapters"][0]["llmReviewStatus"] == "running"
+    assert pipeline["chunks"][0]["dossierStatus"] == "running"
+    assert all(stage["status"] == "running" for stage in pipeline["stages"])
+
+
 def test_completed_retry_drops_stale_child_and_stage_errors() -> None:
     import bookinator.server.__main__ as server
 
@@ -728,6 +749,7 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert 'createBookinatorPipelineControlIntent({action, unitIds, snapshot})' in app
     assert 'fetch("/api/library/pipeline/product-command"' in app
     assert 'schema: "bookinator.pipeline-product-command.v1"' in app
+    assert 'action: "advance-development-checkpoint", label: "Run next chapter"' in app
     assert '/api/library/pipeline/prioritize' not in app
     assert '/api/library/pipeline/current-run/restart' not in app
     assert 'fetch("/api/library/pipeline/stop"' not in app
@@ -915,6 +937,49 @@ def test_bookinator_product_pipeline_commands_share_the_observed_revision() -> N
         with pytest.raises(server.PipelineRevisionConflict):
             server.apply_pipeline_product_command({**intent, "expectedRevision": 8})
     prioritize.assert_not_called()
+
+
+def test_bookinator_product_command_advances_exactly_one_development_chapter() -> None:
+    snapshot = {"revision": 12, "units": []}
+    current = {"snapshot": snapshot}
+    refreshed = {"snapshot": {**snapshot, "revision": 13}}
+    book = {"id": "project-a", "title": "Alpha"}
+    pipeline = {
+        "status": "queued", "phase": "queued", "developmentCheckpointLocked": True,
+        "developmentAnalysisLimit": 3, "developmentAnalysisLimitLabel": "Chapter I",
+        "chapters": [
+            {"sequence": 3, "title": "Chapter I", "status": "complete"},
+            {"sequence": 4, "title": "Chapter II", "status": "pending"},
+            {"sequence": 5, "title": "Chapter III", "status": "pending"},
+        ],
+    }
+    intent = {
+        "schema": "bookinator.pipeline-product-command.v1",
+        "command": "advance-development-checkpoint",
+        "projectId": "project-a",
+        "expectedRevision": 12,
+    }
+
+    with patch.object(server, "global_pipeline_state", side_effect=[current, refreshed]), \
+         patch.object(server, "find_book", return_value=book), \
+         patch.object(server, "load_pipeline", return_value=pipeline), \
+         patch.object(server, "write_pipeline") as write_pipeline_mock, \
+         patch.object(server, "prioritize_pipeline_action") as prioritize:
+        result = server.apply_pipeline_product_command(intent)
+
+    assert result is refreshed
+    assert pipeline["developmentAnalysisLimit"] == 4
+    assert pipeline["developmentAnalysisLimitLabel"] == "Chapter II"
+    assert pipeline["developmentCheckpointLocked"] is False
+    write_pipeline_mock.assert_called_once_with(book, pipeline)
+    prioritize.assert_called_once_with("project-a", "chapter-pipeline")
+
+
+def test_ordinary_product_command_rejects_a_locked_development_checkpoint() -> None:
+    with patch.object(server, "find_book", return_value={"id": "project-a"}), \
+         patch.object(server, "load_pipeline", return_value={"phase": "development-checkpoint", "developmentCheckpointLocked": True}):
+        with pytest.raises(ValueError, match="next bounded development chapter"):
+            server.prioritize_pipeline_action("project-a", "summarize")
 
 
 def test_pipeline_panel_can_start_one_book_completely_over() -> None:
@@ -1788,8 +1853,8 @@ def test_development_launcher_delegates_to_the_shared_inator_launcher() -> None:
     assert '"PYTHONPATH=$project_dir${PYTHONPATH:+:$PYTHONPATH}"' in launcher
     assert '"$launcher" "$@" -- "$python_bin" -m bookinator.server' in launcher
     requirement = manifest["capabilities"]["development-serving"]
-    assert requirement == {"package": "@inator/dev-tools", "version": "0.4.1-dev.3"}
-    assert package["devDependencies"]["@inator/dev-tools"] == "file:.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz"
+    assert requirement == {"package": "@inator/dev-tools", "version": "0.4.1-dev.16"}
+    assert package["devDependencies"]["@inator/dev-tools"] == "file:.inator/packages/inator-dev-tools-0.4.1-dev.16.tgz"
 
 
 def test_server_exposes_installed_commons_modules_through_a_narrow_static_facade() -> None:
@@ -3139,33 +3204,38 @@ def test_machine_is_low_frequency_workspace_navigation() -> None:
     assert 'brand: {href: "#/", label: "Bookinator"' in shell
     assert '{href: "#/books", route: "books", label: "Books", detail: "Library"}' in shell
     assert 'id: "machine"' in shell
-    assert 'detail: "Readiness and local models"' in shell
+    assert 'label: "Local system"' in shell
+    assert 'detail: "Machine, software, and models"' in shell
     assert 'href: "#/machine"' in shell
     navigation = shell.split("navigation: [", 1)[1].split("],", 1)[0]
     assert 'label: "Machine"' not in navigation
-    assert 'data-system-panel="machine"' in page
-    assert 'data-system-panel="models"' in page
+    assert 'id="system-workspace-host"' in page
+    assert "machineWorkspaceCapability" in app
+    assert "modelsWorkspaceCapability" in app
+    assert "createWorkspaceHost" in app
     assert '<main class="machine-page" id="machine-page" hidden>' in page
-    assert '<h1 id="system-title">Machine</h1>' in page
     assert 'id="system-dialog"' not in page
-    assert 'id="models-queue-status"' in page
     assert 'id="local-menu"' not in page
     assert "function updateLocalQueueStatus()" in app
     assert 'openSystemPanel("machine")' in app
     assert "navigation?.classList.toggle(\"running\", running)" in app
-    assert "function readinessCheckMarkup(check)" in app
+    assert "function bookMachineManifest(system)" in app
+    assert "function bookModelsModel(system)" in app
+    assert 'navigation = {machine: "#/machine", models: "#/machine/models"}' in app
+    assert "components: [" in app
+    assert 'label: "GLiNER entity specialist"' in app
+    assert 'label: "Emotion classifier"' in app
     assert "function legacyMachineChecks(system)" in app
-    assert "Showing the checks this server can verify." in app
-    assert "machineChecks.map(readinessCheckMarkup)" in app
     assert 'label: "Bookinator server", status: "ready"' in app
-    assert "GLiNER 2.5 specialist is ready" in app
-    assert "outside Ollama" in app
-    assert 'status === "blocked" ? "!"' in app
-    assert 'data-setup-instructions=' in app
-    assert 'check.action === "install-pdf-reader"' in app
+    assert 'action === "install-pdf-reader"' in app
+    assert "legacyOpenSystemPanel" not in app
+    assert "system-dialog-tabs" not in page
+    assert "models-queue-status" not in page
     hydrate = app.split("async function hydrateLibrary()", 1)[1]
     assert "render();" in hydrate
     assert "route();" in hydrate
+    before_hydrate = app.split("async function hydrateLibrary()", 1)[0]
+    assert not before_hydrate.rstrip().endswith("route();")
     assert 'location.hash.startsWith("#book/")' not in hydrate
 
 
