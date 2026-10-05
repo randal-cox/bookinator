@@ -1,7 +1,7 @@
 import { articlePages, roadmapItems } from "./pages.js";
 import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
-import { createBookinatorAboutPage } from "./product-information.js?v=commons-practice-187";
+import { createBookinatorAboutPage } from "./product-information.js?v=about-trust-191";
 import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=commons-practice-187";
 import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-186";
 import { createBookinatorResourcePage } from "./product-resources.js?v=commons-help-186";
@@ -2277,6 +2277,7 @@ function showArticlePage(collection, requestedTab) {
   tabs.hidden = ["about", "help", "resources", "privacy", "security"].includes(collection);
   tabs.innerHTML = Object.entries(page.tabs).map(([key, [label]]) => `<button type="button" data-article-tab="${key}"${key === activeTab ? ' aria-current="page"' : ""}>${label}</button>`).join("");
   const articleBody = document.querySelector("#article-body");
+  articleBody.dataset.articleCollection = collection;
   const productHistoryMode = collection === "releases" ? "releases" : collection === "roadmap" ? "roadmap" : "";
   articleBody.classList.remove("inator-information-page", "inator-about-page", "inator-help-page", "inator-resource-page", "inator-practice-page");
   articleBody.classList.toggle("shared-product-docs", ["help", "about", "resources", "privacy", "security"].includes(collection));
@@ -2284,7 +2285,7 @@ function showArticlePage(collection, requestedTab) {
     ? `<section class="shared-product-history" aria-label="Bookinator ${productHistoryMode}"><div data-product-history="${productHistoryMode}"></div></section>`
     : "";
   if (!productHistoryMode) {
-    if (collection === "about") createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
+    if (collection === "about") void createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
     else if (collection === "help") createBookinatorHelpPage({ root: articleBody, guideTabs: articlePages.guide.tabs, referenceTabs: articlePages.docs.tabs, initialSection: activeTab });
     else if (collection === "resources") void createBookinatorResourcePage({ root: articleBody });
     else if (collection === "privacy" || collection === "security") {

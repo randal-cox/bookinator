@@ -98,9 +98,27 @@ def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
 def test_about_guide_and_docs_describe_the_current_product():
     pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
 
-    assert 'title: "The book is larger than a prompt"' in pages
+    assert 'title: "A book remembers more than any prompt can hold"' in pages
     assert 'title: "From manuscript to editorial map"' in pages
     assert 'title: "How the local system works"' in pages
     assert "Interactive HTML" in pages
     assert "Questions &amp; Payoffs" in pages
     assert "Loopback only" in pages
+
+
+def test_about_exposes_shared_trust_live_model_citations_and_editorial_artwork():
+    information = (ROOT / "web" / "product-information.js").read_text(encoding="utf-8")
+    pages = (ROOT / "web" / "pages.js").read_text(encoding="utf-8")
+    styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
+
+    assert "defineTrustSurface" in information
+    assert "defineCitationRegistry" in information
+    assert 'fetch("/api/system"' in information
+    assert "citationRegistry: createModelCitationRegistry(system)" in information
+    assert "trust: createBookinatorTrust(system)" in information
+    assert "book-analysis-paper-landscape.png" in pages
+    assert (ROOT / "web" / "assets" / "book-analysis-paper-landscape.png").is_file()
+    assert "data-inator-icon" in pages
+    assert ".article-body.inator-about-page .capability-bands p" in styles
+    assert "activeAboutController?.destroy()" in information
+    assert 'root.dataset.articleCollection !== "about"' in information
