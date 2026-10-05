@@ -73,8 +73,6 @@ export const articlePages = {
   legal: {
     kicker: "Bookinator information", title: "Legal and privacy", intro: "Short, readable promises now; formal release documents before distribution.",
     tabs: {
-      privacy: ["Privacy", `<h2>Local means local.</h2><p>Bookinator is designed to keep manuscripts, derived text, model prompts, embeddings, findings, and reports on the user's computer.</p><p>Installing a model may contact Ollama's registry. Manuscript content is not part of that request.</p>`],
-      security: ["Security", `<h2>The local boundary is part of the design.</h2><p>Bookinator is served on the loopback interface. Its browser UI controls a Python server that owns project files, ingestion, queue state, dependency checks, exports, and communication with Ollama.</p><p>Saved runs expose status, timing, model identity, failures, source ranges, and available evidence so consequential work remains inspectable.</p>`],
       license: ["License", `<h2>Business Source License 1.1</h2><p>Bookinator 0.1.0 is source-available. Personal, educational, research, and internal business production use is permitted; offering Bookinator as a commercial hosted or managed service, or selling it as part of a competing commercial product, requires a separate commercial license.</p><p>On September 24, 2030, this version converts to GPL-3.0-or-later. The repository <code>LICENSE</code> file contains the controlling terms.</p>`],
       terms: ["Terms", `<h2>Editorial aid, not editorial authority</h2><p>Bookinator produces evidence-linked hypotheses. It can be wrong, overly literal, or unaware of deliberate ambiguity. Authors and editors remain responsible for applying its findings.</p>`],
     },

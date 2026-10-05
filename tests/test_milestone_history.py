@@ -86,7 +86,13 @@ def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
     assert "recordIds: Object.keys(recordRoutes)" in information
     for destination in ("milestones", "roadmap", "security", "privacy"):
         assert f'{destination}:' in information
-    assert 'security: ["Security"' in pages
+    practice = (ROOT / "web" / "product-practice.js").read_text(encoding="utf-8")
+    shell = (ROOT / "web" / "product-shell.js").read_text(encoding="utf-8")
+    assert "createProductPracticeViewForFooter" in practice
+    assert "defineProductPrivacy" in practice
+    assert "defineProductSecurity" in practice
+    assert 'privacy: {href: "#privacy"' in shell
+    assert 'security: {href: "#security"' in shell
 
 
 def test_about_guide_and_docs_describe_the_current_product():

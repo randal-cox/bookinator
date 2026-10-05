@@ -1,10 +1,11 @@
 import { articlePages, roadmapItems } from "./pages.js";
 import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
-import { createBookinatorAboutPage } from "./product-information.js?v=about-records-185";
-import { mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=navigation-hydration-183";
+import { createBookinatorAboutPage } from "./product-information.js?v=commons-practice-187";
+import { bookinatorShellPolicy, mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=commons-practice-187";
 import { createBookinatorHelpPage } from "./product-docs.js?v=commons-help-186";
 import { createBookinatorResourcePage } from "./product-resources.js?v=commons-help-186";
+import { createBookinatorPracticePage } from "./product-practice.js?v=commons-practice-187";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
 import { isTemporalDossierObservation } from "./dossier-index.js";
 import { auditPortableReport, buildPortableReportHtml, buildPortableReportManifest, reportExportFilename } from "./portable-report.js?v=queue-order-166";
@@ -2255,6 +2256,8 @@ function showArticlePage(collection, requestedTab) {
     ? { kicker: "Bookinator help", title: "Help", intro: "Orientation, everyday tasks, reference, and common questions.", tabs: { start: ["Start here", ""], tasks: ["Everyday tasks", ""], reference: ["Reference", ""], faq: ["FAQ", ""] } }
     : collection === "resources"
       ? { kicker: "Bookinator resources", title: "Resources", intro: "Presentations, briefs, and bounded product language.", tabs: { library: ["Library", ""] } }
+      : collection === "privacy" || collection === "security"
+        ? { kicker: `Bookinator ${collection}`, title: collection === "privacy" ? "Privacy" : "Security", intro: "", tabs: { record: ["Record", ""] } }
       : articlePages[collection] || articlePages.about;
   const tabKeys = Object.keys(page.tabs);
   const activeTab = tabKeys.includes(requestedTab) ? requestedTab : tabKeys[0];
@@ -2267,16 +2270,16 @@ function showArticlePage(collection, requestedTab) {
   document.querySelector("#welcome-dialog").hidden = true;
   mountBookinatorShell({active: collection, selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   const hero = document.querySelector("#article-hero");
-  hero.hidden = ["about", "help", "resources"].includes(collection);
+  hero.hidden = ["about", "help", "resources", "privacy", "security"].includes(collection);
   hero.classList.toggle("has-mark", Boolean(page.mark));
   hero.innerHTML = `${page.mark ? '<img src="/assets/bookinator.svg" alt="">' : ""}<p class="context">${page.kicker}</p><h1>${page.title}</h1><p>${page.intro}</p>`;
   const tabs = document.querySelector("#article-tabs");
-  tabs.hidden = ["about", "help", "resources"].includes(collection);
+  tabs.hidden = ["about", "help", "resources", "privacy", "security"].includes(collection);
   tabs.innerHTML = Object.entries(page.tabs).map(([key, [label]]) => `<button type="button" data-article-tab="${key}"${key === activeTab ? ' aria-current="page"' : ""}>${label}</button>`).join("");
   const articleBody = document.querySelector("#article-body");
   const productHistoryMode = collection === "releases" ? "releases" : collection === "roadmap" ? "roadmap" : "";
-  articleBody.classList.remove("inator-information-page", "inator-about-page", "inator-help-page", "inator-resource-page");
-  articleBody.classList.toggle("shared-product-docs", ["help", "about", "resources"].includes(collection));
+  articleBody.classList.remove("inator-information-page", "inator-about-page", "inator-help-page", "inator-resource-page", "inator-practice-page");
+  articleBody.classList.toggle("shared-product-docs", ["help", "about", "resources", "privacy", "security"].includes(collection));
   articleBody.innerHTML = productHistoryMode
     ? `<section class="shared-product-history" aria-label="Bookinator ${productHistoryMode}"><div data-product-history="${productHistoryMode}"></div></section>`
     : "";
@@ -2284,6 +2287,10 @@ function showArticlePage(collection, requestedTab) {
     if (collection === "about") createBookinatorAboutPage({ root: articleBody, tabs: page.tabs });
     else if (collection === "help") createBookinatorHelpPage({ root: articleBody, guideTabs: articlePages.guide.tabs, referenceTabs: articlePages.docs.tabs, initialSection: activeTab });
     else if (collection === "resources") void createBookinatorResourcePage({ root: articleBody });
+    else if (collection === "privacy" || collection === "security") {
+      const destination = bookinatorShellPolicy.destinations.find(({ id }) => id === collection);
+      createBookinatorPracticePage({ root: articleBody, destination });
+    }
     else articleBody.innerHTML = page.tabs[activeTab][1];
   }
   const productHistoryMount = document.querySelector("[data-product-history]");
@@ -8054,7 +8061,8 @@ function route() {
   else if (collection === "machine") openSystemPanel(part === "models" ? "models" : "machine");
   else if (collection === "workspace") showWorkspacePage(part);
   else if (collection === "docs" || collection === "guide") showArticlePage("help", collection === "guide" ? "start" : part || "reference");
-  else if (collection === "help" || collection === "resources") showArticlePage(collection, part);
+  else if (collection === "legal" && ["privacy", "security"].includes(part)) showArticlePage(part);
+  else if (["help", "resources", "privacy", "security"].includes(collection)) showArticlePage(collection, part);
   else if (collection === "books" || !articlePages[collection]) showBooksPage();
   else showArticlePage(collection, part);
 }

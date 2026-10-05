@@ -18,8 +18,8 @@ export const bookinatorAbout = defineProductAbout({
 const recordRoutes = Object.freeze({
   milestones: "#releases/milestones",
   roadmap: "#roadmap/priorities",
-  security: "#legal/security",
-  privacy: "#legal/privacy"
+  security: "#security",
+  privacy: "#privacy"
 });
 
 export function createBookinatorAboutPage({ root, tabs } = {}) {

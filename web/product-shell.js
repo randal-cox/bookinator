@@ -94,12 +94,14 @@ function createBackupAdapter() {
 }
 
 export const bookinatorShellPolicy = defineProductShellPolicy({
-  capabilities: ["resources"],
+  capabilities: ["resources", "security"],
   routes: {
     about: {href: "#about/premise", route: "about"},
-    help: {href: "#help/start", route: "help"}
+    help: {href: "#help/start", route: "help"},
+    privacy: {href: "#privacy", route: "privacy"},
+    security: {href: "#security", route: "security"}
   },
-  omit: ["privacy", "security", "milestones", "releases", "roadmap", "resources"],
+  omit: ["milestones", "releases", "roadmap", "resources"],
   extensions: [
     {id: "resources", href: "#resources/library", route: "resources", label: "Resources", group: "resources", after: "help", roles: ["developer", "team"], capability: "resources"}
   ]
@@ -146,7 +148,7 @@ export function mountBookinatorShell({active = "books", selectedBook = null} = {
       {href: selectedBook ? `#/book/${selectedBook.id}/${selectedAnalysisTab}` : "#/books", route: "analysis", label: "Analysis", selectedObject: {displayName: selectedBook?.title || "", emptyLabel: "No book selected"}},
       {href: "#/pipeline", route: "pipeline", label: "Pipeline", detail: "Local queue"}
     ],
-    footer: {links: productShellFooterLinks(bookinatorShellPolicy, {identity, capabilities: ["resources"]})}
+    footer: {links: productShellFooterLinks(bookinatorShellPolicy, {identity, capabilities: ["resources", "security"]})}
   });
 }
 
