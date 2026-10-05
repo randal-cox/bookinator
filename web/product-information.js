@@ -27,7 +27,9 @@ export function createBookinatorAboutPage({ root, tabs } = {}) {
   const controller = createProductAboutPage({
     root,
     productLabel: bookinatorAbout.product.name,
-    productContent: createProductDocsFlow({ sections })
+    productContent: createProductDocsFlow({ sections }),
+    about: bookinatorAbout,
+    recordIds: Object.keys(recordRoutes)
   });
   for (const [record, href] of Object.entries(recordRoutes)) {
     const link = root.querySelector(`.inator-record-link--${record}`);

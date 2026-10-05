@@ -81,6 +81,8 @@ def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
     assert "createBookinatorAboutPage" in app
     assert "createProductAboutPage" in information
     assert "createProductDocsFlow" in information
+    assert "about: bookinatorAbout" in information
+    assert "recordIds: Object.keys(recordRoutes)" in information
     for destination in ("milestones", "roadmap", "security", "privacy"):
         assert f'{destination}:' in information
     assert 'security: ["Security"' in pages

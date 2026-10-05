@@ -1,7 +1,7 @@
 import { articlePages, roadmapItems } from "./pages.js";
 import { createProductHistoryView } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
-import { createBookinatorAboutPage } from "./product-information.js";
+import { createBookinatorAboutPage } from "./product-information.js?v=about-records-185";
 import { mountBookinatorShell, mountBookinatorWorkspace } from "./product-shell.js?v=navigation-hydration-183";
 import { createBookinatorDocsFlow } from "./product-docs.js";
 import { fallbackIcon, imageFileToIcon, renderIcon, shortMark, unicodeIcon } from "./icon-picker.js?v=icon-contrast-110";
