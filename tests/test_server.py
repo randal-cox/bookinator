@@ -1386,6 +1386,28 @@ def test_current_run_tracks_only_work_remaining_at_start_and_expands_explicitly(
         assert json.loads(path.read_text(encoding="utf-8"))["books"]["book-two"]["baselineCompleted"] == 1
 
 
+def test_current_run_basis_migration_is_saved_once_and_survives_restart(tmp_path: Path) -> None:
+    path = tmp_path / "current-run.json"
+    path.write_text(json.dumps({
+        "schema": "bookinator-current-run-v1",
+        "id": "legacy-run",
+        "startedAt": "2026-09-01T00:00:00+00:00",
+        "status": "active",
+        "books": {},
+    }))
+    book = {"id": "book-one", "title": "One", "priority": "high", "pipeline": {"nextAction": "summarize"}}
+    pipeline = {"pipelineProgress": {"completed": 4, "total": 10}}
+
+    with patch.object(server, "CURRENT_RUN_PATH", path):
+        migrated = server.sync_current_pipeline_run([(book, pipeline)])
+        persisted = json.loads(path.read_text(encoding="utf-8"))
+        resumed = server.sync_current_pipeline_run([(book, pipeline)])
+
+    assert persisted["basisVersion"] == server.PIPELINE_RUN_BASIS_VERSION
+    assert persisted["id"] == migrated["id"] == resumed["id"]
+    assert persisted["startedAt"] == migrated["startedAt"] == resumed["startedAt"]
+
+
 def test_current_run_retains_deferred_projects_as_visible_ineligible_work() -> None:
     book = {"id": "deferred", "priority": "shelved", "pipeline": {"nextAction": ""}}
     pipeline = {"pipelineProgress": {"completed": 2, "total": 5}}

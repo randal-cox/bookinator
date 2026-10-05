@@ -1984,16 +1984,18 @@ def sync_current_pipeline_run(
     """Maintain a durable, honest denominator for work undertaken together."""
     with CURRENT_RUN_LOCK:
         run = {} if restart else load_current_pipeline_run()
+        new_run_created = False
         if run.get("basisVersion") != PIPELINE_RUN_BASIS_VERSION:
             run = {}
         candidates = [(book, pipeline) for book, pipeline in pipeline_records if current_run_candidate(book, pipeline)]
         if not run or (run.get("status") == "complete" and candidates):
             run = new_current_pipeline_run(pipeline_records)
+            new_run_created = True
         entries = run.setdefault("books", {})
         if not isinstance(entries, dict):
             entries = {}
             run["books"] = entries
-        changed = restart or not CURRENT_RUN_PATH.exists()
+        changed = restart or new_run_created or not CURRENT_RUN_PATH.exists()
         added_units = int(run.get("addedUnits") or 0)
         records = {str(book.get("id") or ""): (book, pipeline) for book, pipeline in pipeline_records}
         for book, pipeline in candidates:
