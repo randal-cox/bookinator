@@ -717,6 +717,7 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     page = (root / "src" / "index.html").read_text(encoding="utf-8")
     app = (root / "src" / "app.js").read_text(encoding="utf-8")
     adapter = (root / "src" / "pipeline-adapter.js").read_text(encoding="utf-8")
+    server_source = (root / "bookinator" / "server" / "__main__.py").read_text(encoding="utf-8")
     assert 'id="toggle-library-pipeline"' not in page
     assert 'id="global-pipeline-status"' not in page
     assert 'id="queue-books"' not in page
@@ -729,7 +730,8 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert page.index('id="pipeline-page"') < page.index('id="library-pipeline-panel"')
     assert 'id="library-pipeline-panel"' not in page[page.index('id="books-page"'):page.index('id="pipeline-page"')]
     assert "createAtomicPipelineWorkspace" in app
-    assert 'supportedActions: ["move-top", "raise", "lower", "pause", "resume"]' in app
+    assert "supportedActions:" not in app
+    assert 'supported = {"start", "stop", "restart-run", "move-top", "raise", "lower", "move-bottom", "pause", "resume", "stop-after", "rerun"}' in server_source
     assert 'assertPipelineSnapshotConformance, definePipelineSnapshot, pipelineControlIntent' in adapter
     assert 'definePipelineSnapshot(pipeline.snapshot || emptySnapshot)' in adapter
     assert 'assertPipelineSnapshotConformance(snapshot)' in adapter
@@ -755,9 +757,9 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert 'fetch("/api/library/pipeline/stop"' not in app
     assert 'id="library-pipeline-progress"' in page
     assert 'runName: "Current run"' in app
-    assert 'id="restart-current-run"' in page
-    assert 'class="pipeline-control-button pipeline-new-run"' in page
-    assert '<small>Start here</small>' in page
+    assert 'id="restart-current-run"' not in page
+    assert 'class="pipeline-control-button pipeline-new-run"' not in page
+    assert 'action == "restart-run"' in server_source
     assert "New run from here" not in page
     assert 'data-coverage-mode="analysis"' in page
     assert 'data-coverage-mode="reviewed"' in page
@@ -865,6 +867,47 @@ def test_commons_snapshot_expands_control_groups_into_the_atomic_denominator() -
         "project-a::tags::chapter-2",
     }
     assert next(unit for unit in snapshot["units"] if unit["id"] == "project-a::summarize")["children"][0]["status"] == "waiting"
+
+
+def test_commons_snapshot_uses_book_owned_atomic_duration_estimates() -> None:
+    book = {"id": "project-a", "title": "Alpha", "priority": "normal", "pipeline": {"nextAction": "summarize", "pausedActions": []}}
+    pipeline = {
+        "stages": [{"id": "summaries", "status": "pending", "model": "reader:1"}],
+        "chapters": [
+            {"sequence": 1, "title": "One", "status": "complete", "characterCount": 1_000, "chapterReadingStatus": "complete", "chapterReadingModel": "reader:1", "chapterReadingDurationSeconds": 10, "chapterReadingCompletedAt": "2026-10-01T00:00:00Z"},
+            {"sequence": 2, "title": "Two", "status": "complete", "characterCount": 2_000, "chapterReadingStatus": "complete", "chapterReadingModel": "reader:1", "chapterReadingDurationSeconds": 20, "chapterReadingCompletedAt": "2026-10-02T00:00:00Z"},
+            {"sequence": 3, "title": "Outlier", "status": "complete", "characterCount": 1_000, "chapterReadingStatus": "complete", "chapterReadingModel": "reader:1", "chapterReadingDurationSeconds": 1_000, "chapterReadingCompletedAt": "2026-10-03T00:00:00Z"},
+            {"sequence": 4, "title": "Next", "status": "pending", "characterCount": 3_000},
+        ],
+    }
+    run = {
+        "id": "run-estimate", "startedAt": "2026-10-04T00:00:00Z", "updatedAt": "2026-10-04T00:01:00Z",
+        "completed": 3, "bookCount": 1, "books": {"project-a": {"baselineCompleted": 3, "targetTotal": 4}},
+    }
+    queue = [{"bookId": "project-a", "action": "summarize", "task": "Chapter summaries", "state": "queued", "rank": 1}]
+
+    with patch.object(server, "load_queue_actions", return_value={}), patch.object(server, "load_settings", return_value={"primaryModel": "reader:1"}):
+        snapshot = server.build_commons_pipeline_snapshot([book], [(book, pipeline)], queue, run, enabled=True, running=False)
+
+    unit = next(unit for unit in snapshot["units"] if unit["id"] == "project-a::summarize")
+    child = unit["children"][0]
+    assert child["timingMethod"] == "chapter-reading"
+    assert child["estimate"]["durationMs"] == 30_000
+    assert child["estimate"]["sampleSize"] == 3
+    assert child["estimate"]["confidence"] == "low"
+    assert "per 1,000 input characters" in child["estimate"]["basis"]
+    assert child["estimate"]["evidence"]["match"] == "activity-model-provider"
+    assert child["estimate"]["evidence"]["predictionChecks"][0]["actualDurationMs"] == 10_000
+    assert unit["estimate"]["durationMs"] == 30_000
+    assert unit["estimate"]["source"] == server.PIPELINE_ESTIMATE_SOURCE
+
+
+def test_commons_parent_estimate_requires_complete_atomic_coverage() -> None:
+    children = [
+        {"id": "one", "estimate": {"durationMs": 5_000, "confidence": "high", "sampleSize": 10}},
+        {"id": "two", "estimate": None},
+    ]
+    assert server.aggregate_pipeline_estimates(children) is None
 
 
 def test_commons_pipeline_control_is_revision_checked_and_atomic(tmp_path: Path) -> None:

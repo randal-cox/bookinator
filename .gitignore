@@ -13,6 +13,8 @@ __pycache__/
 .inator/packages/*.tgz
 !.inator/packages/inator-dev-tools-0.4.1-dev.3.tgz
 !.inator/packages/inator-ui-0.4.1-dev.49.tgz
+!.inator/packages/inator-engine-0.1.0-dev.12.tgz
+!.inator/packages/inator-ui-0.4.1-dev.88.tgz
 
 # Generated exports and visual-QA intermediates.
 output/

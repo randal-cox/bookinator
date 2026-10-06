@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import mimetypes
 import os
 import platform
@@ -1478,6 +1479,187 @@ def pipeline_attempts_for_snapshot(unit_id: str, record: dict[str, object], stat
     return attempts, accepted if accepted in attempt_ids else None, current if current in attempt_ids else None
 
 
+PIPELINE_ESTIMATE_SOURCE = "bookinator-ledger-median-v1"
+PIPELINE_ESTIMATE_HISTORY_LIMIT = 40
+
+
+def robust_median(values: list[float]) -> float | None:
+    """Return a deterministic median without letting one pathological run lead."""
+    finite = sorted(float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(float(value)))
+    if not finite:
+        return None
+    middle = len(finite) // 2
+    return finite[middle] if len(finite) % 2 else (finite[middle - 1] + finite[middle]) / 2
+
+
+def pipeline_operation_provider(model: object, method: object) -> str:
+    """Name the runtime family without moving Book's model semantics into Commons."""
+    model_id = str(model or "").casefold()
+    method_id = str(method or "").casefold()
+    if "gliner" in model_id or method_id == "gliner-signals":
+        return "hugging-face-gliner"
+    if "hartmann" in model_id or method_id == "emotions":
+        return "hugging-face-transformers"
+    if "deterministic" in model_id or method_id == "prepare":
+        return "bookinator-deterministic"
+    return "ollama" if model_id else "bookinator-local"
+
+
+def pipeline_duration_history(
+    pipeline_records: list[tuple[dict[str, object], dict[str, object]]],
+) -> list[dict[str, object]]:
+    """Recover successful atomic timing observations from product-owned ledgers."""
+    observations: list[dict[str, object]] = []
+    for book, pipeline in pipeline_records:
+        for operation in pipeline_atomic_operations(book, pipeline):
+            duration_ms = float(operation.get("durationMs") or 0)
+            if operation.get("status") != "complete" or not math.isfinite(duration_ms) or duration_ms <= 0:
+                continue
+            method = str(operation.get("timingMethod") or operation.get("action") or "")
+            model = str(operation.get("model") or "")
+            observations.append({
+                "id": str(operation.get("id") or ""),
+                "method": method,
+                "model": model,
+                "provider": pipeline_operation_provider(model, method),
+                "inputCharacters": max(0, int(operation.get("inputCharacters") or 0)),
+                "durationMs": round(duration_ms),
+                "completedAt": str(operation.get("completedAt") or ""),
+            })
+    return observations
+
+
+def _pipeline_prediction_checks(samples: list[dict[str, object]]) -> tuple[list[dict[str, object]], float | None]:
+    """Cross-check the predictor against retained actuals without training on itself."""
+    checks: list[dict[str, object]] = []
+    for index, sample in enumerate(samples):
+        others = [candidate for offset, candidate in enumerate(samples) if offset != index]
+        if not others:
+            continue
+        input_characters = int(sample.get("inputCharacters") or 0)
+        sized = [candidate for candidate in others if int(candidate.get("inputCharacters") or 0) > 0]
+        predicted: float | None = None
+        if input_characters > 0 and sized:
+            rate = robust_median([
+                float(candidate["durationMs"]) / int(candidate["inputCharacters"])
+                for candidate in sized
+            ])
+            predicted = rate * input_characters if rate is not None else None
+        if predicted is None:
+            predicted = robust_median([float(candidate["durationMs"]) for candidate in others])
+        actual = float(sample.get("durationMs") or 0)
+        if predicted is None or actual <= 0:
+            continue
+        checks.append({
+            "sampleId": str(sample.get("id") or ""),
+            "inputCharacters": input_characters or None,
+            "predictedDurationMs": round(predicted),
+            "actualDurationMs": round(actual),
+            "absolutePercentageError": round(abs(predicted - actual) / actual, 4),
+            "completedAt": str(sample.get("completedAt") or "") or None,
+        })
+    error = robust_median([float(check["absolutePercentageError"]) for check in checks])
+    return checks[-8:], round(error, 4) if error is not None else None
+
+
+def estimate_pipeline_operation(
+    operation: dict[str, object],
+    history: list[dict[str, object]],
+    *,
+    default_model: str = "",
+    estimated_at: str = "",
+) -> dict[str, object] | None:
+    """Predict one Book operation from comparable model/provider history."""
+    method = str(operation.get("timingMethod") or operation.get("action") or "")
+    method_model = {
+        "gliner-signals": GLINER_MODEL_ID,
+        "emotions": EMOTION_MODEL_ID,
+        "chapter-archive": "deterministic",
+        "prepare": "deterministic",
+    }.get(method, "")
+    model = str(operation.get("model") or method_model or default_model or "")
+    provider = pipeline_operation_provider(model, method)
+    exact = [sample for sample in history if sample["method"] == method and sample["provider"] == provider and str(sample["model"]).casefold() == model.casefold()]
+    provider_matches = [sample for sample in history if sample["method"] == method and sample["provider"] == provider]
+    method_matches = [sample for sample in history if sample["method"] == method]
+    samples = exact or provider_matches or method_matches
+    if not samples:
+        return None
+    samples = sorted(samples, key=lambda sample: str(sample.get("completedAt") or ""))[-PIPELINE_ESTIMATE_HISTORY_LIMIT:]
+    input_characters = max(0, int(operation.get("inputCharacters") or 0))
+    sized = [sample for sample in samples if int(sample.get("inputCharacters") or 0) > 0]
+    duration_ms: float | None = None
+    if input_characters > 0 and sized:
+        rate = robust_median([
+            float(sample["durationMs"]) / int(sample["inputCharacters"])
+            for sample in sized
+        ])
+        duration_ms = rate * input_characters if rate is not None else None
+        rate_per_thousand = (rate or 0) * 1000
+        basis = f"Median {rate_per_thousand:,.0f} ms per 1,000 input characters across {len(sized)} {method} runs for {model or provider}; scaled to {input_characters:,} characters."
+    else:
+        duration_ms = robust_median([float(sample["durationMs"]) for sample in samples])
+        basis = f"Median wall time across {len(samples)} {method} runs for {model or provider}; no comparable input-size measure is retained."
+    if duration_ms is None:
+        return None
+    checks, median_error = _pipeline_prediction_checks(samples)
+    exact_match = bool(exact)
+    if exact_match and len(samples) >= 8 and median_error is not None and median_error <= 0.35:
+        confidence = "high"
+    elif exact_match and len(samples) >= 3 and (median_error is None or median_error <= 0.75):
+        confidence = "medium"
+    else:
+        confidence = "low"
+    if not exact_match:
+        basis += f" No exact history exists for {model or 'the current model'}; this low-confidence fallback uses {provider if provider_matches else method} history."
+    return {
+        "durationMs": max(1, round(duration_ms)),
+        "basis": basis,
+        "confidence": confidence,
+        "source": PIPELINE_ESTIMATE_SOURCE,
+        "estimatedAt": estimated_at or None,
+        "sampleSize": len(samples),
+        "evidence": {
+            "schema": "bookinator.pipeline-duration-evidence.v1",
+            "method": method,
+            "model": model or None,
+            "provider": provider,
+            "inputCharacters": input_characters or None,
+            "match": "activity-model-provider" if exact_match else "activity-provider" if provider_matches else "activity-only",
+            "medianAbsolutePercentageError": median_error,
+            "predictionChecks": checks,
+        },
+    }
+
+
+def aggregate_pipeline_estimates(children: list[dict[str, object]], *, estimated_at: str = "") -> dict[str, object] | None:
+    """Turn complete child coverage into one scheduling-row estimate for Commons."""
+    estimates = [child.get("estimate") for child in children if isinstance(child.get("estimate"), dict)]
+    if not children or len(estimates) != len(children):
+        return None
+    confidence_rank = {"low": 0, "medium": 1, "high": 2}
+    weakest = min((str(estimate.get("confidence") or "low") for estimate in estimates), key=lambda value: confidence_rank.get(value, 0))
+    sample_sizes = [int(estimate.get("sampleSize") or 0) for estimate in estimates]
+    checks = []
+    for child in children:
+        estimate = child["estimate"]
+        evidence = estimate.get("evidence") if isinstance(estimate.get("evidence"), dict) else {}
+        checks.extend({"workUnitId": child.get("id"), **check} for check in evidence.get("predictionChecks", []) if isinstance(check, dict))
+    return {
+        "durationMs": sum(int(estimate["durationMs"]) for estimate in estimates),
+        "basis": f"Sum of {len(estimates)} Bookinator atomic estimates. Each operation retains its activity, model/provider, input-size basis, and validation evidence.",
+        "confidence": weakest,
+        "source": PIPELINE_ESTIMATE_SOURCE,
+        "estimatedAt": estimated_at or None,
+        "sampleSize": min(sample_sizes) if sample_sizes else 0,
+        "evidence": {
+            "schema": "bookinator.pipeline-duration-evidence.v1",
+            "atomicOperationCount": len(estimates),
+            "predictionChecks": checks[-20:],
+        },
+    }
+
+
 def build_commons_pipeline_snapshot(
     books: list[dict[str, object]],
     pipeline_records: list[tuple[dict[str, object], dict[str, object]]],
@@ -1488,6 +1670,9 @@ def build_commons_pipeline_snapshot(
     running: bool,
 ) -> dict[str, object]:
     """Translate authoritative scheduler state into the Commons protocol."""
+    timing_history = pipeline_duration_history(pipeline_records)
+    default_model = configured_primary_model(load_settings())
+    estimated_at = str(current_run.get("updatedAt") or current_run.get("startedAt") or "")
     queue_by_book = {str(item.get("bookId") or ""): item for item in queue}
     records_by_book = {str(book.get("id") or ""): pipeline for book, pipeline in pipeline_records}
     pinned_actions = load_queue_actions()
@@ -1593,12 +1778,17 @@ def build_commons_pipeline_snapshot(
                         child_status = "blocked"
                     else:
                         child_status = "waiting"
-                children.append({
+                projected_child = {
                     **child,
                     "status": child_status,
                     "method": action,
-                    "provider": "local",
-                })
+                    "provider": pipeline_operation_provider(child.get("model") or default_model, child.get("timingMethod") or action),
+                }
+                projected_child["estimate"] = estimate_pipeline_operation(
+                    projected_child, timing_history, default_model=default_model, estimated_at=estimated_at
+                )
+                children.append(projected_child)
+            unit_estimate = aggregate_pipeline_estimates(children, estimated_at=estimated_at)
             units.append({
                 "id": unit_id,
                 "workUnitId": unit_id,
@@ -1607,13 +1797,14 @@ def build_commons_pipeline_snapshot(
                 "detail": str(record.get("detail") or ("Ready for the local worker." if status == "waiting" else "Waiting for prerequisite work.")),
                 "method": action,
                 "action": action,
-                "provider": "local",
+                "provider": pipeline_operation_provider(children[0].get("model") or default_model, children[0].get("timingMethod") or action),
                 "sequence": len(units) + 1,
                 "rank": int(queued.get("rank") or 9999) * 100 + order,
                 "status": status,
                 "dependencyIds": [],
                 "attempts": attempts,
                 "children": children,
+                "estimate": unit_estimate,
                 "acceptedAttemptId": accepted_attempt_id,
                 "currentAttemptId": current_attempt_id,
                 "inputSignature": record.get("inputSignature"),
@@ -1639,18 +1830,26 @@ def build_commons_pipeline_snapshot(
         if queued_action and not any(unit["id"] == queued_id for unit in units):
             unit_status = "running" if queued.get("state") == "running" else "waiting"
             attempts, _, current_attempt_id = pipeline_attempts_for_snapshot(queued_id, {}, unit_status)
+            queued_child = {
+                "id": f"{queued_id}::queued", "action": queued_action,
+                "label": str(queued.get("task") or queued_action.replace("-", " ").title()),
+                "detail": "The scheduler retained an explicit action outside the ordinary ledger projection.",
+                "method": queued_action, "timingMethod": queued_action,
+                "provider": pipeline_operation_provider(default_model, queued_action),
+                "status": unit_status, "sequence": 1,
+            }
+            queued_child["estimate"] = estimate_pipeline_operation(
+                queued_child, timing_history, default_model=default_model, estimated_at=estimated_at
+            )
             units.append({
                 "id": queued_id, "workUnitId": queued_id, "projectId": book_id,
                 "label": str(queued.get("task") or queued_action.replace("-", " ").title()),
                 "detail": "The local worker owns this job." if unit_status == "running" else "Ready for the local worker.",
-                "method": queued_action, "action": queued_action, "provider": "local",
+                "method": queued_action, "action": queued_action, "provider": queued_child["provider"],
                 "sequence": len(units) + 1, "rank": int(queued.get("rank") or 9999) * 100 + len(definitions),
                 "status": unit_status, "dependencyIds": [], "attempts": attempts,
-                "children": [{
-                    "id": f"{queued_id}::queued", "label": str(queued.get("task") or queued_action.replace("-", " ").title()),
-                    "detail": "The scheduler retained an explicit action outside the ordinary ledger projection.",
-                    "method": queued_action, "provider": "local", "status": unit_status, "sequence": 1,
-                }],
+                "children": [queued_child],
+                "estimate": aggregate_pipeline_estimates([queued_child], estimated_at=estimated_at),
                 "acceptedAttemptId": None, "currentAttemptId": current_attempt_id,
                 "policy": {"required": False, "paused": False, "pinned": pinned_actions.get(book_id) == queued_action, "stopAfter": False, "notifyOnComplete": False, "retry": "explicit", "recovery": "manual", "safeStopBoundary": "attempt"},
                 "gate": {"state": "not-required"}, "product": {"bookId": book_id, "action": queued_action},
@@ -1677,7 +1876,8 @@ def build_commons_pipeline_snapshot(
         "projects": [(project["id"], project["priority"]) for project in projects],
         "units": [(
             unit["id"], unit["status"], unit["rank"], unit["policy"]["paused"], unit["policy"]["pinned"], unit["gate"]["state"], unit.get("currentAttemptId"),
-            [(child["id"], child["status"]) for child in unit.get("children", [])],
+            (unit.get("estimate") or {}).get("durationMs"), (unit.get("estimate") or {}).get("confidence"),
+            [(child["id"], child["status"], (child.get("estimate") or {}).get("durationMs")) for child in unit.get("children", [])],
         ) for unit in units],
     }
     revision = int(hashlib.sha256(json.dumps(revision_basis, sort_keys=True).encode("utf-8")).hexdigest()[:12], 16)
@@ -1853,15 +2053,25 @@ def pipeline_atomic_operations(book: dict[str, object], pipeline: dict[str, obje
     }
     operations: list[dict[str, object]] = []
 
-    def append(action: str, suffix: str, label: str, status: object, detail: str = "") -> None:
-        operations.append({
+    def append(
+        action: str, suffix: str, label: str, status: object, detail: str = "", *,
+        timing_method: str = "", model: object = "", input_characters: object = 0,
+        duration_seconds: object = 0, completed_at: object = "",
+    ) -> None:
+        operation = {
             "id": f"{book_id}::{action}::{suffix}",
             "action": action,
             "label": label,
             "detail": detail,
             "status": pipeline_atomic_status(status),
             "sequence": len(operations) + 1,
-        })
+            "timingMethod": timing_method or action,
+            "model": str(model or ""),
+            "inputCharacters": max(0, int(input_characters or 0)),
+            "durationMs": max(0, round(float(duration_seconds or 0) * 1000)),
+            "completedAt": str(completed_at or ""),
+        }
+        operations.append(operation)
 
     next_action = str(book.get("pipeline", {}).get("nextAction") or pipeline.get("queuedAction") or "")
     if not manuscript_chapters:
@@ -1874,7 +2084,12 @@ def pipeline_atomic_operations(book: dict[str, object], pipeline: dict[str, obje
         sequence = str(chapter.get("sequence") or chapter.get("number") or index)
         chapter_label = str(chapter.get("title") or chapter.get("chapterTitle") or f"Chapter {index}")
         if chapter_archive:
-            append("prepare", f"chapter-{sequence}", f"Chapter archive · {chapter_label}", "complete" if chapter_archive.get("status") == "complete" else chapter_archive.get("status"), "Preserve the canonical chapter source artifact.")
+            append(
+                "prepare", f"chapter-{sequence}", f"Chapter archive · {chapter_label}",
+                "complete" if chapter_archive.get("status") == "complete" else chapter_archive.get("status"),
+                "Preserve the canonical chapter source artifact.", timing_method="chapter-archive",
+                model="deterministic", input_characters=chapter.get("characterCount"),
+            )
         chapter_passes = [
             ("summarize", "summaries", "status", "Chapter summary"),
             ("gliner-signals", "gliner-signals", "glinerStatus", "GLiNER signals"),
@@ -1888,7 +2103,29 @@ def pipeline_atomic_operations(book: dict[str, object], pipeline: dict[str, obje
             stage = stages.get(stage_id)
             if action != "summarize" and (not stage or stage.get("disabled")):
                 continue
-            append(action, f"chapter-{sequence}", f"{label} · {chapter_label}", chapter.get(status_key), str(stage.get("detail") or "") if stage else "")
+            prefix = {
+                "gliner-signals": "gliner", "emotions": "emotion", "tags": "tag",
+                "smells": "smell", "cumulative-context": "context", "llm-review": "llmReview",
+            }.get(action, "")
+            if action == "summarize":
+                shared_reading = chapter.get("chapterReadingStatus") is not None or chapter.get(status_key) != "complete"
+                timing_method = "chapter-reading" if shared_reading else "summarize"
+                model = chapter.get("chapterReadingModel") if shared_reading else chapter.get("model")
+                duration = chapter.get("chapterReadingDurationSeconds") if shared_reading else chapter.get("durationSeconds")
+                completed_at = chapter.get("chapterReadingCompletedAt") if shared_reading else chapter.get("completedAt")
+                input_characters = chapter.get("inputCharacters") or chapter.get("characterCount")
+            else:
+                timing_method = action
+                model = chapter.get(f"{prefix}Model")
+                duration = chapter.get(f"{prefix}DurationSeconds")
+                completed_at = chapter.get(f"{prefix}CompletedAt")
+                input_characters = chapter.get(f"{prefix}InputCharacters") or chapter.get("inputCharacters") or chapter.get("characterCount")
+            append(
+                action, f"chapter-{sequence}", f"{label} · {chapter_label}", chapter.get(status_key),
+                str(stage.get("detail") or "") if stage else "", timing_method=timing_method,
+                model=model or (stage or {}).get("model"), input_characters=input_characters,
+                duration_seconds=duration, completed_at=completed_at,
+            )
 
     chapter_sequences = {str(chapter.get("sequence") or chapter.get("number") or "") for chapter in manuscript_chapters}
     for index, chunk in enumerate(pipeline.get("chunks", []) if isinstance(pipeline.get("chunks"), list) else [], 1):
@@ -1898,7 +2135,13 @@ def pipeline_atomic_operations(book: dict[str, object], pipeline: dict[str, obje
         chapter_label = str(chunk.get("chapterLabel") or chunk.get("chapterTitle") or f"Chapter {chunk.get('chapterSequence') or '?'}")
         chunk_in_chapter = chunk.get("chunkInChapter")
         label = f"Chapter dossier · {chapter_label}" + (f" · Chunk {chunk_in_chapter}" if chunk_in_chapter not in (None, "") else "")
-        append("dossiers", f"chunk-{sequence}", label, chunk.get("dossierStatus"), str(stages.get("dossiers", {}).get("detail") or ""))
+        append(
+            "dossiers", f"chunk-{sequence}", label, chunk.get("dossierStatus"),
+            str(stages.get("dossiers", {}).get("detail") or ""), timing_method="dossiers",
+            model=chunk.get("dossierModel") or stages.get("dossiers", {}).get("model"),
+            input_characters=chunk.get("inputCharacters") or chunk.get("characterCount"),
+            duration_seconds=chunk.get("dossierDurationSeconds"), completed_at=chunk.get("dossierCompletedAt"),
+        )
 
     for action, key, label in (
         ("whole-summary", "wholeBookSummary", "Whole-book summary"),
@@ -1909,7 +2152,11 @@ def pipeline_atomic_operations(book: dict[str, object], pipeline: dict[str, obje
         record = pipeline.get(key)
         if not isinstance(record, dict) or record.get("disabled"):
             continue
-        append(action, "rollup", label, record.get("status"), str(record.get("detail") or ""))
+        append(
+            action, "rollup", label, record.get("status"), str(record.get("detail") or ""),
+            timing_method=action, model=record.get("model"), input_characters=record.get("inputCharacters"),
+            duration_seconds=record.get("durationSeconds"), completed_at=record.get("completedAt"),
+        )
     return operations
 
 
@@ -2227,6 +2474,12 @@ def persist_queue_action(book_id: str, action: str) -> None:
 
 def complete_queue_action(book_id: str, action: str) -> None:
     """Forget a durable request only after its requested pass returns."""
+    settings = load_settings()
+    if settings.get("pipelineStopAfterUnitId") == f"{book_id}::{action}":
+        settings.pop("pipelineStopAfterUnitId", None)
+        settings["pipelineEnabled"] = "false"
+        save_settings(settings)
+        QUEUE_CANCEL_EVENT.set()
     actions = load_queue_actions()
     if actions.get(book_id) != action:
         return
@@ -8735,7 +8988,7 @@ def apply_pipeline_control_intent(intent: dict[str, object]) -> dict[str, object
     if intent.get("schema") != PIPELINE_CONTROL_INTENT_SCHEMA:
         raise ValueError("Choose the supported pipeline control protocol.")
     action = str(intent.get("action") or "")
-    supported = {"start", "stop", "move-top", "raise", "lower", "pause", "resume"}
+    supported = {"start", "stop", "restart-run", "move-top", "raise", "lower", "move-bottom", "pause", "resume", "stop-after", "rerun"}
     if action not in supported:
         raise ValueError("Choose a supported pipeline action.")
     raw_unit_ids = intent.get("unitIds", [])
@@ -8746,7 +8999,7 @@ def apply_pipeline_control_intent(intent: dict[str, object]) -> dict[str, object
     snapshot = current["snapshot"]
 
     units_by_id = {str(unit["id"]): unit for unit in snapshot["units"]}
-    if action not in {"start", "stop"} and not unit_ids:
+    if action not in {"start", "stop", "restart-run"} and not unit_ids:
         raise ValueError("Select at least one pipeline unit.")
     unknown = [unit_id for unit_id in unit_ids if unit_id not in units_by_id]
     if unknown:
@@ -8757,6 +9010,10 @@ def apply_pipeline_control_intent(intent: dict[str, object]) -> dict[str, object
         start_global_pipeline()
     elif action == "stop":
         stop_global_pipeline()
+    elif action == "restart-run":
+        library = load_library()
+        pipeline_records = [(book, add_pipeline_progress(pipeline_for_client(str(book.get("id") or ""), load_pipeline(book)))) for book in library]
+        sync_current_pipeline_run(pipeline_records, restart=True)
     elif action == "move-top":
         for unit in reversed(selected):
             product = unit.get("product", {})
@@ -8764,6 +9021,21 @@ def apply_pipeline_control_intent(intent: dict[str, object]) -> dict[str, object
     elif action in {"raise", "lower"}:
         for project_id in dict.fromkeys(str(unit["projectId"]) for unit in selected):
             change_pipeline_project_priority(project_id, action)
+    elif action == "move-bottom":
+        selected_projects = list(dict.fromkeys(str(unit["projectId"]) for unit in selected))
+        queue = [book_id for book_id in load_queue() if book_id not in selected_projects]
+        save_queue([*queue, *selected_projects])
+    elif action == "stop-after":
+        settings = load_settings()
+        settings["pipelineStopAfterUnitId"] = str(selected[0]["id"])
+        save_settings(settings)
+    elif action == "rerun":
+        restart_actions = {"summarize": "restart", "dossiers": "dossier-restart", "emotions": "emotion-restart", "tags": "tag-restart", "smells": "smell-restart"}
+        for unit in selected:
+            product = unit.get("product", {})
+            book_id = str(product.get("bookId") or unit["projectId"])
+            unit_action = str(product.get("action") or unit.get("action") or "")
+            prioritize_pipeline_action(book_id, restart_actions.get(unit_action, unit_action))
     elif action in {"pause", "resume"}:
         paused = action == "pause"
         for unit in selected:

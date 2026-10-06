@@ -366,12 +366,9 @@ function renderPipelineQueue() {
   const list = document.querySelector("#pipeline-book-list");
   const progress = document.querySelector("#library-pipeline-progress");
   const summary = document.querySelector("#pipeline-queue-summary");
-  if (!list || !progress || !summary) return;
+  if (!list || !progress) return;
   const snapshot = currentPipelineSnapshot();
-  const active = Number(snapshot.progress?.active || 0);
-  summary.textContent = active
-    ? `${active.toLocaleString()} active atomic ${active === 1 ? "operation" : "operations"} in ${snapshot.units.length.toLocaleString()} scheduling ${snapshot.units.length === 1 ? "group" : "groups"}. Expand a Step to inspect the work counted by progress.`
-    : "No analysis operations are waiting.";
+  if (summary) summary.hidden = true;
   if (pipelineWorkspace) {
     pipelineWorkspace.update(snapshot);
     return;
@@ -380,10 +377,9 @@ function renderPipelineQueue() {
     progressMount: progress,
     queueMount: list,
     snapshot,
-    supportedActions: ["move-top", "raise", "lower", "pause", "resume"],
     showTidy: false,
-    showTiming: false,
-    showStartHere: false,
+    showTiming: true,
+    showStartHere: true,
     labels: { appName: "Bookinator", runName: "Current run", project: "Project" },
     onAction: handleCommonsPipelineAction
   });
@@ -1750,21 +1746,6 @@ document.querySelectorAll("[data-coverage-mode]").forEach((button) => button.add
   localStorage.setItem(pipelineCoverageKey, pipelineCoverageMode);
   updateGlobalPipelineStatus();
 }));
-
-document.querySelector("#restart-current-run").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  if (button.disabled) return;
-  button.disabled = true;
-  try {
-    const result = await handleBookinatorPipelineCommand({command: "restart-current-run"});
-    state.globalPipeline = result.pipeline || state.globalPipeline;
-    updateGlobalPipelineStatus();
-  } catch (error) {
-    await confirmAction({context: "Current run unchanged", title: "Bookinator could not start a fresh run", message: error.message, acceptLabel: "Close"});
-  } finally {
-    button.disabled = false;
-  }
-});
 
 const setupInstructions = {
   "operating-system": ["Update this computer to a supported operating system and architecture.", "Bookinator currently targets macOS 14+ on Apple silicon, current 64-bit Windows 10+, and explicitly tested 64-bit Linux distributions.", "Return here after the operating-system update; Bookinator will run the check again."],
