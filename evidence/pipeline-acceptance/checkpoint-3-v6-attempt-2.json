@@ -1,0 +1,301 @@
+{
+  "schema": "bookinator.pipeline-acceptance.v1",
+  "observedAt": "2026-10-16T17:46:01.745Z",
+  "subject": {
+    "bookId": "acceptance-dunwich",
+    "title": "The Dunwich Horror — Acceptance",
+    "source": "public-domain local fixture",
+    "developmentLimit": 4
+  },
+  "boundary": {
+    "baseURL": "http://127.0.0.1:4892",
+    "dataRootKind": "isolated-disposable",
+    "minimumAuthoredChapters": 3,
+    "rawManuscriptRetained": false
+  },
+  "summary": {
+    "status": "failed",
+    "checks": 20,
+    "passed": 12,
+    "failed": 8
+  },
+  "checks": [
+    {
+      "id": "checkpoint.locked",
+      "status": "passed",
+      "evidence": {
+        "status": "paused",
+        "phase": "development-checkpoint",
+        "locked": true,
+        "limit": 4
+      }
+    },
+    {
+      "id": "chapters.minimum",
+      "status": "passed",
+      "evidence": {
+        "completedSpecimens": 3,
+        "required": 3
+      }
+    },
+    {
+      "id": "chapter.2.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 657.7
+      }
+    },
+    {
+      "id": "chapter.2.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.2.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 46,
+        "exactInCanonicalSource": 46
+      }
+    },
+    {
+      "id": "chapter.2.semantic-hygiene",
+      "status": "failed",
+      "evidence": {
+        "endingCovered": false,
+        "endingReason": "no-anchored-final-quarter-fact",
+        "castEntries": 12,
+        "uniqueCanonicalCast": 9,
+        "castRolesEvidenceBound": true
+      }
+    },
+    {
+      "id": "chapter.2.referential-integrity",
+      "status": "failed",
+      "evidence": {
+        "unresolvedSubjects": [
+          "G001",
+          "G002"
+        ],
+        "unsupportedKinshipClaims": []
+      }
+    },
+    {
+      "id": "chapter.2.review-structure",
+      "status": "failed",
+      "evidence": {
+        "editorialVerdict": "no_material_concerns",
+        "rubricDimensions": 10,
+        "applicableDimensionsHaveExactEvidence": false
+      }
+    },
+    {
+      "id": "chapter.3.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 621.5
+      }
+    },
+    {
+      "id": "chapter.3.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.3.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 32,
+        "exactInCanonicalSource": 32
+      }
+    },
+    {
+      "id": "chapter.3.semantic-hygiene",
+      "status": "failed",
+      "evidence": {
+        "endingCovered": false,
+        "endingReason": "no-anchored-final-quarter-fact",
+        "castEntries": 7,
+        "uniqueCanonicalCast": 7,
+        "castRolesEvidenceBound": true
+      }
+    },
+    {
+      "id": "chapter.3.referential-integrity",
+      "status": "failed",
+      "evidence": {
+        "unresolvedSubjects": [
+          "G001",
+          "G002",
+          "G003",
+          "G006"
+        ],
+        "unsupportedKinshipClaims": []
+      }
+    },
+    {
+      "id": "chapter.3.review-structure",
+      "status": "failed",
+      "evidence": {
+        "editorialVerdict": "no_material_concerns",
+        "rubricDimensions": 10,
+        "applicableDimensionsHaveExactEvidence": false
+      }
+    },
+    {
+      "id": "chapter.4.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 863.3
+      }
+    },
+    {
+      "id": "chapter.4.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.4.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 30,
+        "exactInCanonicalSource": 30
+      }
+    },
+    {
+      "id": "chapter.4.semantic-hygiene",
+      "status": "failed",
+      "evidence": {
+        "endingCovered": true,
+        "endingReason": "late-fact-overlap",
+        "castEntries": 3,
+        "uniqueCanonicalCast": 3,
+        "castRolesEvidenceBound": false
+      }
+    },
+    {
+      "id": "chapter.4.referential-integrity",
+      "status": "failed",
+      "evidence": {
+        "unresolvedSubjects": [
+          "G001",
+          "G003",
+          "G004",
+          "G005"
+        ],
+        "unsupportedKinshipClaims": [
+          "Wilbur, the son of Old Whateley"
+        ]
+      }
+    },
+    {
+      "id": "chapter.4.review-structure",
+      "status": "passed",
+      "evidence": {
+        "editorialVerdict": "no_material_concerns",
+        "rubricDimensions": 10,
+        "applicableDimensionsHaveExactEvidence": true
+      }
+    }
+  ],
+  "chapters": [
+    {
+      "sequence": 2,
+      "label": "1",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 657.7,
+      "sourceSha256": "10c88de450b8021fa7a90983dc1371b64a4b319dc6d9312c8675b6d5d7d45101",
+      "artifactSha256": "4039ccfb34ad52811f44b160f7d0bfad094be62f2ffc778d11fa5c0ba8490352",
+      "claims": 27,
+      "evidenceAnchors": 46,
+      "exactEvidenceAnchors": 46,
+      "endingCovered": false,
+      "castEntries": 12,
+      "uniqueCanonicalCast": 9,
+      "castRolesEvidenceBound": true,
+      "unresolvedSubjects": [
+        "G001",
+        "G002"
+      ],
+      "unsupportedKinshipClaims": [],
+      "rubricDimensions": 10,
+      "applicableDimensionsHaveExactEvidence": false
+    },
+    {
+      "sequence": 3,
+      "label": "2",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 621.5,
+      "sourceSha256": "79576d5057b054ea869e294eb19a729bf93fce8a6aae31c90227818f3d9a5bf7",
+      "artifactSha256": "1e066ee4195b2d7a990884d25cdb93cc1d6b763d4cfee808878e0d17f7903063",
+      "claims": 16,
+      "evidenceAnchors": 32,
+      "exactEvidenceAnchors": 32,
+      "endingCovered": false,
+      "castEntries": 7,
+      "uniqueCanonicalCast": 7,
+      "castRolesEvidenceBound": true,
+      "unresolvedSubjects": [
+        "G001",
+        "G002",
+        "G003",
+        "G006"
+      ],
+      "unsupportedKinshipClaims": [],
+      "rubricDimensions": 10,
+      "applicableDimensionsHaveExactEvidence": false
+    },
+    {
+      "sequence": 4,
+      "label": "3",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 863.3,
+      "sourceSha256": "74fa02c98ad90217b0a71a089f3c6976870df56e1dbc3504fac46cf0e3d2ef1b",
+      "artifactSha256": "a926a5849f0f5652a35fe3a319596163f453f930af3e17a7ded67476583d27b7",
+      "claims": 20,
+      "evidenceAnchors": 30,
+      "exactEvidenceAnchors": 30,
+      "endingCovered": true,
+      "castEntries": 3,
+      "uniqueCanonicalCast": 3,
+      "castRolesEvidenceBound": false,
+      "unresolvedSubjects": [
+        "G001",
+        "G003",
+        "G004",
+        "G005"
+      ],
+      "unsupportedKinshipClaims": [
+        "Wilbur, the son of Old Whateley"
+      ],
+      "rubricDimensions": 10,
+      "applicableDimensionsHaveExactEvidence": true
+    }
+  ],
+  "limitations": [
+    "Exact source-anchor matching checks provenance integrity, not whether every interpretation is persuasive.",
+    "A local public-domain specimen does not represent every manuscript format, language, model, or hardware profile.",
+    "Human editorial judgment remains required for usefulness, omissions, tone, and commercial readiness."
+  ]
+}

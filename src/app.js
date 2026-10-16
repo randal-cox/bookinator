@@ -1,5 +1,5 @@
 import { articlePages } from "./pages.js";
-import { createAtomicPipelineWorkspace, createProductHistoryTabs, createWorkspaceCapabilityRegistry, createWorkspaceHost, machineWorkspaceCapability, modelsWorkspaceCapability, normalizeProductAboutTab } from "/commons/@inator/ui/index.js";
+import { createAtomicPipelineWorkspace, createProductHistoryTabs, createWorkspaceCapabilityRegistry, createWorkspaceHost, machineWorkspaceCapability, modelsWorkspaceCapability, normalizeProductAboutTab, setInatorTooltip } from "/commons/@inator/ui/index.js";
 import { bookinatorProductHistory } from "./product-history.js";
 import { createBookinatorPipelineControlIntent, createBookinatorPipelineSnapshot } from "./pipeline-adapter.js?v=commons-pipeline-203";
 import { createBookinatorAboutPage } from "./product-information.js?v=about-route-200";
@@ -48,6 +48,17 @@ const pipelineCoverageKey = "bookinator.pipeline-coverage.v1";
 // Keep destructive category resets isolated from customer-facing controls so a
 // release build can turn them off without changing the analysis toolbars.
 const developmentControlsEnabled = true;
+
+function hydrateInatorTooltips(root = document) {
+  if (root instanceof Element && root.matches("[data-inator-tooltip]")) setInatorTooltip(root, root.dataset.inatorTooltip);
+  root.querySelectorAll?.("[data-inator-tooltip]").forEach((node) => setInatorTooltip(node, node.dataset.inatorTooltip));
+}
+
+const tooltipObserver = new MutationObserver((records) => {
+  for (const record of records) for (const node of record.addedNodes) if (node instanceof Element) hydrateInatorTooltips(node);
+});
+tooltipObserver.observe(document.body, {childList: true, subtree: true});
+hydrateInatorTooltips();
 
 try {
   mountBookinatorShell();
@@ -380,7 +391,6 @@ function renderPipelineQueue() {
     showTidy: false,
     showTiming: true,
     showStartHere: true,
-    labels: { appName: "Bookinator", runName: "Current run", project: "Project" },
     onAction: handleCommonsPipelineAction
   });
 }
@@ -489,7 +499,7 @@ function render() {
     return;
   }
   directory.innerHTML = `
-    <div class="directory-heading"><span class="selection-header"><input type="checkbox" data-select-visible aria-label="Select all visible books"><button type="button" data-sort="selection" title="Sort selected books first" aria-label="Sort selected books first">${state.sort.key === "selection" ? state.sort.direction === "desc" ? "↓" : "↑" : "↕"}</button></span><span>${sortButton("title", "Book")}</span><span>${sortButton("priority", "Priority")}</span><span>${sortButton("length", "Length")}</span><span>${sortButton("analysis", "Analysis")}</span><span>${sortButton("ingested", "Ingested")}</span><span>${sortButton("changed", "Last change")}</span><span></span></div>
+    <div class="directory-heading"><span class="selection-header"><input type="checkbox" data-select-visible aria-label="Select all visible books"><button type="button" data-sort="selection" data-inator-tooltip="Sort selected books first" aria-label="Sort selected books first">${state.sort.key === "selection" ? state.sort.direction === "desc" ? "↓" : "↑" : "↕"}</button></span><span>${sortButton("title", "Book")}</span><span>${sortButton("priority", "Priority")}</span><span>${sortButton("length", "Length")}</span><span>${sortButton("analysis", "Analysis")}</span><span>${sortButton("ingested", "Ingested")}</span><span>${sortButton("changed", "Last change")}</span><span></span></div>
     ${books.map((book) => {
       const analysis = bookAnalysisProgress(book);
       const length = bookLengthMetrics(book);
@@ -501,13 +511,13 @@ function render() {
         : "";
       return `<article class="book-row${analysisComplete ? " analysis-complete" : ""}">
       <label class="book-selector"><input type="checkbox" data-select-book="${escapeHtml(book.id)}"${state.selection.has(book.id) ? " checked" : ""}><span class="sr-only">Select ${escapeHtml(book.title)}</span></label>
-      <div class="book-identity"><button type="button" class="book-cover${running ? " is-running" : ""} book-cover-edit" data-book-icon="${escapeHtml(book.id)}" data-open-book="${escapeHtml(book.id)}" aria-label="Open ${escapeHtml(book.title)}" title="Open book"></button><div><button type="button" class="book-title-link" data-open-book="${escapeHtml(book.id)}">${escapeHtml(book.title)}</button><span>${escapeHtml(book.author || "Author not specified")}</span>${duplicateIdentity}</div></div>
+      <div class="book-identity"><button type="button" class="book-cover${running ? " is-running" : ""} book-cover-edit" data-book-icon="${escapeHtml(book.id)}" data-open-book="${escapeHtml(book.id)}" aria-label="Open ${escapeHtml(book.title)}" data-inator-tooltip="Open book"></button><div><button type="button" class="book-title-link" data-open-book="${escapeHtml(book.id)}">${escapeHtml(book.title)}</button><span>${escapeHtml(book.author || "Author not specified")}</span>${duplicateIdentity}</div></div>
       <label class="priority-control priority-${escapeHtml(book.priority || "normal")}"><span class="sr-only">Priority for ${escapeHtml(book.title)}</span><select data-book-priority="${escapeHtml(book.id)}"><option value="high"${book.priority === "high" ? " selected" : ""}>High</option><option value="normal"${!book.priority || book.priority === "normal" ? " selected" : ""}>Normal</option><option value="low"${book.priority === "low" ? " selected" : ""}>Low</option><option value="shelved"${book.priority === "shelved" ? " selected" : ""}>Shelved</option></select></label>
       <span class="length-cell"><strong>${length.words > 0 ? `${length.words.toLocaleString()} words` : "Measuring…"}</strong><small>${[length.chapters > 0 ? countedLabel(length.chapters, "chapter") : "", length.bytes > 0 ? formatByteSize(length.bytes) : ""].filter(Boolean).join(" · ") || "Size pending"}</small></span>
       <span class="pipeline-cell"><strong>${analysis.percent}%</strong><small>${analysis.total ? `${analysis.completed.toLocaleString()} of ${analysis.total.toLocaleString()} required steps` : "awaiting chapter map"}</small></span>
       <span class="date-cell">${bookDateMarkup(book.ingestedAt)}</span>
       <span class="date-cell">${bookDateMarkup(book.pipeline?.updatedAt || book.updatedAt || book.createdAt)}</span>
-      <button class="row-action-icon-button" type="button" data-open-book="${escapeHtml(book.id)}" title="Open ${escapeHtml(book.title)}" aria-label="Open ${escapeHtml(book.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Z"/><path d="m13 7.5 3.5 3.5"/></svg></button>
+      <button class="row-action-icon-button" type="button" data-open-book="${escapeHtml(book.id)}" data-inator-tooltip="Open ${escapeHtml(book.title)}" aria-label="Open ${escapeHtml(book.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Z"/><path d="m13 7.5 3.5 3.5"/></svg></button>
     </article>`;
     }).join("")}`;
   books.forEach((book) => renderIcon(directory.querySelector(`[data-book-icon="${CSS.escape(book.id)}"]`), book.icon, book.title, book.author));
@@ -515,7 +525,7 @@ function render() {
   const visibleSelection = selectionState(books);
   headerSelection.checked = visibleSelection.checked;
   headerSelection.indeterminate = visibleSelection.indeterminate;
-  headerSelection.title = visibleSelection.indeterminate ? `Select all visible books (${visibleSelection.selectedCount} of ${visibleSelection.totalCount} selected)` : visibleSelection.checked ? "Clear visible selection" : "Select all visible books";
+  setInatorTooltip(headerSelection, visibleSelection.indeterminate ? `Select all visible books (${visibleSelection.selectedCount} of ${visibleSelection.totalCount} selected)` : visibleSelection.checked ? "Clear visible selection" : "Select all visible books");
   headerSelection.addEventListener("change", () => {
     const before = selectionState(books);
     if (before.indeterminate) {
@@ -835,7 +845,7 @@ function renderShadowHeadingDiagnostic(result) {
   const previewMarkup = result.preview ? `<section class="shadow-heading-preview ${result.preview.ok ? "pass" : "fail"}"><strong>${result.preview.ok ? "Dry-run reparse passes." : "The dry-run reparse still has heading mismatches."}</strong><span>${result.preview.ok ? "Using the current parser and approved boundaries would preserve every TIMMY / SHADOW heading. Nothing was written or queued." : "Inspect the dry-run counts before rebuilding or restarting analysis."}</span></section>` : "";
   results.className = `shadow-heading-results ${result.ok ? "pass" : "fail"}`;
   results.innerHTML = `${previewMarkup}<header><strong>${result.ok ? "The currently saved chapters agree with the source." : `${issueCount} chapter-level mismatch${issueCount === 1 ? "" : "es"} remain in the saved chapters.`}</strong><span>${escapeHtml(result.note || "")}</span></header>
-    <table><thead><tr><th>Marker</th><th>Original PDF</th><th>Saved headings</th><th>Dry-run headings</th><th>Saved malformed</th><th>Dry-run result</th></tr></thead><tbody>${rows}</tbody></table>
+    <table data-inator-native-table><thead><tr><th>Marker</th><th>Original PDF</th><th>Saved headings</th><th>Dry-run headings</th><th>Saved malformed</th><th>Dry-run result</th></tr></thead><tbody>${rows}</tbody></table>
     ${excludedMarkup}${chapterMarkup}${issueMarkup}`;
   results.hidden = false;
 }
@@ -888,7 +898,7 @@ function openExistingBook(bookId, {host = null} = {}) {
   document.querySelector("#book-original-ingested-at").textContent = formatBookDate(book.originalIngestedAt);
   const sourceDocument = document.querySelector("#book-source-filename");
   sourceDocument.innerHTML = book.sourceAvailable
-    ? `<a class="book-source-download" href="/api/books/${encodeURIComponent(book.id)}/source" download title="Download ${escapeHtml(book.sourceFilename || "source document")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 20h14"/></svg><span><strong>Download source</strong><small>${escapeHtml(book.sourceFilename || "Source document")}</small></span></a>`
+    ? `<a class="book-source-download" href="/api/books/${encodeURIComponent(book.id)}/source" download data-inator-tooltip="Download ${escapeHtml(book.sourceFilename || "source document")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 20h14"/></svg><span><strong>Download source</strong><small>${escapeHtml(book.sourceFilename || "Source document")}</small></span></a>`
     : `<span class="book-source-unavailable">Not available</span>`;
   manuscriptWell.hidden = Boolean(book.manuscriptId);
   document.querySelector("#manuscript-well-title").textContent = "Reconnect this manuscript";
@@ -1116,7 +1126,7 @@ document.querySelector("#run-inspector-expand")?.addEventListener("click", (even
   event.currentTarget.setAttribute("aria-pressed", String(expanded));
   event.currentTarget.querySelector("strong").textContent = expanded ? "Restore" : "Expand";
   event.currentTarget.querySelector("span").textContent = expanded ? "↙" : "↗";
-  event.currentTarget.title = expanded ? "Restore inspector size" : "Expand inspector";
+  setInatorTooltip(event.currentTarget, expanded ? "Restore inspector size" : "Expand inspector");
 });
 
 document.addEventListener("keydown", (event) => {
@@ -1193,11 +1203,11 @@ function refreshBookSaveState() {
   const hasAuthor = Boolean(authorInput.value.trim());
   const ready = state.editingBookId ? hasTitle : Boolean(state.draftManuscriptId && hasTitle && hasAuthor);
   saveBookButton.disabled = !ready;
-  saveBookButton.title = ready
+  setInatorTooltip(saveBookButton, ready
     ? ""
     : state.editingBookId
       ? "Enter a title before saving."
-      : "Wait for Bookinator to identify the manuscript, then confirm its title and author.";
+      : "Wait for Bookinator to identify the manuscript, then confirm its title and author.");
 }
 
 function selectedBookPriority() {
@@ -1932,6 +1942,7 @@ function showBooksPage() {
   document.querySelector("#workspace-page").hidden = true;
   mountBookinatorShell({active: "books", selectedBook: state.books.find((book) => book.id === state.currentBookId)});
   updateFooterRoute();
+  render();
   document.title = "Bookinator · Books";
 }
 
@@ -2608,7 +2619,7 @@ function chapterPipelineLedger(pipeline, book, openRows = new Set(), open = true
       baseDuration: completedDuration,
     });
     const groupDetails = `<section class="analysis-run-details chapter-group-run-details"><h3>Chapter processing total</h3><dl><dt>State</dt><dd>${escapeHtml(aggregateLabel)}</dd><dt>Processing time</dt><dd>${aggregateDuration}</dd><dt>Completed jobs</dt><dd>${complete.toLocaleString()} of ${group.tasks.length.toLocaleString()}</dd><dt>Waiting</dt><dd>${waiting.toLocaleString()}</dd><dt>Needs attention</dt><dd>${failed.toLocaleString()}</dd>${active ? `<dt>Running now</dt><dd>${escapeHtml(active.label)}</dd>` : ""}</dl><p>The total combines the elapsed processing time recorded by the elementary jobs below. Open an individual job to inspect its inputs and outputs.</p></section>`;
-    const statusControl = `<button class="chapter-status" data-show-chapter-group-details type="button" title="Show aggregate chapter processing time">${escapeHtml(aggregateLabel)}</button>`;
+    const statusControl = `<button class="chapter-status" data-show-chapter-group-details type="button" data-inator-tooltip="Show aggregate chapter processing time">${escapeHtml(aggregateLabel)}</button>`;
     return `<details class="pipeline-chapter-group ${escapeHtml(group.status)}" data-analysis-key="${escapeHtml(key)}"${open ? " open" : ""}><summary><span class="pipeline-chapter-number">${escapeHtml(group.sequence)}</span><span><strong>${escapeHtml(heading)}</strong><small>${active ? `${escapeHtml(active.label)} running · ` : ""}${complete.toLocaleString()} of ${group.tasks.length.toLocaleString()} jobs complete</small></span>${statusControl}<span class="pipeline-chapter-disclosure" aria-hidden="true">⌄</span></summary><div class="pipeline-chapter-tasks">${group.tasks.map((task) => stageMarkup(task, pipeline, book, openRows)).join("")}</div><template class="chapter-group-details-template">${groupDetails}</template></details>`;
   }).join("");
   return pipelineLedgerDisclosure({
@@ -2950,9 +2961,9 @@ function chapterAnalysisControlsMarkup({hasEmotions, hasTags, hasComments}) {
   const emotion = sourceAnalysisPreferences.emotion;
   const tag = sourceAnalysisPreferences.tag;
   return [
-    hasEmotions ? `<details class="source-analysis-setting emotion" data-analysis-settings="emotion"><summary aria-label="Emotion overlay settings" title="Emotions">${editorMarkerIcon("emotion", "joy")}<span class="sr-only">Emotions</span></summary><div class="source-analysis-menu"><label class="source-analysis-enabled"><input type="checkbox" data-analysis-enabled${emotion.enabled ? " checked" : ""}> Show emotions</label><label class="source-analysis-enabled neutral"><input type="checkbox" data-analysis-neutral${emotion.neutral ? " checked" : ""}> Include Neutral regions</label><label>Minimum emotion score <output data-analysis-output>${Number(emotion.threshold)}%</output></label><input data-analysis-threshold type="range" min="0" max="100" step="1" value="${Number(emotion.threshold)}"><div class="source-marker-presets"><button type="button" data-analysis-preset="5">Explore 5%</button><button type="button" data-analysis-preset="10">Balanced 10%</button><button type="button" data-analysis-preset="25">Strong 25%</button></div></div></details>` : "",
-    hasTags ? `<details class="source-analysis-setting tag" data-analysis-settings="tag"><summary aria-label="Tag overlay settings" title="Tags">${editorMarkerIcon("tag", "theme_topic")}<span class="sr-only">Tags</span></summary><div class="source-analysis-menu"><label class="source-analysis-enabled"><input type="checkbox" data-analysis-enabled${tag.enabled ? " checked" : ""}> Show tag evidence</label><label>Minimum tag score <output data-analysis-output>${Number(tag.threshold)}%</output></label><input data-analysis-threshold type="range" min="0" max="100" step="1" value="${Number(tag.threshold)}"><div class="source-marker-presets"><button type="button" data-analysis-preset="25">Trace 25%</button><button type="button" data-analysis-preset="50">Material 50%</button><button type="button" data-analysis-preset="75">Dominant 75%</button></div></div></details>` : "",
-    hasComments ? `<details class="source-analysis-setting comments" data-analysis-comments><summary aria-label="Editor comment display settings" title="Editor comments">${editorMarkerIcon("annotation", "comments")}<span class="sr-only">Editor comments</span></summary><div class="source-analysis-menu"><strong>Show editor comments</strong>${[["all", "Show active comments"], ["hidden", "Hide comments"]].map(([value, label]) => `<label class="source-comments-choice"><input type="radio" name="source-comments-mode" value="${value}" data-analysis-comments-mode${sourceAnalysisPreferences.comments.mode === value ? " checked" : ""}> ${label}</label>`).join("")}</div></details>` : "",
+    hasEmotions ? `<details class="source-analysis-setting emotion" data-analysis-settings="emotion"><summary aria-label="Emotion overlay settings" data-inator-tooltip="Emotions">${editorMarkerIcon("emotion", "joy")}<span class="sr-only">Emotions</span></summary><div class="source-analysis-menu"><label class="source-analysis-enabled"><input type="checkbox" data-analysis-enabled${emotion.enabled ? " checked" : ""}> Show emotions</label><label class="source-analysis-enabled neutral"><input type="checkbox" data-analysis-neutral${emotion.neutral ? " checked" : ""}> Include Neutral regions</label><label>Minimum emotion score <output data-analysis-output>${Number(emotion.threshold)}%</output></label><input data-analysis-threshold type="range" min="0" max="100" step="1" value="${Number(emotion.threshold)}"><div class="source-marker-presets"><button type="button" data-analysis-preset="5">Explore 5%</button><button type="button" data-analysis-preset="10">Balanced 10%</button><button type="button" data-analysis-preset="25">Strong 25%</button></div></div></details>` : "",
+    hasTags ? `<details class="source-analysis-setting tag" data-analysis-settings="tag"><summary aria-label="Tag overlay settings" data-inator-tooltip="Tags">${editorMarkerIcon("tag", "theme_topic")}<span class="sr-only">Tags</span></summary><div class="source-analysis-menu"><label class="source-analysis-enabled"><input type="checkbox" data-analysis-enabled${tag.enabled ? " checked" : ""}> Show tag evidence</label><label>Minimum tag score <output data-analysis-output>${Number(tag.threshold)}%</output></label><input data-analysis-threshold type="range" min="0" max="100" step="1" value="${Number(tag.threshold)}"><div class="source-marker-presets"><button type="button" data-analysis-preset="25">Trace 25%</button><button type="button" data-analysis-preset="50">Material 50%</button><button type="button" data-analysis-preset="75">Dominant 75%</button></div></div></details>` : "",
+    hasComments ? `<details class="source-analysis-setting comments" data-analysis-comments><summary aria-label="Editor comment display settings" data-inator-tooltip="Editor comments">${editorMarkerIcon("annotation", "comments")}<span class="sr-only">Editor comments</span></summary><div class="source-analysis-menu"><strong>Show editor comments</strong>${[["all", "Show active comments"], ["hidden", "Hide comments"]].map(([value, label]) => `<label class="source-comments-choice"><input type="radio" name="source-comments-mode" value="${value}" data-analysis-comments-mode${sourceAnalysisPreferences.comments.mode === value ? " checked" : ""}> ${label}</label>`).join("")}</div></details>` : "",
   ].join("");
 }
 
@@ -2970,9 +2981,9 @@ function annotatedChapterTextMarkupWithAnnotations(text, overlays, regions = [],
       const annotationMarkers = relevantAnnotations.filter((annotation) => !annotation.transient && Math.max(start, Number(annotation.characterStart)) === position).flatMap((annotation) => annotationCategories(annotation).map((category) => ({type: "annotation", iconKey: category, label: annotationCategoryLabel(category), annotation})));
       const allMarkers = [...annotationMarkers, ...markers];
       const markerMarkup = allMarkers.length ? `<span class="text-signal-markers" contenteditable="false">${allMarkers.map((marker) => {
-        if (marker.type === "annotation") return `<span class="text-signal-marker annotation annotation-${escapeHtml(marker.iconKey)}" data-annotation-id="${escapeHtml(marker.annotation.id)}" data-annotation-status="active" role="img" aria-label="${escapeHtml(marker.label)} annotation" title="${escapeHtml(marker.label)} annotation">${editorMarkerIcon("annotation", marker.iconKey)}</span>`;
+        if (marker.type === "annotation") return `<span class="text-signal-marker annotation annotation-${escapeHtml(marker.iconKey)}" data-annotation-id="${escapeHtml(marker.annotation.id)}" data-annotation-status="active" role="img" aria-label="${escapeHtml(marker.label)} annotation" data-inator-tooltip="${escapeHtml(marker.label)} annotation">${editorMarkerIcon("annotation", marker.iconKey)}</span>`;
         const percent = Math.round(marker.score * 100);
-        return `<span class="text-signal-marker ${escapeHtml(marker.type)} marker-${escapeHtml(marker.iconKey)}" data-source-marker-type="${escapeHtml(marker.type)}" data-source-marker-score="${percent}" role="img" aria-label="${escapeHtml(marker.label)} ${percent} percent" title="${escapeHtml(marker.label)} · ${percent}%">${editorMarkerIcon(marker.type, marker.iconKey)}</span>`;
+        return `<span class="text-signal-marker ${escapeHtml(marker.type)} marker-${escapeHtml(marker.iconKey)}" data-source-marker-type="${escapeHtml(marker.type)}" data-source-marker-score="${percent}" role="img" aria-label="${escapeHtml(marker.label)} ${percent} percent" data-inator-tooltip="${escapeHtml(marker.label)} · ${percent}%">${editorMarkerIcon(marker.type, marker.iconKey)}</span>`;
       }).join("")}</span>` : "";
       const next = boundaries[index + 1];
       const copy = escapeHtml(text.slice(position, next)).replace(/\n/g, "<br>");
@@ -2984,7 +2995,7 @@ function annotatedChapterTextMarkupWithAnnotations(text, overlays, regions = [],
         const percent = Math.round(region.score * 100);
         const label = emotionPresentation[region.label]?.[0] || signalLabel(region.label);
         classes.push("emotion-region", `emotion-${escapeHtml(region.label)}`);
-        attributes.push(`data-emotion-region-score="${percent}"`, `style="--emotion-region:${escapeHtml(region.color)}"`, `title="${escapeHtml(label)} region · ${percent}%"`);
+        attributes.push(`data-emotion-region-score="${percent}"`, `style="--emotion-region:${escapeHtml(region.color)}"`, `data-inator-tooltip="${escapeHtml(label)} region · ${percent}%"`);
       }
       if (annotation) {
         if (annotation.transient) {
@@ -3613,7 +3624,7 @@ function signalDescription(id, family = "") {
 
 function explainedSignalLabel(id, family = "") {
   const label = signalLabel(id);
-  return `<strong class="explained-signal" tabindex="0" data-tooltip-heading="${escapeHtml(label)}" data-tooltip="${escapeHtml(signalDescription(id, family))}">${escapeHtml(label)}<span aria-hidden="true">?</span></strong>`;
+  return `<strong class="explained-signal" tabindex="0" data-inator-tooltip="${escapeHtml(`${label}: ${signalDescription(id, family)}`)}">${escapeHtml(label)}<span aria-hidden="true">?</span></strong>`;
 }
 
 function emotionResultMarkup(artifact, chapter = {}) {
@@ -3785,7 +3796,7 @@ function wholeBookRollupRows(items, {kind, totalChapters, availableChapters = to
     const width = tag ? item.count / Math.max(totalChapters, 1) * 100 : emotion ? item.averageScore * 100 : item.count / maximum * 100;
     const metric = tag ? `${Math.round(item.averageScore * 100)}% avg` : emotion ? `${item.count} at 10%+` : `${item.count} ${item.count === 1 ? "finding" : "findings"}`;
     const chapterCount = `${item.chapters.length} ${item.chapters.length === 1 ? "chapter" : "chapters"}`;
-    const chapterLinks = item.chapters.length ? `<span class="whole-book-rollup-chapter-count" tabindex="0" aria-label="${escapeHtml(chapterCount)}; focus to show chapter links"><small>${escapeHtml(chapterCount)}</small><span class="whole-book-rollup-chapter-tooltip" role="group" aria-label="${escapeHtml(`${label} chapters`)}">${item.chapters.map((chapter) => `<button type="button" data-rollup-chapter="${chapter.sequence}" data-rollup-kind="${kind}" title="${escapeHtml(chapter.label)}" aria-label="Open ${escapeHtml(chapter.label)} ${escapeHtml(kind)} results">${escapeHtml(chapter.number)}</button>`).join("")}</span></span>` : `<small class="whole-book-rollup-no-chapters">None at threshold</small>`;
+    const chapterLinks = item.chapters.length ? `<span class="whole-book-rollup-chapter-count" tabindex="0" aria-label="${escapeHtml(chapterCount)}; focus to show chapter links"><small>${escapeHtml(chapterCount)}</small><span class="whole-book-rollup-chapter-tooltip" role="group" aria-label="${escapeHtml(`${label} chapters`)}">${item.chapters.map((chapter) => `<button type="button" data-rollup-chapter="${chapter.sequence}" data-rollup-kind="${kind}" data-inator-tooltip="${escapeHtml(chapter.label)}" aria-label="Open ${escapeHtml(chapter.label)} ${escapeHtml(kind)} results">${escapeHtml(chapter.number)}</button>`).join("")}</span></span>` : `<small class="whole-book-rollup-no-chapters">None at threshold</small>`;
     const marker = emotion ? `<span class="whole-book-rollup-emotion" style="--emotion:${escapeHtml(item.color)}">${escapeHtml(item.icon)}</span>` : `<span class="whole-book-rollup-rank">${offset + index + 1}</span>`;
     const name = tag ? explainedSignalLabel(item.id, item.family) : `<strong>${escapeHtml(label)}</strong>`;
     return `<article class="whole-book-rollup-row" data-rollup-row${tag ? ` data-rollup-family="${escapeHtml(item.family)}"` : ""}${index + offset >= visibleLimit ? " hidden" : ""}>${marker}<div class="whole-book-rollup-name">${name}<small>${escapeHtml(secondary)}</small></div><div class="whole-book-rollup-frequency"><span><b>${escapeHtml(metric)}</b>${chapterLinks}</span><i style="--rollup-width:${Math.max(2, width)}%"><b></b></i></div></article>`;
@@ -3951,7 +3962,7 @@ function pipelineControl({action = "", label, title, stop = false, danger = fals
       ? '<path d="M4 11a8 8 0 1 1 2.3 6.1"/><path d="M4 5v6h6"/>'
       : '<path d="m8 5 11 7-11 7Z"/>';
   const attribute = stop ? "data-stop-reading" : `data-pipeline-action="${action}"`;
-  return `<button class="pipeline-control-button${stop || danger ? " danger" : ""}" ${attribute}${development ? " data-development-control" : ""} type="button" title="${escapeHtml(title)}"${disabled ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><small>${escapeHtml(label)}</small></button>`;
+  return `<button class="pipeline-control-button${stop || danger ? " danger" : ""}" ${attribute}${development ? " data-development-control" : ""} type="button" data-inator-tooltip="${escapeHtml(title)}"${disabled ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><small>${escapeHtml(label)}</small></button>`;
 }
 
 function resetCategoryControl(action, category) {
@@ -3965,7 +3976,7 @@ function resetCategoryControl(action, category) {
 }
 
 function collapseAnalysisControl() {
-  return '<button class="pipeline-control-button" data-collapse-analysis type="button" title="Collapse all open disclosures"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5-5 5 5"/><path d="m7 17 5-5 5 5"/></svg><small>Collapse</small></button>';
+  return '<button class="pipeline-control-button" data-collapse-analysis type="button" data-inator-tooltip="Collapse all open disclosures"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5-5 5 5"/><path d="m7 17 5-5 5 5"/></svg><small>Collapse</small></button>';
 }
 
 const workspaceIcons = {
@@ -4067,7 +4078,7 @@ function workspacePipelineNeedsPolling(bookId, pipeline) {
 
 function renderWorkspaceNavigation(container, book, activeTab) {
   const activeGroup = workspaceGroupForTab(activeTab);
-  const groupMarkup = (group, label, icon) => `<button type="button" class="book-tool-button workspace-group-button${activeGroup === group ? " is-active" : ""}" data-workspace-group="${group}" aria-expanded="${activeGroup === group && !workspaceGroupState(book.id, group).collapsed}" title="${label} workspace"><span class="book-tool-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${workspaceIcons[icon]}</svg></span><span class="workspace-group-copy"><small>${label}</small><span class="workspace-group-status" data-workspace-group-status="${group}">${group === "analysis" ? "Analysis tools" : "Linked reports"}</span></span><span class="workspace-group-chevron" aria-hidden="true">⌄</span></button>`;
+  const groupMarkup = (group, label, icon) => `<button type="button" class="book-tool-button workspace-group-button${activeGroup === group ? " is-active" : ""}" data-workspace-group="${group}" aria-expanded="${activeGroup === group && !workspaceGroupState(book.id, group).collapsed}" data-inator-tooltip="${label} workspace"><span class="book-tool-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${workspaceIcons[icon]}</svg></span><span class="workspace-group-copy"><small>${label}</small><span class="workspace-group-status" data-workspace-group-status="${group}">${group === "analysis" ? "Analysis tools" : "Linked reports"}</span></span><span class="workspace-group-chevron" aria-hidden="true">⌄</span></button>`;
   const shelf = activeGroup && !workspaceGroupState(book.id, activeGroup).collapsed
     ? `<div class="book-workspace-shelf" data-workspace-shelf="${activeGroup}" aria-label="${activeGroup === "analysis" ? "Analysis" : "Explore"} tools">${workspaceTabsForBook(book, activeGroup).map((id) => `${workspaceShelfEndTabs.has(id) ? '<span class="workspace-shelf-spacer" aria-hidden="true"></span>' : ""}${workspaceTabButton(workspaceTabs.find((tab) => tab.id === id), activeTab)}`).join("")}</div>`
     : "";
@@ -4205,7 +4216,7 @@ function workspaceSectionHeading({icon, title, subtitle, actions = "", metrics =
   const sideContent = `${metrics}${actions}${collapse ? collapseAnalysisControl() : ""}`;
   const side = sideContent ? `<div class="workspace-heading-side">${sideContent}</div>` : "";
   const help = explanationTitle || explanation
-    ? ` tabindex="0" data-tooltip-heading="${escapeHtml(explanationTitle)}" data-tooltip="${escapeHtml(explanation)}" aria-label="${escapeHtml(title)}: ${escapeHtml(explanationTitle)} ${escapeHtml(explanation)}"`
+    ? ` tabindex="0" data-inator-tooltip="${escapeHtml(`${explanationTitle}: ${explanation}`)}" aria-label="${escapeHtml(title)}: ${escapeHtml(explanationTitle)} ${escapeHtml(explanation)}"`
     : "";
   return `<header class="workspace-section-heading"><div class="workspace-heading-main${explanationTitle || explanation ? " has-help" : ""}"${help}><span class="workspace-section-icon${explanationTitle || explanation ? " has-help" : ""}" aria-hidden="true"><svg viewBox="0 0 24 24">${workspaceIcons[icon]}</svg></span><div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p></div></div>${side}</header>`;
 }
@@ -4220,7 +4231,7 @@ function progressActivity(activity = {}, fallback = "Bookinator is checking the 
   const structured = task && book
     ? `<span class="progress-live-copy"><strong>${escapeHtml(task)}</strong><small>${escapeHtml([book, item, model].filter(Boolean).join(" · "))}</small></span>`
     : `<span>${escapeHtml(copy)}</span>`;
-  return `<span class="progress-live ${stateName}" title="${escapeHtml(copy)}"><i aria-hidden="true"></i>${structured}</span>`;
+  return `<span class="progress-live ${stateName}" data-inator-tooltip="${escapeHtml(copy)}"><i aria-hidden="true"></i>${structured}</span>`;
 }
 
 function resolvedActivity(pipeline = null) {
@@ -4264,15 +4275,15 @@ function taskHeadingActions({action = "", extra = ""}) {
 }
 
 function timingChartControl(view) {
-  return `<button class="pipeline-control-button timing-chart-control" data-show-timing-chart="${escapeHtml(view)}" type="button" title="Chart saved elapsed times"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-5 3 2 5-7"/><circle cx="7" cy="15" r="1"/><circle cx="11" cy="10" r="1"/><circle cx="14" cy="12" r="1"/><circle cx="19" cy="5" r="1"/></svg><small>Timing</small></button>`;
+  return `<button class="pipeline-control-button timing-chart-control" data-show-timing-chart="${escapeHtml(view)}" type="button" data-inator-tooltip="Chart saved elapsed times"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-5 3 2 5-7"/><circle cx="7" cy="15" r="1"/><circle cx="11" cy="10" r="1"/><circle cx="14" cy="12" r="1"/><circle cx="19" cy="5" r="1"/></svg><small>Timing</small></button>`;
 }
 
 function chartExportControl() {
-  return `<details class="chart-export-menu" data-no-dialog-drag><summary class="pipeline-control-button" title="Export this chart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg><small>Export</small></summary><div role="menu"><button type="button" role="menuitem" data-chart-export="svg">SVG</button><button type="button" role="menuitem" data-chart-export="png">PNG</button><button type="button" role="menuitem" data-chart-export="pdf">PDF</button><button type="button" role="menuitem" data-chart-export="csv">CSV</button></div></details>`;
+  return `<details class="chart-export-menu" data-no-dialog-drag><summary class="pipeline-control-button" data-inator-tooltip="Export this chart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg><small>Export</small></summary><div role="menu"><button type="button" role="menuitem" data-chart-export="svg">SVG</button><button type="button" role="menuitem" data-chart-export="png">PNG</button><button type="button" role="menuitem" data-chart-export="pdf">PDF</button><button type="button" role="menuitem" data-chart-export="csv">CSV</button></div></details>`;
 }
 
 function reportExportControl(report) {
-  return `<details class="chart-export-menu report-export-menu"><summary class="pipeline-control-button" title="Export this report"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg><small>Export</small></summary><div role="menu"><button type="button" role="menuitem" data-report-export="${escapeHtml(report)}">PDF</button></div></details>`;
+  return `<details class="chart-export-menu report-export-menu"><summary class="pipeline-control-button" data-inator-tooltip="Export this report"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg><small>Export</small></summary><div role="menu"><button type="button" role="menuitem" data-report-export="${escapeHtml(report)}">PDF</button></div></details>`;
 }
 
 function downloadFile(content, filename, type) {
@@ -5081,7 +5092,7 @@ function openTimingChart(pipeline, view) {
     id: dialogId,
     className: "timing-chart-dialog",
     labelledBy: titleId,
-    content: `<header class="dialog-heading"><div class="timing-book-identity"><span class="timing-book-icon" data-timing-book-icon></span><span><strong id="${titleId}">${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author || "Author not specified")}</small></span></div><div class="timing-report-identity"><strong>${escapeHtml(analysisLabel)}</strong><small>${escapeHtml(timingLabel)}</small></div></header><div class="timing-chart-toolbar" data-no-dialog-drag><p>${view === "pipeline" ? `<strong>Total project analysis time: ${escapeHtml(formatRunDuration(totalElapsed))}.</strong> ` : ""}Hover for exact elapsed time${["pipeline", "inferences"].includes(view) ? "." : "; select a point to inspect its chapter."}</p><div class="timing-chart-header-actions"><button class="pipeline-control-button" type="button" data-timing-order aria-pressed="false" title="Order: pipeline order. Select to show longest first" aria-label="Reorder timing rows; currently in pipeline order"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h11M8 12h8M8 18h5"/><path d="M5 4v16M3 18l2 2 2-2"/></svg><small>Reorder</small></button><button class="pipeline-control-button" type="button" data-timing-zero aria-pressed="true" title="Start the elapsed-time axis at zero"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v15h15"/><path d="M8 16h.01M8 12h.01M8 8h.01"/></svg><small>Zero</small></button><button class="pipeline-control-button" type="button" data-fit-chart title="Fit the whole chart to the available area"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><path d="m3 8 5-5M21 8l-5-5M3 16l5 5M21 16l-5 5"/></svg><small>Fit</small></button>${chartExportControl()}</div></div><div class="timing-chart-scroll" data-timing-chart></div><div class="timing-tooltip" role="status" hidden></div>`,
+    content: `<header class="dialog-heading"><div class="timing-book-identity"><span class="timing-book-icon" data-timing-book-icon></span><span><strong id="${titleId}">${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author || "Author not specified")}</small></span></div><div class="timing-report-identity"><strong>${escapeHtml(analysisLabel)}</strong><small>${escapeHtml(timingLabel)}</small></div></header><div class="timing-chart-toolbar" data-no-dialog-drag><p>${view === "pipeline" ? `<strong>Total project analysis time: ${escapeHtml(formatRunDuration(totalElapsed))}.</strong> ` : ""}Hover for exact elapsed time${["pipeline", "inferences"].includes(view) ? "." : "; select a point to inspect its chapter."}</p><div class="timing-chart-header-actions"><button class="pipeline-control-button" type="button" data-timing-order aria-pressed="false" data-inator-tooltip="Order: pipeline order. Select to show longest first" aria-label="Reorder timing rows; currently in pipeline order"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h11M8 12h8M8 18h5"/><path d="M5 4v16M3 18l2 2 2-2"/></svg><small>Reorder</small></button><button class="pipeline-control-button" type="button" data-timing-zero aria-pressed="true" data-inator-tooltip="Start the elapsed-time axis at zero"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v15h15"/><path d="M8 16h.01M8 12h.01M8 8h.01"/></svg><small>Zero</small></button><button class="pipeline-control-button" type="button" data-fit-chart data-inator-tooltip="Fit the whole chart to the available area"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><path d="m3 8 5-5M21 8l-5-5M3 16l5 5M21 16l-5 5"/></svg><small>Fit</small></button>${chartExportControl()}</div></div><div class="timing-chart-scroll" data-timing-chart></div><div class="timing-tooltip" role="status" hidden></div>`,
   });
   renderIcon(overlay.querySelector("[data-timing-book-icon]"), book.icon, book.title, book.author);
   const chart = overlay.querySelector("[data-timing-chart]");
@@ -5113,7 +5124,7 @@ function openTimingChart(pipeline, view) {
       const target = item.sequence ? ` data-timing-sequence="${item.sequence}"` : "";
       const titleLines = wrapChartTitle(item.title);
       const titleMarkup = titleLines.map((line) => `<tspan class="timing-label-title" x="${labelWidth - 18}" dy="15">${escapeHtml(line)}</tspan>`).join("");
-      return `<text class="timing-label" x="${labelWidth - 18}" y="${y(index) - (titleLines.length > 1 ? 15 : titleLines.length ? 7 : -4)}" text-anchor="end"><tspan>${escapeHtml(item.label)}</tspan>${titleMarkup}</text><line x1="${labelWidth}" x2="${width - right}" y1="${y(index)}" y2="${y(index)}" class="timing-row-guide"/><circle cx="${x(item.seconds)}" cy="${y(index)}" r="7" tabindex="0" role="button" data-timing-point data-timing-title="${escapeHtml(item.tooltip || item.label)}" data-timing-elapsed="${escapeHtml(formatRunDuration(item.seconds))}"${target}/>`;
+      return `<text class="timing-label" x="${labelWidth - 18}" y="${y(index) - (titleLines.length > 1 ? 15 : titleLines.length ? 7 : -4)}" text-anchor="end"><tspan>${escapeHtml(item.label)}</tspan>${titleMarkup}</text><line x1="${labelWidth}" x2="${width - right}" y1="${y(index)}" y2="${y(index)}" class="timing-row-guide"/><circle cx="${x(item.seconds)}" cy="${y(index)}" r="7" tabindex="0" role="button" data-timing-point data-timing-data-inator-tooltip="${escapeHtml(item.tooltip || item.label)}" data-timing-elapsed="${escapeHtml(formatRunDuration(item.seconds))}"${target}/>`;
     }).join("");
     chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" style="width:${width}px;height:${height}px" data-chart-layout-width="${width}" aria-label="Elapsed time by ${view === "pipeline" ? "pipeline step" : view === "inferences" ? "inference" : "chapter"}">${grid}<line x1="${labelWidth}" x2="${width - right}" y1="${plotBottom}" y2="${plotBottom}" class="timing-axis"/><text class="timing-axis-title" x="${labelWidth + (width - labelWidth - right) / 2}" y="${height - 4}" text-anchor="middle">Elapsed time</text><polyline points="${points}" class="timing-line"/>${nodes}</svg>`;
     chart.querySelectorAll("[data-timing-point]").forEach((node) => {
@@ -5143,7 +5154,7 @@ function openTimingChart(pipeline, view) {
   orderButton.addEventListener("click", () => {
     const byElapsed = orderButton.getAttribute("aria-pressed") !== "true";
     orderButton.setAttribute("aria-pressed", String(byElapsed));
-    orderButton.title = byElapsed ? "Order: longest elapsed time first. Select to restore pipeline order" : "Order: pipeline order. Select to show longest first";
+    setInatorTooltip(orderButton, byElapsed ? "Order: longest elapsed time first. Select to restore pipeline order" : "Order: pipeline order. Select to show longest first");
     orderButton.setAttribute("aria-label", byElapsed ? "Reorder timing rows; currently longest elapsed time first" : "Reorder timing rows; currently in pipeline order");
     rows.sort(byElapsed
       ? (left, right) => right.seconds - left.seconds || left.pipelineOrder - right.pipelineOrder
@@ -5227,11 +5238,11 @@ async function changeChapterBoundary(bookId, operation, page) {
 }
 
 function reviewChapterMapControl(label = "Review map") {
-  return `<button class="pipeline-control-button" data-open-chapter-map type="button" title="Inspect and approve the detected chapter structure"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h5M8 16h7"/></svg><small>${escapeHtml(label)}</small></button>`;
+  return `<button class="pipeline-control-button" data-open-chapter-map type="button" data-inator-tooltip="Inspect and approve the detected chapter structure"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h5M8 16h7"/></svg><small>${escapeHtml(label)}</small></button>`;
 }
 
 function approveChapterMapControl() {
-  return `<button class="pipeline-control-button" data-approve-chapter-map type="button" title="Approve this chapter map for downstream analysis"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><small>Approve</small></button>`;
+  return `<button class="pipeline-control-button" data-approve-chapter-map type="button" data-inator-tooltip="Approve this chapter map for downstream analysis"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><small>Approve</small></button>`;
 }
 
 function chapterMapReadyForReview(pipeline) {
@@ -5259,7 +5270,7 @@ function chapterLengthRollupMarkup(pipeline) {
   const bars = points.map((point) => {
     const width = Math.max(2, point.words / maximum * 100);
     const label = `${point.number} · ${point.title} · ${point.words.toLocaleString()} words`;
-    return `<li><button type="button" data-chapter-length-target="${point.sequence}" title="${escapeHtml(label)}" aria-label="Open ${escapeHtml(label)}"><b>${escapeHtml(point.number)}</b><i aria-hidden="true"><em style="--chapter-length:${width}%"></em></i><small>${point.words.toLocaleString()}</small></button></li>`;
+    return `<li><button type="button" data-chapter-length-target="${point.sequence}" data-inator-tooltip="${escapeHtml(label)}" aria-label="Open ${escapeHtml(label)}"><b>${escapeHtml(point.number)}</b><i aria-hidden="true"><em style="--chapter-length:${width}%"></em></i><small>${point.words.toLocaleString()}</small></button></li>`;
   }).join("");
   const stat = (label, point, value = point.words) => `<span><small>${escapeHtml(label)}</small><strong>${Number(value).toLocaleString()} words</strong>${point ? `<em>${escapeHtml(point.number)} · ${escapeHtml(point.title)}</em>` : ""}</span>`;
   return `<section class="chapter-length-rollup"><header><div>${stat("Shortest", shortest)}${stat("Median", null, median)}${stat("Longest", longest)}</div><p>${ratio ? `The longest chapter is ${ratio.toFixed(1)}× the length of the shortest.` : "Chapter lengths are shown in manuscript order."}</p></header><div class="chapter-length-chart"><div class="chapter-length-axis" aria-hidden="true"><span>Chapter</span><span>0</span><span>${Math.round(maximum / 2).toLocaleString()}</span><span>${maximum.toLocaleString()} words</span></div><ol aria-label="Chapter length in words">${bars}</ol></div></section>`;
@@ -5319,7 +5330,7 @@ function chapterBoundaryRecoveryMarkup(pipeline) {
   if (!pages.length) return "";
   const candidates = pipeline.chapterHeadingReport?.otherCandidates || [];
   const labelForPage = (page) => candidates.find((candidate) => (candidate.demotedPages || []).map(Number).includes(Number(page)))?.label || `Page ${Number(page).toLocaleString()}`;
-  return `<section class="chapter-boundary-recovery"><div><strong>${pages.length} excluded chapter ${pages.length === 1 ? "boundary" : "boundaries"}</strong><p>No text was deleted. Each excluded heading was folded into the preceding chapter and can be restored.</p></div><div>${pages.map((page) => `<button class="secondary-button heading-restore" data-restore-chapter-page="${Number(page)}" data-restore-chapter-title="${escapeHtml(displayHeading(labelForPage(page)))}" type="button">Restore ${escapeHtml(displayHeading(labelForPage(page)))}</button>`).join("")}</div></section>`;
+  return `<section class="chapter-boundary-recovery"><div><strong>${pages.length} excluded chapter ${pages.length === 1 ? "boundary" : "boundaries"}</strong><p>No text was deleted. Each excluded heading was folded into the preceding chapter and can be restored.</p></div><div>${pages.map((page) => `<button class="secondary-button heading-restore" data-restore-chapter-page="${Number(page)}" data-restore-chapter-data-inator-tooltip="${escapeHtml(displayHeading(labelForPage(page)))}" type="button">Restore ${escapeHtml(displayHeading(labelForPage(page)))}</button>`).join("")}</div></section>`;
 }
 
 function compactCharacterCount(value) {
@@ -5370,7 +5381,7 @@ function sourceMetricsMarkup(metrics, range = "", {className = "", title = "", c
   const parts = sourceMetricParts(metrics, range);
   if (!parts.primary && !parts.middle.length && !parts.pages) return "";
   const metric = (part) => `<span${part.accessible ? ` aria-label="${escapeHtml(part.accessible)}"` : ""}>${escapeHtml(part.text)}</span>`;
-  return `<span class="source-metric-stack ${escapeHtml(className)}"${title ? ` title="${escapeHtml(title)}"` : ""}>${caption ? `<small class="source-metric-caption">${escapeHtml(caption)}</small>` : ""}${parts.primary ? `<strong class="source-metric-primary">${metric(parts.primary)}</strong>` : ""}${parts.middle.length ? `<span class="source-metric-middle">${parts.middle.map(metric).join("")}</span>` : ""}${parts.pages ? `<strong class="source-metric-pages">${metric(parts.pages)}</strong>` : ""}</span>`;
+  return `<span class="source-metric-stack ${escapeHtml(className)}"${title ? ` data-inator-tooltip="${escapeHtml(title)}"` : ""}>${caption ? `<small class="source-metric-caption">${escapeHtml(caption)}</small>` : ""}${parts.primary ? `<strong class="source-metric-primary">${metric(parts.primary)}</strong>` : ""}${parts.middle.length ? `<span class="source-metric-middle">${parts.middle.map(metric).join("")}</span>` : ""}${parts.pages ? `<strong class="source-metric-pages">${metric(parts.pages)}</strong>` : ""}</span>`;
 }
 
 function analysisRowColumns({identity, metadata = "", reporting = ""}) {
@@ -5381,14 +5392,14 @@ function analysisStatusControl({status = "pending", label = "", inspectable = tr
   const normalized = ["blocked", "ready"].includes(status) ? "pending" : status;
   const statusLabel = label || (normalized === "pending" ? "Waiting" : signalLabel(normalized));
   const triggerAttribute = trigger === "stage" ? "data-show-stage-details" : "data-show-reading-details";
-  const attributes = inspectable ? ` ${triggerAttribute} type="button" title="${escapeHtml(title)}"` : "";
+  const attributes = inspectable ? ` ${triggerAttribute} type="button" data-inator-tooltip="${escapeHtml(title)}"` : "";
   const tag = inspectable ? "button" : "span";
   return `<${tag} class="chapter-status"${attributes}>${escapeHtml(statusLabel)}</${tag}>`;
 }
 
 function chapterSourceButton(sourceSequence, heading) {
   if (!sourceSequence) return "";
-  return `<button class="chapter-source-eye" type="button" data-view-chapter-source="${escapeHtml(sourceSequence)}" data-no-dialog-drag aria-label="View ${escapeHtml(heading)} manuscript text" title="View chapter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.7"/></svg></button>`;
+  return `<button class="chapter-source-eye" type="button" data-view-chapter-source="${escapeHtml(sourceSequence)}" data-no-dialog-drag aria-label="View ${escapeHtml(heading)} manuscript text" data-inator-tooltip="View chapter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.7"/></svg></button>`;
 }
 
 function chapterSourceMetadata(sourceSequence, heading, stats) {
@@ -5495,7 +5506,7 @@ function chapterMapRow(chapter, pipeline, book = {}) {
   const mapStatus = frontMatter ? "Excluded" : !mapReady ? "Building" : needsReview ? "Review" : pipeline.chapterMapApproved ? "Approved" : "Proposed";
   const mapStatusTone = frontMatter ? "neutral" : !mapReady ? "building" : needsReview ? "review" : pipeline.chapterMapApproved ? "approved" : "proposed";
   const correction = !frontMatter && Number(chapter.pageStart) !== firstAuthoredPage
-    ? `<button class="chapter-map-correction" data-demote-chapter data-chapter-page="${Number(chapter.pageStart)}" data-chapter-title="${escapeHtml(title)}" type="button" title="Review whether this heading should be folded into the preceding chapter">Not a chapter…</button>`
+    ? `<button class="chapter-map-correction" data-demote-chapter data-chapter-page="${Number(chapter.pageStart)}" data-chapter-data-inator-tooltip="${escapeHtml(title)}" type="button" data-inator-tooltip="Review whether this heading should be folded into the preceding chapter">Not a chapter…</button>`
     : "";
   const identity = `<span class="chapter-map-sequence">${Number(chapter.sequence || chapter.number || 0).toLocaleString()}</span><span class="chapter-map-title"><strong>${escapeHtml(title)}</strong>${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ""}<span class="chapter-map-verification"><span class="chapter-validation ${validationTone}"><i>${frontMatter ? "·" : needsReview ? "!" : "✓"}</i>${escapeHtml(validation)}</span>${correction}</span></span>`;
   const reporting = `<span class="chapter-map-status ${mapStatusTone}">${escapeHtml(mapStatus)}</span>`;
@@ -5521,7 +5532,7 @@ function markAnalysisResultWaiting(kind, id) {
   const badge = row.querySelector("[data-show-reading-details]");
   if (badge) {
     badge.textContent = "waiting";
-    badge.title = "Show queued run details";
+    setInatorTooltip(badge, "Show queued run details");
   }
 }
 
@@ -5844,7 +5855,7 @@ function dossierAuthoredChapters(pipeline) {
 
 function dossierChapterCircle(item, present = true) {
   const title = present ? [item.chapter, item.title, item.pages].filter(Boolean).join(" · ") : `${item.chapter}${item.title ? ` · ${item.title}` : ""} · Not present`;
-  return present ? `<button type="button" data-view-chapter-source="${item.sequence}" title="${escapeHtml(title)}">${escapeHtml(item.number)}</button>` : `<span class="absent" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(item.number)}</span>`;
+  return present ? `<button type="button" data-view-chapter-source="${item.sequence}" data-inator-tooltip="${escapeHtml(title)}">${escapeHtml(item.number)}</button>` : `<span class="absent" data-inator-tooltip="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(item.number)}</span>`;
 }
 
 function dossierIndexInspector(detailsMarkup, kind, label) {
@@ -5969,8 +5980,8 @@ function dossierIntersectionMarkup(pipeline, book, focusKind, focusLabel, showNo
       if (item.chapters.length) relationParts.push(`${item.chapters.length} shared ${item.chapters.length === 1 ? "chapter" : "chapters"}`);
       const relation = relationParts.join(" · ");
       const shared = new Map(item.chapters.map((chapter) => [chapter.sequence, chapter]));
-      const sharedChapters = `<div class="intersection-chapters" aria-label="Chapters where ${escapeHtml(focus.label)} and ${escapeHtml(item.label)} interact">${focusChapterList.map((chapter) => shared.has(chapter.sequence) ? dossierChapterCircle(shared.get(chapter.sequence)) : `<span class="no-interaction" title="${escapeHtml(chapter.chapter)} · No interaction with ${escapeHtml(item.label)}" aria-label="${escapeHtml(chapter.chapter)} · No interaction with ${escapeHtml(item.label)}">${escapeHtml(chapter.number)}</span>`).join("")}</div>`;
-      return `<article class="intersection-row ${item.sameSections ? "same-section" : "same-chapter"}"><button type="button" data-open-connection-item="${item.kind}" data-intersection-label="${escapeHtml(item.label)}" title="Inspect ${escapeHtml(item.label)}"><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(relation)}</small></button>${sharedChapters}</article>`;
+      const sharedChapters = `<div class="intersection-chapters" aria-label="Chapters where ${escapeHtml(focus.label)} and ${escapeHtml(item.label)} interact">${focusChapterList.map((chapter) => shared.has(chapter.sequence) ? dossierChapterCircle(shared.get(chapter.sequence)) : `<span class="no-interaction" data-inator-tooltip="${escapeHtml(chapter.chapter)} · No interaction with ${escapeHtml(item.label)}" aria-label="${escapeHtml(chapter.chapter)} · No interaction with ${escapeHtml(item.label)}">${escapeHtml(chapter.number)}</span>`).join("")}</div>`;
+      return `<article class="intersection-row ${item.sameSections ? "same-section" : "same-chapter"}"><button type="button" data-open-connection-item="${item.kind}" data-intersection-label="${escapeHtml(item.label)}" data-inator-tooltip="Inspect ${escapeHtml(item.label)}"><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(relation)}</small></button>${sharedChapters}</article>`;
     }).join("");
     return `<details class="intersection-group"><summary><span>${escapeHtml(kindNames[kind])}</span><strong>${related.length.toLocaleString()}</strong><small>${escapeHtml(hitters || "No shared chapter")}</small></summary><div>${rows || `<p>No ${kindNames[kind].toLocaleLowerCase()} share a chapter with this item.</p>`}</div></details>`;
   }).join("");
@@ -6045,7 +6056,7 @@ function emotionMapReportMarkup(pipeline) {
     const bars = emotions.map(([label, score]) => {
       const presentation = emotionPresentation[label] || [signalLabel(label), "#8393a8", "●"];
       representedEmotions.set(label, presentation);
-      return `<span class="emotion-map-bar" style="--emotion:${presentation[1]};--emotion-score:${Math.max(18, Number(score) * 100)}%" title="${escapeHtml(presentation[0])} · ${Math.round(Number(score) * 100)}%"><i aria-hidden="true">${escapeHtml(presentation[2])}</i><b>${escapeHtml(presentation[0])}</b><small>${Math.round(Number(score) * 100)}%</small></span>`;
+      return `<span class="emotion-map-bar" style="--emotion:${presentation[1]};--emotion-score:${Math.max(18, Number(score) * 100)}%" data-inator-tooltip="${escapeHtml(presentation[0])} · ${Math.round(Number(score) * 100)}%"><i aria-hidden="true">${escapeHtml(presentation[2])}</i><b>${escapeHtml(presentation[0])}</b><small>${Math.round(Number(score) * 100)}%</small></span>`;
     }).join("");
     const heading = displayHeading(chapter.title) || `Chapter ${chapter.number || chapter.sequence}`;
     const title = displayHeading(chapter.chapterTitle || "");
@@ -6432,7 +6443,7 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
     delete bookPage.dataset.connectionIntersectionKind;
     delete bookPage.dataset.connectionIntersectionLabel;
     const header = document.querySelector("#book-workspace-header");
-    header.innerHTML = `<div class="workspace-page-context"><p class="workspace-page-title">Analysis</p><p>Evidence, reports, and editorial work for this manuscript.</p></div><button type="button" class="workspace-book-icon" id="workspace-book-icon" title="Open book identity" aria-label="Open identity for ${escapeHtml(book.title)}"></button><div class="workspace-book-copy"><h1>${escapeHtml(book.title)}</h1><p>${escapeHtml(book.author || "Author not specified")}</p></div>`;
+    header.innerHTML = `<div class="workspace-page-context"><p class="workspace-page-title">Analysis</p><p>Evidence, reports, and editorial work for this manuscript.</p></div><button type="button" class="workspace-book-icon" id="workspace-book-icon" data-inator-tooltip="Open book identity" aria-label="Open identity for ${escapeHtml(book.title)}"></button><div class="workspace-book-copy"><h1>${escapeHtml(book.title)}</h1><p>${escapeHtml(book.author || "Author not specified")}</p></div>`;
     renderIcon(document.querySelector("#workspace-book-icon"), book.icon, book.title, book.author);
     document.querySelector("#workspace-book-icon").addEventListener("click", () => navigateWorkspaceTab(book.id, "identity"));
   }
@@ -7519,7 +7530,7 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
       const syncCollapseButton = () => {
         const anyOpen = disclosureRows.some((details) => details.open);
         collapseButton.disabled = !anyOpen;
-        collapseButton.title = anyOpen ? "Collapse all open disclosures" : "All disclosures are collapsed";
+        setInatorTooltip(collapseButton, anyOpen ? "Collapse all open disclosures" : "All disclosures are collapsed");
       };
       collapseButton.addEventListener("click", () => {
         disclosureRows.forEach((details) => details.removeAttribute("open"));
@@ -7634,84 +7645,6 @@ async function showBookPage(bookId, requestedTab = "", requestedInference = "", 
   }
 }
 
-function installTooltips() {
-  const tooltip = document.querySelector("#app-tooltip");
-  let owner = null;
-
-  const normalize = (root = document) => {
-    const candidates = [];
-    if (root.nodeType === 1 && root.hasAttribute?.("title")) candidates.push(root);
-    candidates.push(...root.querySelectorAll?.("[title]") || []);
-    for (const element of candidates) {
-      const copy = element.getAttribute("title")?.trim();
-      if (copy) element.dataset.tooltip = copy;
-      element.removeAttribute("title");
-    }
-  };
-
-  const hide = () => {
-    if (owner?.getAttribute("aria-describedby") === tooltip.id) owner.removeAttribute("aria-describedby");
-    owner = null;
-    tooltip.classList.remove("visible");
-    tooltip.hidden = true;
-  };
-
-  const show = (element) => {
-    const copy = element?.dataset.tooltip;
-    if (!copy) return;
-    owner = element;
-    const heading = element.dataset.tooltipHeading?.trim();
-    tooltip.replaceChildren();
-    tooltip.classList.toggle("rich", Boolean(heading));
-    if (heading) {
-      const title = document.createElement("strong");
-      title.textContent = heading;
-      tooltip.append(title);
-      const body = document.createElement("span");
-      body.textContent = copy;
-      tooltip.append(body);
-    } else {
-      tooltip.textContent = copy;
-    }
-    tooltip.hidden = false;
-    tooltip.classList.add("visible");
-    element.setAttribute("aria-describedby", tooltip.id);
-    const anchor = element.getBoundingClientRect();
-    const box = tooltip.getBoundingClientRect();
-    const gap = 9;
-    const margin = 10;
-    const above = anchor.top - box.height - gap;
-    const top = above >= margin ? above : Math.min(window.innerHeight - box.height - margin, anchor.bottom + gap);
-    const centered = anchor.left + anchor.width / 2 - box.width / 2;
-    const left = Math.max(margin, Math.min(window.innerWidth - box.width - margin, centered));
-    tooltip.style.left = `${Math.round(left)}px`;
-    tooltip.style.top = `${Math.round(top)}px`;
-  };
-
-  normalize();
-  new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.type === "attributes") normalize(mutation.target);
-      else for (const node of mutation.addedNodes) if (node.nodeType === 1) normalize(node);
-    }
-  }).observe(document.body, {subtree: true, childList: true, attributes: true, attributeFilter: ["title"]});
-
-  document.addEventListener("pointerover", (event) => {
-    const target = event.target.closest?.("[data-tooltip]");
-    if (target && target !== owner) show(target);
-  });
-  document.addEventListener("pointerout", (event) => {
-    if (owner && !owner.contains(event.relatedTarget)) hide();
-  });
-  document.addEventListener("focusin", (event) => show(event.target.closest?.("[data-tooltip]")));
-  document.addEventListener("focusout", (event) => {
-    if (owner && !owner.contains(event.relatedTarget)) hide();
-  });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") hide(); });
-  window.addEventListener("scroll", hide, true);
-  window.addEventListener("resize", hide);
-}
-
 function route() {
   const [collection = "books", part, tab, subtab] = location.hash.replace(/^#\/?/, "").split("/");
   if (collection === "book" && part) showBookPage(part, tab, subtab);
@@ -7801,7 +7734,6 @@ document.querySelector("#restart-pipeline-stage")?.addEventListener("click", asy
     event.currentTarget.disabled = false;
   }
 });
-installTooltips();
 installChapterFontControls();
 window.addEventListener("hashchange", async () => {
   if (identityFormIsInline()) {

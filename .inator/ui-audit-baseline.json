@@ -1,15 +1,14 @@
 {
   "schema": "inator.ui-audit-baseline.v2",
   "reviewed": true,
-  "reviewedAt": "2026-10-05T16:38:25.883Z",
-  "reviewAfter": "2027-01-03T16:38:25.883Z",
+  "reviewedAt": "2026-10-16T15:57:31.684Z",
+  "reviewAfter": "2027-01-14T15:57:31.684Z",
   "findings": [
+    "src/app.js: [UI-PIPELINE-NO-HIDDEN-TIDY] Products must not suppress the standard Pipeline Tidy control. Implement durable tidy semantics or record a dated, owned conformance exception in Commons.",
     "src/app.js: [UI-DIALOG-LITERAL-ROLE] Literal role=dialog markup bypasses the shared lifecycle, focus, movement, and containment contract; use createDialogSurface.",
-    "src/app.js: [UI-BUTTON-BAR-TOOL-CONTROLS] A toolbar or button bar must use shared icon-over-label tool controls.",
-    "src/app.js: [UI-LIST-NATIVE-TABLE-REVIEW] Native tables require explicit review; durable collections must use createListView.",
+    "src/app.js: [UI-BUTTON-BAR-TOOL-CONTROLS] A toolbar or button bar must use shared icon-over-label tool controls; document a narrow exception instead of shipping raw text buttons.",
     "src/index.html: [UI-DIALOG-LITERAL-ROLE] Literal role=dialog markup bypasses the shared lifecycle, focus, movement, and containment contract; use createDialogSurface.",
-    "src/index.html: [UI-BUTTON-BAR-TOOL-CONTROLS] A toolbar or button bar must use shared icon-over-label tool controls.",
-    "src/portable-report.js: [UI-LIST-NATIVE-TABLE-REVIEW] Native tables require explicit review; durable collections must use createListView.",
-    "src/styles.css: [UI-TYPOGRAPHY-FLOOR] Text below the 12px/.75rem Inator readability floor is blocked."
+    "src/index.html: [UI-BUTTON-BAR-TOOL-CONTROLS] A toolbar or button bar must use shared icon-over-label tool controls; document a narrow exception instead of shipping raw text buttons.",
+    "src/styles.css: [UI-TYPOGRAPHY-FLOOR] Text below the 12px/.75rem Inator readability floor requires remediation or an explicit reviewed exception."
   ]
 }

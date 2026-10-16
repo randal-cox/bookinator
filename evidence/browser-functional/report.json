@@ -1,0 +1,82 @@
+{
+  "schema": "bookinator.browser-functional.v1",
+  "observedAt": "2026-10-16T18:09:56.146Z",
+  "boundary": {
+    "browser": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "desktop": {
+      "width": 1280,
+      "height": 900
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844
+    },
+    "data": "temporary isolated public-domain fixture"
+  },
+  "observations": [
+    {
+      "id": "shell.identity",
+      "status": "passed",
+      "evidence": {
+        "action": "loaded the live library",
+        "assertion": "named product brand and Books route rendered"
+      }
+    },
+    {
+      "id": "domain.intake",
+      "status": "passed",
+      "evidence": {
+        "action": "uploaded the public-domain Markdown fixture and saved it shelved",
+        "assertion": "title and author were inferred, the record persisted, and the product opened its workspace"
+      }
+    },
+    {
+      "id": "domain.library-state",
+      "status": "passed",
+      "evidence": {
+        "action": "searched the live library, reloaded, and inspected priority",
+        "assertion": "shelved priority and search preference survived reload"
+      }
+    },
+    {
+      "id": "pipeline.shared-surface",
+      "status": "passed",
+      "evidence": {
+        "action": "opened Pipeline through product navigation",
+        "assertion": "shared progress and priority-order queue rendered from live server state"
+      }
+    },
+    {
+      "id": "workspace.identity",
+      "status": "passed",
+      "evidence": {
+        "action": "verified the shared form geometry, edited both attribution fields, enabled both roles, saved, and reloaded",
+        "assertion": "the form was centered and values plus pressed role state persisted in the rendered form"
+      }
+    },
+    {
+      "id": "domain.workspace",
+      "status": "passed",
+      "evidence": {
+        "action": "reopened the saved book workspace",
+        "assertion": "Identity, Analysis, Explore, and Reviewer domain groups were present"
+      }
+    },
+    {
+      "id": "responsive.390",
+      "status": "passed",
+      "evidence": {
+        "action": "loaded the real app at exactly 390px",
+        "assertion": "the rendered document had no horizontal page overflow"
+      }
+    },
+    {
+      "id": "runtime.errors",
+      "status": "passed",
+      "evidence": {
+        "action": "observed both browser sessions",
+        "assertion": "no uncaught page error or console error occurred"
+      }
+    }
+  ]
+}

@@ -437,7 +437,7 @@ export function buildPortableReportHtml(manifest) {
   const chapterLengthRows = d.chapters.map((chapter) => {
     const words = Number(chapter.wordCount) || 0;
     const label = [chapter.heading, chapter.title, n(words) + ' words'].filter(Boolean).join(' · ');
-    return '<div class="chapter-length-row" title="' + e(label) + '"><strong>' + e(chapter.sequence) + '</strong><span class="chapter-length-track"><i style="--chapter-length:' + Math.max(2, words / lengthMaximum * 100) + '%"></i></span><small>' + n(words) + ' words</small></div>';
+    return '<div class="chapter-length-row" aria-label="' + e(label) + '"><strong>' + e(chapter.sequence) + '</strong><span class="chapter-length-track"><i style="--chapter-length:' + Math.max(2, words / lengthMaximum * 100) + '%"></i></span><small>' + n(words) + ' words</small></div>';
   }).join('');
   if (has('chapter-length')) parts.push(section('chapter-length', 'Chapter length', d.chapters.length + ' chapters in reading order', chapterLengthRows ? '<div class="chapter-length-list">' + chapterLengthRows + '</div>' : empty('No chapter word counts were included.')));
 
@@ -501,7 +501,7 @@ export function buildPortableReportHtml(manifest) {
   const emotionProfile = emotionProfileRows ? '<section class="emotion-profile"><h3>Whole-book emotional profile</h3>' + emotionProfileRows + '</section>' : '';
   const emotionRows = emotional.map((chapter) => {
     const values = Object.entries(chapter.emotion).filter((item) => item[1] >= .1).sort((left, right) => right[1] - left[1]);
-    const bars = values.map((item, index) => '<span style="--emotion:' + palette[index % palette.length] + ';flex:' + Math.max(.08, item[1]) + '" title="' + e(item[0]) + ' ' + Math.round(item[1] * 100) + '%">' + e(item[0]) + '</span>').join('');
+    const bars = values.map((item, index) => '<span style="--emotion:' + palette[index % palette.length] + ';flex:' + Math.max(.08, item[1]) + '" aria-label="' + e(item[0]) + ' ' + Math.round(item[1] * 100) + '%">' + e(item[0]) + '</span>').join('');
     return '<div class="emotion-row" data-search-item><strong>' + e(chapter.heading) + '</strong><div class="emotion-bars">' + (bars || '<small>No emotion at 10% or higher</small>') + '</div></div>';
   }).join('');
   if (has('emotions')) parts.push(section('emotions', 'Emotional texture', emotional.length + ' chapters scored', emotionProfile + (emotionRows || empty('No completed emotion scores were included.'))));
@@ -530,7 +530,7 @@ export function buildPortableReportHtml(manifest) {
   if (has('smells')) parts.push(section('smells', 'Editorial findings', d.smells.length + ' retained', findings ? '<div class="finding-list">' + findings + '</div>' : empty('No retained prose findings were included.')));
 
   const provenance = d.provenance.map((item) => '<tr data-search-item><td>' + e(item.label || item.id) + '</td><td>' + status(item.status) + '</td><td>' + e(item.model || 'Not recorded') + '</td><td>' + e(duration(item.durationSeconds)) + '</td></tr>').join('');
-  if (has('method')) parts.push(section('method', 'Method and provenance', d.export.freshness, '<p>This export contains selected derived analysis only. It does not contain the source manuscript or chapter prose.</p><table class="method-table"><thead><tr><th>Analysis</th><th>Status</th><th>Model</th><th>Duration</th></tr></thead><tbody>' + provenance + '</tbody></table>'));
+  if (has('method')) parts.push(section('method', 'Method and provenance', d.export.freshness, '<p>This export contains selected derived analysis only. It does not contain the source manuscript or chapter prose.</p><table data-inator-native-table class="method-table"><thead><tr><th>Analysis</th><th>Status</th><th>Model</th><th>Duration</th></tr></thead><tbody>' + provenance + '</tbody></table>'));
   parts.push(section('guide', 'Using this report', 'A read-only Bookinator publication', '<div class="artifact-guide"><article><strong>Choose a view</strong><p>Use the menu to move among summaries, reviewer comments, questions, connections, findings, and methods. Browser Back and Forward work normally.</p></article><article><strong>Separate judgment from suggestion</strong><p>Reviewer comments record a person’s judgment and selected quotation. Machine observations remain editorial suggestions, not automatic corrections.</p></article><article><strong>Keep it portable</strong><p>This single file works offline. Send or archive it as-is; it cannot rerun analysis or alter the original Bookinator project.</p></article></div>'));
   parts.push(section('license', 'License', 'Bookinator 0.1.0', '<div class="license-summary"><strong>Business Source License 1.1.</strong> Personal, educational, research, and internal business use is allowed. The work changes to GPL-3.0-or-later on September 24, 2030.</div><div class="license-document">' + licenseMarkup(licenseText) + '</div>'));
 

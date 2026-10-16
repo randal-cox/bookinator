@@ -7,17 +7,25 @@
     "inator:doctor": "inator doctor",
     "ui:check": "inator audit-ui src --baseline .inator/ui-audit-baseline.json",
     "inator:ui-check": "inator audit-ui --baseline .inator/ui-audit-baseline.json",
-    "check": "npm run inator:ui-check"
+    "test:python": ".venv/bin/python -m pytest -q",
+    "test:lint": ".venv/bin/ruff check bookinator tests --output-format=concise",
+    "audit:pylint": ".venv/bin/pylint bookinator --reports=no --score=yes --exit-zero",
+    "test:syntax": "node --check src/app.js && node --check src/icon-picker.js && node --check src/portable-report.js && node --check tools/collect-pipeline-acceptance.mjs",
+    "test:functional": "node tests/browser-functional.mjs",
+    "test:pipeline-acceptance": "node tools/collect-pipeline-acceptance.mjs",
+    "check": "npm run test:syntax && npm run test:lint && npm run test:python && npm run inator:ui-check",
+    "milestone:check": "npm run check && npm run test:functional"
   },
   "devDependencies": {
-    "@inator/dev-tools": "file:.inator/packages/inator-dev-tools-0.4.1-dev.16.tgz"
+    "playwright-core": "^1.55.0",
+    "@inator/dev-tools": "file:.inator/packages/inator-dev-tools-0.4.1-dev.22.tgz"
   },
   "dependencies": {
-    "@inator/engine": "file:.inator/packages/inator-engine-0.1.0-dev.12.tgz",
-    "@inator/machine": "file:.inator/packages/inator-machine-0.1.0-dev.2.tgz",
-    "@inator/software": "file:.inator/packages/inator-software-0.1.0-dev.2.tgz",
-    "@inator/models": "file:.inator/packages/inator-models-0.1.0-dev.4.tgz",
-    "@inator/ui": "file:.inator/packages/inator-ui-0.4.1-dev.88.tgz"
+    "@inator/engine": "file:.inator/packages/inator-engine-0.1.0-dev.27.tgz",
+    "@inator/machine": "file:.inator/packages/inator-machine-0.1.0-dev.3.tgz",
+    "@inator/models": "file:.inator/packages/inator-models-0.1.0-dev.8.tgz",
+    "@inator/software": "file:.inator/packages/inator-software-0.1.0-dev.12.tgz",
+    "@inator/ui": "file:.inator/packages/inator-ui-0.4.1-dev.156.tgz"
   },
   "engines": {
     "node": ">=22"

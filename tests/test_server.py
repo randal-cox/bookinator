@@ -753,7 +753,9 @@ def test_library_delegates_global_queue_controls_and_project_priority_to_commons
     assert '/api/library/pipeline/current-run/restart' not in app
     assert 'fetch("/api/library/pipeline/stop"' not in app
     assert 'id="library-pipeline-progress"' in page
-    assert 'runName: "Current run"' in app
+    # Presentation labels belong to Commons; Book supplies domain records, not a
+    # product-specific vocabulary override.
+    assert 'labels: {' not in app
     assert 'id="restart-current-run"' not in page
     assert 'class="pipeline-control-button pipeline-new-run"' not in page
     assert 'action == "restart-run"' in server_source
@@ -1465,10 +1467,21 @@ def test_assessment_evidence_converts_passage_ids_to_readable_source_quotes() ->
     passages = server.source_evidence_passages(text)
     result = server.normalize_assessment_evidence(
         text,
-        [f"{passages[0]['id']} {passages[0]['characterStart']}:{passages[0]['characterEnd']}", passages[1]["id"], passages[2]["text"], passages[0]["id"]],
+        [
+            {"passage_id": passages[0]["id"], "quote": passages[0]["text"], "character_start": passages[0]["characterStart"], "character_end": passages[0]["characterEnd"]},
+            passages[1]["id"], passages[2]["text"], passages[0]["id"],
+        ],
     )
 
     assert result == [passages[0]["text"], passages[1]["text"], passages[2]["text"]]
+
+
+def test_assessment_schema_requires_exact_evidence_references_and_allows_inapplicable_dimensions() -> None:
+    evidence = server.llm_assessment_schema()["properties"]["dimensions"]["properties"]["clarity"]["properties"]["evidence"]
+
+    assert evidence["minItems"] == 0
+    assert evidence["maxItems"] == 3
+    assert evidence["items"]["required"] == ["passage_id", "quote", "character_start", "character_end"]
 
 
 def test_current_run_tracks_only_work_remaining_at_start_and_expands_explicitly(tmp_path: Path) -> None:
@@ -1574,6 +1587,24 @@ def test_next_pipeline_action_does_not_resurrect_a_stopped_book() -> None:
     assert next_pipeline_action(book, pipeline) == ""
 
 
+def test_next_pipeline_action_does_not_route_around_failed_combined_read() -> None:
+    book = {"id": "book-1234", "manuscriptId": "manuscript", "priority": "high"}
+    pipeline = {
+        "status": "ready",
+        "phase": "recovering",
+        "stages": [
+            {"id": "extraction", "status": "complete"},
+            {"id": "chapter-archive", "status": "complete"},
+            {"id": "summaries", "status": "failed"},
+            {"id": "dossiers", "status": "pending"},
+        ],
+        "chapters": [{"sequence": 2, "status": "failed", "chapterReadingStatus": "failed"}],
+        "chunks": [{"sequence": 1, "chapterSequence": 2, "dossierStatus": "pending"}],
+    }
+
+    assert next_pipeline_action(book, pipeline) == ""
+
+
 def test_retry_failed_analysis_is_selective_and_preserves_run_history(tmp_path: Path) -> None:
     import bookinator.server.__main__ as server
 
@@ -1602,6 +1633,37 @@ def test_retry_failed_analysis_is_selective_and_preserves_run_history(tmp_path: 
     assert pipeline["chunks"][0]["dossierRuns"][-1]["dossierError"] == "timeout"
     assert pipeline["chapters"][1]["summary"] == "Keep me"
     assert pipeline["chapters"][1]["tagStatus"] == "complete"
+
+
+def test_retry_failed_analysis_resets_combined_read_as_one_transaction(tmp_path: Path) -> None:
+    import bookinator.server.__main__ as server
+
+    pipeline = {
+        "status": "ready",
+        "stages": [
+            {"id": "summaries", "status": "failed"},
+            {"id": "dossiers", "status": "pending"},
+            {"id": "llm-review", "status": "failed"},
+        ],
+        "chapters": [{
+            "sequence": 2, "status": "failed", "chapterReadingStatus": "failed",
+            "chapterReadingModel": "reader", "chapterReadingDurationSeconds": 42.0,
+            "chapterReadingPhase": "consistency", "llmReviewStatus": "failed",
+            "error": "missing final movement", "llmReviewError": "missing final movement",
+        }],
+        "chunks": [{"sequence": 1, "chapterSequence": 2, "dossierStatus": "pending"}],
+    }
+    with patch("bookinator.server.__main__.chunk_artifacts_path", return_value=tmp_path):
+        count = server.retry_failed_analysis({"id": "book-1234"}, pipeline)
+
+    chapter = pipeline["chapters"][0]
+    assert count == 1
+    assert chapter["status"] == "pending"
+    assert chapter["chapterReadingStatus"] == "pending"
+    assert chapter["llmReviewStatus"] == "pending"
+    assert chapter["chapterReadingRuns"][-1]["chapterReadingPhase"] == "consistency"
+    assert chapter["chapterReadingRuns"][-1]["error"] == "missing final movement"
+    assert "llmReviewError" not in chapter
 
 
 def test_gliner_is_a_visible_elementary_step_before_chapter_reading() -> None:
@@ -1893,8 +1955,9 @@ def test_development_launcher_delegates_to_the_shared_inator_launcher() -> None:
     assert '"PYTHONPATH=$project_dir${PYTHONPATH:+:$PYTHONPATH}"' in launcher
     assert '"$launcher" "$@" -- "$python_bin" -m bookinator.server' in launcher
     requirement = manifest["capabilities"]["development-serving"]
-    assert requirement == {"package": "@inator/dev-tools", "version": "0.4.1-dev.16"}
-    assert package["devDependencies"]["@inator/dev-tools"] == "file:.inator/packages/inator-dev-tools-0.4.1-dev.16.tgz"
+    artifact = package["devDependencies"]["@inator/dev-tools"]
+    assert requirement["package"] == "@inator/dev-tools"
+    assert artifact == f"file:.inator/packages/inator-dev-tools-{requirement['version']}.tgz"
 
 
 def test_server_exposes_installed_commons_modules_through_a_narrow_static_facade() -> None:
@@ -2168,6 +2231,33 @@ def test_stale_worker_cannot_erase_newer_development_checkpoint(tmp_path: Path) 
     assert saved["developmentCheckpointLocked"] is True
     assert saved["chapters"][0]["status"] == "complete"
     assert saved["chapters"][0]["summary"] == "Safe."
+
+
+def test_stale_worker_cannot_resurrect_an_explicitly_stopped_pipeline(tmp_path: Path) -> None:
+    book = {"id": "book-1234", "manuscriptId": "manuscript-1234"}
+    project = tmp_path / "manuscript-1234"
+    project.mkdir()
+    persisted = {
+        "bookId": "book-1234", "ledgerRevision": 9,
+        "status": "paused", "phase": "paused",
+        "explicitlyStoppedAt": "2026-10-16T16:30:00+00:00",
+        "stages": [{"id": "summaries", "status": "pending"}],
+        "chapters": [{"sequence": 2, "status": "pending"}],
+    }
+    (project / "pipeline.json").write_text(json.dumps(persisted), encoding="utf-8")
+    stale_worker = {
+        "bookId": "book-1234", "ledgerRevision": 8,
+        "status": "running", "phase": "chapter-reading",
+        "stages": [{"id": "summaries", "status": "running"}],
+        "chapters": [{"sequence": 2, "status": "running"}],
+    }
+
+    with patch.object(server, "BOOKS_ROOT", tmp_path), patch.object(server, "append_pipeline_event") as event:
+        server.write_pipeline(book, stale_worker)
+
+    saved = json.loads((project / "pipeline.json").read_text(encoding="utf-8"))
+    assert saved == persisted
+    event.assert_called_once_with(book, "stale-write-rejected", reason="explicit-stop")
 
 
 def test_long_worker_can_commit_after_read_side_revision_advances(tmp_path: Path) -> None:
@@ -3210,15 +3300,17 @@ def test_every_implemented_explore_report_has_html_and_pdf_selectors() -> None:
     assert 'available: (pipeline) => pipeline.wholeBookLlmReview?.status === "complete"' in definitions
 
 
-def test_workspace_task_explanations_use_shared_rich_icon_tooltip() -> None:
+def test_workspace_task_explanations_do_not_ship_a_second_tooltip_runtime() -> None:
     root = Path(__file__).parents[1]
     app = (root / "src" / "app.js").read_text(encoding="utf-8")
     styles = (root / "src" / "styles.css").read_text(encoding="utf-8")
-    assert 'data-tooltip-heading="${escapeHtml(explanationTitle)}"' in app
+    assert 'data-inator-tooltip="${escapeHtml(`${explanationTitle}: ${explanation}`)}"' in app
     assert 'workspaceSectionHeading({icon, title, subtitle, actions, metrics, explanationTitle, explanation, collapse})' in app
-    assert 'tooltip.classList.toggle("rich", Boolean(heading))' in app
+    assert "setInatorTooltip" in app
+    assert "function installTooltips" not in app
+    assert "data-tooltip-heading" not in app
     assert 'class="task-explanation"' not in app
-    assert ".app-tooltip.rich strong" in styles
+    assert ".app-tooltip" not in styles
     assert ".workspace-section-icon.has-help:focus-visible" in styles
     assert ".task-explanation" not in styles
 
@@ -3325,12 +3417,19 @@ def test_server_launch_resumes_an_enabled_library_pipeline() -> None:
         def server_close(self) -> None:
             return None
 
-    with patch.object(server, "ThreadingHTTPServer", return_value=LocalServer()), \
+    with patch.object(server, "BookinatorHTTPServer", return_value=LocalServer()), \
          patch.object(server, "pipeline_is_enabled", return_value=True), \
          patch.object(server, "start_global_pipeline", side_effect=pipeline_started.set) as start_pipeline, \
          patch.object(server.sys, "argv", ["bookinator"]):
         server.main()
     start_pipeline.assert_called_once_with()
+
+
+def test_http_server_accepts_a_cold_browser_module_graph() -> None:
+    import bookinator.server.__main__ as server
+
+    assert server.BookinatorHTTPServer.request_queue_size >= 32
+    assert server.BookinatorHTTPServer.daemon_threads is True
 
 
 def test_background_pipeline_startup_does_not_block_http_startup() -> None:
@@ -4072,10 +4171,12 @@ def test_structured_model_exposes_live_response_telemetry() -> None:
             yield b'{"message":{"content":"true}"},"done":true,"prompt_eval_count":123,"eval_count":7,"done_reason":"stop"}\n'
 
     server.MODEL_RESPONSE_TELEMETRY.pop("book-live", None)
-    with patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()):
+    with patch("bookinator.server.__main__.urllib.request.urlopen", return_value=Response()) as open_model:
         result, raw = server._run_structured_model(
             "A compact prompt", "reader", {"type": "object"}, run_key="book-live", activity="chapter reading",
         )
+    request_payload = json.loads(open_model.call_args.args[0].data)
+    assert request_payload["options"]["num_predict"] == 16_384
     assert result == {"ok": True}
     assert raw == '{"ok":true}'
     snapshot = server.model_response_telemetry("book-live")
@@ -4216,6 +4317,18 @@ def test_chapter_summary_coverage_accepts_the_final_narrative_turn() -> None:
     }, source)
 
     assert server.chapter_summary_ending_coverage(normalized["summary"], normalized, source)["covered"] is True
+
+
+def test_chapter_summary_coverage_never_treats_missing_late_evidence_as_success() -> None:
+    source = "The doctor examines Laura. " + ("The family waits in uncertainty. " * 20) + "At sunset Laura meets General Spielsdorf on the road."
+    normalized = normalize_chapter_summary({
+        "summary": "The doctor examines Laura.",
+        "key_points": [{"claim": "The doctor examines Laura.", "subject": "The doctor", "evidence_ref": {"quote": "The doctor examines Laura."}}],
+        "ending_state": [], "new_questions": [], "question_details": [],
+    }, source)
+
+    coverage = server.chapter_summary_ending_coverage(normalized["summary"], normalized, source)
+    assert coverage == {"covered": False, "reason": "missing-anchored-final-quarter-fact", "lateFacts": []}
 
 
 def test_evidence_claims_do_not_upgrade_observation_into_cause() -> None:
@@ -4631,9 +4744,9 @@ def test_chapter_reader_groups_analysis_and_text_controls_at_the_top() -> None:
     assert 'class="chapter-control-cluster text"' in page
     assert "function chapterAnalysisControlsMarkup" in app
     assert 'data-analysis-comments' in app
-    assert 'title="Emotions"' in app
-    assert 'title="Tags"' in app
-    assert 'title="Editor comments"' in app
+    assert 'data-inator-tooltip="Emotions"' in app
+    assert 'data-inator-tooltip="Tags"' in app
+    assert 'data-inator-tooltip="Editor comments"' in app
     assert '<div class="source-overlay-key">' not in app
     assert ".chapter-reader-toolbar" in styles
     assert ".chapter-control-cluster.analysis { position: relative;" in styles
@@ -4875,6 +4988,117 @@ def test_queue_worker_claims_continue_arriving_while_it_is_finishing() -> None:
     server.PIPELINE_THREADS.pop("book-1234", None)
     server.PIPELINE_CANCEL_EVENTS.pop("book-1234", None)
     assert calls == ["book-1234", "book-1234"]
+
+
+def test_queue_worker_contains_expected_pipeline_cancellation() -> None:
+    import bookinator.server.__main__ as server
+
+    server.QUEUE_CANCEL_EVENT.clear()
+    server.QUEUE_ACTIONS.clear()
+    server.QUEUE_ACTIONS["book-1234"] = "summarize"
+    with patch.object(server, "load_queue", return_value=["book-1234"]), \
+         patch.object(server, "find_book", return_value={"id": "book-1234"}), \
+         patch.object(server, "load_pipeline", return_value={"chapters": [{"status": "pending"}]}), \
+         patch.object(server, "QUEUE_THREAD", threading.current_thread()), \
+         patch.object(server, "run_book_chapter_pipeline", side_effect=PipelineCancelled("stopped")):
+        server.run_library_queue()
+
+    assert server.QUEUE_CURRENT_TASK == {}
+    assert server.QUEUE_THREAD is None
+    assert "book-1234" not in server.QUEUE_ACTIONS
+
+
+def test_queue_worker_contains_retryable_summary_quality_rejection() -> None:
+    import bookinator.server.__main__ as server
+
+    server.QUEUE_CANCEL_EVENT.clear()
+    server.QUEUE_ACTIONS.clear()
+    server.QUEUE_ACTIONS["book-1234"] = "chapter-pipeline"
+    with patch.object(server, "load_queue", return_value=["book-1234"]), \
+         patch.object(server, "find_book", return_value={"id": "book-1234"}), \
+         patch.object(server, "load_pipeline", return_value={"chapters": [{"status": "pending"}]}), \
+         patch.object(server, "QUEUE_THREAD", threading.current_thread()), \
+         patch.object(server, "complete_queue_action") as complete, \
+         patch.object(server, "run_book_chapter_pipeline", side_effect=server.ChapterSummaryError("missing ending", "{}", [])):
+        server.run_library_queue()
+
+    complete.assert_called_once_with("book-1234", "chapter-pipeline")
+    assert server.QUEUE_CURRENT_TASK == {}
+    assert server.QUEUE_THREAD is None
+    assert "book-1234" not in server.QUEUE_ACTIONS
+
+
+def test_safe_stop_restores_every_running_analysis_status_to_retryable() -> None:
+    import bookinator.server.__main__ as server
+
+    book = {"id": "book-1234", "manuscriptId": "manuscript-1234"}
+    pipeline = {
+        "status": "running",
+        "phase": "chapter-reading",
+        "chapters": [{
+            "sequence": 2,
+            "status": "running",
+            "chapterReadingStatus": "running",
+            "glinerStatus": "complete",
+            "emotionStatus": "running",
+            "tagStatus": "pending",
+            "smellStatus": "running",
+            "contextStatus": "running",
+            "llmReviewStatus": "running",
+        }],
+        "chunks": [{"sequence": 1, "dossierStatus": "running"}],
+        "stages": [{"id": "summaries", "status": "running"}],
+        "inferences": [{"id": "questions", "status": "running"}],
+        "wholeBookSummary": {"status": "running"},
+        "wholeBookDossier": {"status": "running"},
+        "questionTracker": {"status": "running"},
+        "wholeBookLlmReview": {"status": "running"},
+    }
+    saved = []
+    server.QUEUE_ACTIONS.clear()
+    server.PIPELINE_CANCEL_EVENTS.clear()
+    with patch.object(server, "set_pipeline_enabled"), \
+         patch.object(server, "save_queue_actions"), \
+         patch.object(server, "load_library", return_value=[book]), \
+         patch.object(server, "load_pipeline", return_value=pipeline), \
+         patch.object(server, "write_pipeline", side_effect=lambda _book, value: saved.append(value.copy())), \
+         patch.object(server, "chunk_artifacts_path", return_value=Path("/missing")):
+        server.stop_global_pipeline()
+
+    chapter = pipeline["chapters"][0]
+    assert pipeline["status"] == "paused"
+    assert chapter["status"] == "pending"
+    assert chapter["glinerStatus"] == "complete"
+    assert chapter["tagStatus"] == "pending"
+    for key in ("chapterReadingStatus", "emotionStatus", "smellStatus", "contextStatus", "llmReviewStatus"):
+        assert chapter[key] == "pending"
+    assert pipeline["chunks"][0]["dossierStatus"] == "pending"
+    assert pipeline["stages"][0]["status"] == "pending"
+    assert pipeline["inferences"][0]["status"] == "pending"
+    for key in ("wholeBookSummary", "wholeBookDossier", "questionTracker", "wholeBookLlmReview"):
+        assert pipeline[key]["status"] == "pending"
+    assert saved
+
+
+def test_combined_chapter_read_persists_its_running_dossier_projection() -> None:
+    import bookinator.server.__main__ as server
+
+    book = {"id": "book-1234", "manuscriptId": "manuscript-1234"}
+    chunks = [{"sequence": 7, "chapterSequence": 2, "dossierStatus": "pending", "dossierError": "older failure"}]
+    artifact = {"sequence": 7, "dossierStatus": "pending", "dossierError": "older failure"}
+    writes = []
+    with patch.object(server, "chunk_artifacts_path", return_value=Path("/artifacts")), \
+         patch.object(server, "read_json_artifact", return_value=artifact.copy()), \
+         patch.object(server, "write_chunk_artifact", side_effect=lambda _book, sequence, value: writes.append((sequence, value.copy()))):
+        server.mark_chapter_reading_chunks_started(book, chunks, "qwen2.5:7b", "2026-10-16T16:30:00+00:00")
+
+    assert chunks == [{
+        "sequence": 7, "chapterSequence": 2, "dossierStatus": "running",
+        "dossierModel": "qwen2.5:7b", "dossierStartedAt": "2026-10-16T16:30:00+00:00",
+    }]
+    assert writes[0][0] == 7
+    assert writes[0][1]["dossierStatus"] == "running"
+    assert "dossierError" not in writes[0][1]
 
 
 def test_retiring_queue_worker_cannot_erase_replacement_worker_identity() -> None:
@@ -5870,6 +6094,12 @@ def test_chapter_reading_schema_requires_identity_ledger_before_shared_views() -
     ]
 
 
+def test_consistency_schema_reports_only_rejections_not_verbose_keep_decisions() -> None:
+    verdict = server.chapter_reading_consistency_schema()["properties"]["decisions"]["items"]["properties"]["verdict"]
+
+    assert verdict["enum"] == ["reject"]
+
+
 def test_action_recall_passages_preserve_exact_source_and_find_carmilla_movement() -> None:
     source = (
         "The room was blue and still.\n\n"
@@ -5880,6 +6110,17 @@ def test_action_recall_passages_preserve_exact_source_and_find_carmilla_movement
     assert len(passages) == 1
     assert passages[0]["exact_source"].startswith("The lady started back")
     assert passages[0]["exact_source"] == source[passages[0]["character_start"]:passages[0]["character_end"]]
+
+
+def test_action_recall_can_select_late_region_without_early_candidate_crowding() -> None:
+    early = " ".join(f"She went and came and turned at marker {index}." for index in range(24))
+    late = "At sunset Laura went to the General. The General said that his niece had died."
+    source = f"{early} {late}"
+    passages = server.chapter_action_passages(source, limit=8, start_at=len(early))
+
+    assert passages
+    assert all(item["character_start"] >= len(early) for item in passages)
+    assert any("niece had died" in item["exact_source"] for item in passages)
 
 
 def test_action_coverage_gaps_are_target_specific() -> None:
@@ -5900,6 +6141,48 @@ def test_action_coverage_gaps_are_target_specific() -> None:
     }
     gaps = server.chapter_action_coverage_gaps(raw, source)
     assert [(item["passage_id"], item["target"]) for item in gaps] == [(passage["id"], "dossier_event")]
+
+
+def test_consistency_audit_receives_a_terminal_source_obligation_when_summary_stops_early() -> None:
+    source = "The doctor examines Laura. " + ("The family waits in uncertainty. " * 20) + "At sunset Laura meets General Spielsdorf on the road."
+    raw = {
+        "action_audit": [],
+        "summary": {"key_points": [{"claim": "The doctor examines Laura.", "subject": "doctor", "evidence_ref": {"quote": "The doctor examines Laura."}}]},
+        "dossier": {"events": []},
+    }
+
+    gaps = server.chapter_action_coverage_gaps(raw, source)
+
+    assert len(gaps) == 1
+    assert gaps[0]["target"] == "summary_key_point"
+    assert gaps[0]["evidence_ref"]["quote"] == "At sunset Laura meets General Spielsdorf on the road."
+
+
+def test_consistency_audit_receives_every_late_action_when_summary_stops_early() -> None:
+    source = (
+        "The doctor examines Laura. "
+        + ("The family waits in uncertainty. " * 24)
+        + "At sunset Laura went to General Spielsdorf on the road. "
+        + "The General said that his niece had died. "
+        + "Laura went home before dark."
+    )
+    early = server.source_evidence_passages(source)[0]
+    raw = {
+        "action_audit": [],
+        "summary": {"key_points": [{
+            "claim": "The doctor examines Laura.", "subject": "doctor",
+            "evidence_ref": {"passage_id": early["id"], "quote": early["text"]},
+        }]},
+        "dossier": {"events": []},
+    }
+
+    gaps = server.chapter_action_coverage_gaps(raw, source)
+    late_summary_gaps = [item for item in gaps if item["target"] == "summary_key_point"]
+
+    assert len(late_summary_gaps) >= 2
+    quotes = [item["evidence_ref"]["quote"] for item in late_summary_gaps]
+    assert any("went to General Spielsdorf" in quote for quote in quotes)
+    assert any("niece had died" in quote for quote in quotes)
 
 
 def test_action_repair_refuses_to_flatten_uncertain_perception_into_fact() -> None:
@@ -5930,6 +6213,97 @@ def test_action_repair_refuses_to_flatten_uncertain_perception_into_fact() -> No
     assert accepted_report["coverageAdditionCount"] == 1
 
 
+def test_consistency_cannot_rename_one_cast_candidate_into_a_nearby_person() -> None:
+    raw = {
+        "cast": [{
+            "entity_id": "G004", "canonical_name": "Lavinia", "aliases": [],
+            "role": "Participant", "evidence_ref": {"quote": "Lavinia remained downstairs."},
+        }],
+        "summary": {"summary": "Lavinia remained downstairs.", "key_points": []},
+        "dossier": {"synopsis": "Lavinia remained downstairs.", "events": []},
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "decisions": [],
+        "coverage_decisions": [], "issues": [],
+        "cast_corrections": [{
+            "candidate_id": "cast:0", "canonical_name": "Wilbur", "aliases": [],
+            "role": "Participant", "evidence_ref": {"quote": "Wilbur grew rapidly."},
+            "reason": "Wrong candidate index.",
+        }],
+    }, {"cast:0"}, [])
+
+    assert cleaned["cast"][0]["canonical_name"] == "Lavinia"
+    assert report["castCorrectionCount"] == 0
+
+
+def test_consistency_cannot_delete_cast_by_positional_decision() -> None:
+    raw = {
+        "cast": [{
+            "entity_id": "G001", "canonical_name": "Old Whateley", "aliases": [],
+            "role": "Participant", "evidence_ref": {"quote": "Old Whateley spoke."},
+        }],
+        "summary": {"key_points": [{"claim": "He spoke.", "subject": "G001"}]},
+        "dossier": {"facts": []},
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [],
+        "coverage_decisions": [], "issues": [],
+        "decisions": [{"candidate_id": "cast:0", "verdict": "reject", "reason": "Off by one."}],
+    }, {"cast:0"}, [])
+
+    assert [item["canonical_name"] for item in cleaned["cast"]] == ["Old Whateley"]
+    assert report["rejectedCandidateCount"] == 0
+
+
+def test_consistency_report_exposes_unclosed_summary_rejections() -> None:
+    raw = {
+        "cast": [],
+        "summary": {
+            "summary": "Wilbur prepares a ritual.",
+            "key_points": [{"claim": "Wilbur prepares a ritual.", "subject": "wilbur"}],
+        },
+        "dossier": {"facts": []},
+    }
+    _cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [],
+        "coverage_decisions": [], "issues": [],
+        "decisions": [{
+            "candidate_id": "summary.key_points:0", "verdict": "reject",
+            "reason": "The source shows carpentry, not a ritual.",
+        }],
+    }, {"summary.key_points:0"}, [])
+
+    assert report["rejectedSummaryCandidateCount"] == 1
+    assert report["summaryCorrectionApplied"] is False
+
+
+def test_projection_subject_integrity_is_case_insensitive_and_detects_removed_ids() -> None:
+    raw = {
+        "cast": [
+            {"entity_id": "G001", "canonical_name": "Old Whateley"},
+            {"entity_id": "G003", "canonical_name": "Wilbur"},
+        ],
+        "summary": {"key_points": [{"subject": "G001"}, {"subject": "g003"}]},
+        "dossier": {"events": []},
+    }
+    cast = [{"entityId": "g003", "canonicalName": "Wilbur"}]
+
+    assert server.unresolved_projection_subjects(raw, cast) == ["G001"]
+    replaced = server.replace_cast_ids_with_names(raw, cast)
+    assert replaced["summary"]["key_points"][1]["subject"] == "Wilbur"
+
+
+def test_summary_kinship_requires_local_source_support() -> None:
+    source = "Old Whateley prepared a new room for his grandson Wilbur."
+
+    assert server.unsupported_summary_kinship_claims(
+        "Wilbur, the son of Old Whateley, grew rapidly.", source,
+    ) == ["Wilbur, the son of Old Whateley"]
+    assert server.unsupported_summary_kinship_claims(
+        "Wilbur, the grandson of Old Whateley, grew rapidly.", source,
+    ) == []
+
+
 def test_chapter_reading_cast_keeps_aliases_with_one_canonical_identity() -> None:
     source = "A masked young lady entered. Her mother called her Millarca."
     cast = server.normalize_chapter_reading_cast([{
@@ -5942,6 +6316,40 @@ def test_chapter_reading_cast_keeps_aliases_with_one_canonical_identity() -> Non
     assert cast[0]["entityId"] == "millarca"
     assert cast[0]["aliases"] == ["Millarca", "the masked young lady"]
     assert cast[0]["evidenceAnchor"]["matchMethod"] == "exact"
+
+
+def test_chapter_reading_cast_deduplicates_repeated_canonical_entities() -> None:
+    source = "Whippoorwills chatter. Later, the whippoorwills fall silent."
+    cast = server.normalize_chapter_reading_cast([
+        {"entity_id": "bird-1", "canonical_name": "Whippoorwills", "aliases": ["night birds"], "role": "Birds", "evidence_ref": {"quote": "Whippoorwills chatter."}},
+        {"entity_id": "bird-2", "canonical_name": "whippoorwills", "aliases": ["whip-poor-wills"], "role": "Birds", "evidence_ref": {"quote": "the whippoorwills fall silent"}},
+    ], source)
+
+    assert len(cast) == 1
+    assert cast[0]["entityId"] == "bird-1"
+    assert cast[0]["aliases"] == ["Whippoorwills", "night birds", "whip-poor-wills"]
+
+
+def test_chapter_reading_cast_does_not_publish_unanchored_kinship_roles() -> None:
+    source = "The farmhouse was feared because of Old Whateley's reputation for black magic."
+    cast = server.normalize_chapter_reading_cast([{
+        "entity_id": "old-whateley", "canonical_name": "Old Whateley", "aliases": [],
+        "role": "The father of Wilbur and Lavinia", "evidence_ref": {"quote": source},
+    }], source)
+
+    assert cast[0]["role"] == "Participant mentioned in this chapter"
+    assert cast[0]["roleEvidenceStatus"] == "unsupported-generalized"
+
+
+def test_chapter_reading_cast_keeps_anchored_kinship_roles() -> None:
+    source = "Old Whateley was Lavinia's father."
+    cast = server.normalize_chapter_reading_cast([{
+        "entity_id": "old-whateley", "canonical_name": "Old Whateley", "aliases": [],
+        "role": "Lavinia's father", "evidence_ref": {"quote": source},
+    }], source)
+
+    assert cast[0]["role"] == "Lavinia's father"
+    assert cast[0]["roleEvidenceStatus"] == "supported"
 
 
 def test_chapter_reading_cast_ids_become_readable_subjects_after_verification() -> None:
@@ -5972,7 +6380,6 @@ def test_identity_audit_exposes_cast_hypotheses_and_co_present_relationship_labe
 
 
 def test_identity_audit_can_correct_cast_without_changing_stable_entity_id() -> None:
-    source = "The Countess presented her daughter Millarca."
     raw = {
         "cast": [{
             "entity_id": "millarca", "canonical_name": "Millarca", "aliases": [],

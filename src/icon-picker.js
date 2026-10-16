@@ -1,3 +1,5 @@
+import { setInatorTooltip } from "/commons/@inator/ui/index.js";
+
 export function graphemes(value) {
   const text = String(value || "");
   if (typeof Intl.Segmenter === "function") {
@@ -89,7 +91,7 @@ export function renderIcon(element, icon, fallback = "B", author = "") {
       const spine = document.createElement("span");
       spine.className = "book-spine-title";
       spine.textContent = String(fallback || "Untitled");
-      spine.title = String(fallback || "Untitled");
+      setInatorTooltip(spine, String(fallback || "Untitled"));
       const byline = document.createElement("span");
       byline.className = "book-cover-author";
       const authorParts = coverAuthor.split(/\s+/);
@@ -98,7 +100,7 @@ export function renderIcon(element, icon, fallback = "B", author = "") {
       } else {
         byline.textContent = coverAuthor;
       }
-      byline.title = String(author || "");
+      setInatorTooltip(byline, String(author || ""));
       element.append(spine, byline);
       fitBookMetadata(element, spine, byline);
     } else {

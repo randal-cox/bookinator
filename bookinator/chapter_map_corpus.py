@@ -149,7 +149,8 @@ def select_candidates(candidates: list[Candidate], target: int) -> list[Candidat
     pools: dict[str, list[Candidate]] = defaultdict(list)
     for candidate in candidates:
         pools[candidate.category].append(candidate)
-    stable = lambda item: hashlib.sha256(f"bookinator-structure-v1:{item.gutenberg_id}:{item.title}".encode()).hexdigest()
+    def stable(item: Candidate) -> str:
+        return hashlib.sha256(f"bookinator-structure-v1:{item.gutenberg_id}:{item.title}".encode()).hexdigest()
     for pool in pools.values():
         pool.sort(key=stable)
     selected: list[Candidate] = []

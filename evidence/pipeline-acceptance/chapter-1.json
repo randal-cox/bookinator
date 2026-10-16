@@ -1,0 +1,87 @@
+{
+  "schema": "bookinator.pipeline-acceptance.v1",
+  "observedAt": "2026-10-16T16:47:12.613Z",
+  "subject": {
+    "bookId": "acceptance-dunwich",
+    "title": "The Dunwich Horror — Acceptance",
+    "source": "public-domain local fixture",
+    "developmentLimit": 2
+  },
+  "boundary": {
+    "baseURL": "http://127.0.0.1:4892",
+    "dataRootKind": "isolated-disposable",
+    "minimumAuthoredChapters": 1,
+    "rawManuscriptRetained": false
+  },
+  "summary": {
+    "status": "passed",
+    "checks": 5,
+    "passed": 5,
+    "failed": 0
+  },
+  "checks": [
+    {
+      "id": "checkpoint.locked",
+      "status": "passed",
+      "evidence": {
+        "status": "paused",
+        "phase": "development-checkpoint",
+        "locked": true,
+        "limit": 2
+      }
+    },
+    {
+      "id": "chapters.minimum",
+      "status": "passed",
+      "evidence": {
+        "completedSpecimens": 1,
+        "required": 1
+      }
+    },
+    {
+      "id": "chapter.2.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 657.7
+      }
+    },
+    {
+      "id": "chapter.2.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.2.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 46,
+        "exactInCanonicalSource": 46
+      }
+    }
+  ],
+  "chapters": [
+    {
+      "sequence": 2,
+      "label": "1",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 657.7,
+      "sourceSha256": "10c88de450b8021fa7a90983dc1371b64a4b319dc6d9312c8675b6d5d7d45101",
+      "artifactSha256": "4039ccfb34ad52811f44b160f7d0bfad094be62f2ffc778d11fa5c0ba8490352",
+      "claims": 27,
+      "evidenceAnchors": 46,
+      "exactEvidenceAnchors": 46
+    }
+  ],
+  "limitations": [
+    "Exact source-anchor matching checks provenance integrity, not whether every interpretation is persuasive.",
+    "A local public-domain specimen does not represent every manuscript format, language, model, or hardware profile.",
+    "Human editorial judgment remains required for usefulness, omissions, tone, and commercial readiness."
+  ]
+}

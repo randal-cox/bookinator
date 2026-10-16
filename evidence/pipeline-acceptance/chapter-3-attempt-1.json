@@ -1,0 +1,39 @@
+{
+  "schema": "bookinator.pipeline-attempt-observation.v1",
+  "observedAt": "2026-10-16T17:25:00Z",
+  "subject": {
+    "bookId": "acceptance-dunwich",
+    "chapterSequence": 4,
+    "chapterLabel": "3",
+    "fixture": "public-domain local manuscript"
+  },
+  "model": "qwen2.5:7b",
+  "promptVersion": "chapter-reading-v6",
+  "result": "rejected-retryable",
+  "reason": "The combined reader did not anchor and summarize the chapter's final movement.",
+  "timing": {
+    "startedAt": "2026-10-16T17:02:45Z",
+    "completedAt": "2026-10-16T17:21:24Z",
+    "durationSeconds": 1119.3
+  },
+  "primaryResponse": {
+    "generatedTokens": 14730,
+    "outputCharacters": 57375,
+    "status": "complete"
+  },
+  "consistencyResponse": {
+    "generatedTokens": 2456,
+    "outputCharacters": 11271,
+    "status": "complete",
+    "doneReason": "stop"
+  },
+  "adversarialDisposition": {
+    "machineCompletionAccepted": false,
+    "finding": "A large, schema-valid response still omitted the final-quarter government and newspaper investigation movement.",
+    "followUp": "Expanded the consistency assay from one terminal sentence to every deterministic late-action candidate; preserved the rejection instead of weakening the gate."
+  },
+  "limitations": [
+    "This observation retains counts, timing, model identity, and the rejection reason but not generated or manuscript prose.",
+    "Token and character counts came from Bookinator's live model telemetry."
+  ]
+}

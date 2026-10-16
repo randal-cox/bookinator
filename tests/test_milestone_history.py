@@ -88,7 +88,6 @@ def test_docs_use_shared_editorial_flow_without_replacing_product_prose():
 
 def test_about_uses_shared_product_and_ecosystem_tabs_with_record_shelf():
     app = (ROOT / "src" / "app.js").read_text(encoding="utf-8")
-    pages = (ROOT / "src" / "pages.js").read_text(encoding="utf-8")
     information = (ROOT / "src" / "product-information.js").read_text(encoding="utf-8")
 
     assert "createBookinatorAboutPage" in app
