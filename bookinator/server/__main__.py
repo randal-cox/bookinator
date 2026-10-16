@@ -11757,12 +11757,12 @@ def local_executable(name: str) -> str | None:
     if found := shutil.which(name):
         return found
     candidates = {
-        "brew": ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"),
         "uv": ("/opt/homebrew/bin/uv", "/usr/local/bin/uv"),
         "ollama": (
-            "/opt/homebrew/bin/ollama",
-            "/usr/local/bin/ollama",
             "/Applications/Ollama.app/Contents/Resources/ollama",
+            str(Path.home() / "Library" / "Application Support" / "Inator" / "providers" / "ollama" / "current" / "ollama"),
+            "/usr/local/bin/ollama",
+            "/opt/homebrew/bin/ollama",
         ),
     }
     return next((path for path in candidates.get(name, ()) if Path(path).is_file() and os.access(path, os.X_OK)), None)
@@ -11781,14 +11781,6 @@ def machine_readiness(ollama: dict[str, object] | None = None) -> dict[str, obje
     ollama_version = str(ollama.get("version") or "")
     ollama_installed = bool(ollama.get("installed"))
     ollama_running = bool(ollama.get("running"))
-    brew_path = local_executable("brew") if system == "Darwin" else None
-    brew_available = brew_path is not None
-    brew_version = ""
-    if brew_available:
-        try:
-            brew_version = subprocess.run([brew_path, "--version"], capture_output=True, text=True, timeout=5, check=True).stdout.splitlines()[0].strip()
-        except (OSError, subprocess.SubprocessError, IndexError):
-            brew_available = False
     try:
         disk_root = DATA_ROOT if DATA_ROOT.exists() else DATA_ROOT.parent
         free_disk_gib = round(shutil.disk_usage(disk_root).free / (1024 ** 3), 1)
@@ -11819,9 +11811,8 @@ def machine_readiness(ollama: dict[str, object] | None = None) -> dict[str, obje
     checks = [
         {"id": "operating-system", "label": "Operating system", "status": platform_status, "value": f"{system} · {machine}", "detail": platform_detail, "instructions": "operating-system" if platform_status != "ready" else ""},
         {"id": "memory", "label": "Memory", "status": "warning" if not memory_gib else "ready" if memory_gib >= 32 else "blocked", "value": f"{memory_gib:g} GB" if memory_gib else "Unknown", "detail": "Bookinator's supported floor for model-backed analysis is 32 GB of physical memory." if memory_gib else "Bookinator could not measure physical memory on this computer.", "instructions": "memory" if not memory_gib or memory_gib < 32 else ""},
-        *([{"id": "homebrew", "label": "Homebrew", "status": "ready" if brew_available else "blocked", "value": brew_version or "Missing", "detail": "Bookinator uses Homebrew to install and maintain Ollama and other native dependencies on macOS." if brew_available else "Homebrew is required for Bookinator's managed dependency installation on macOS.", "instructions": "homebrew" if not brew_available else ""}] if system == "Darwin" else []),
         {"id": "python", "label": "Python runtime", "status": "ready" if python_supported else "blocked", "value": python_version, "detail": "Python 3.11 or newer is available." if python_supported else "This source build requires Python 3.11 or newer.", "instructions": "python" if not python_supported else ""},
-        {"id": "ollama", "label": "Ollama runtime", "status": "ready" if ollama_running else "repairable" if brew_available else "blocked", "value": f"Ollama {ollama_version}" if ollama_version else "Running (version unavailable)" if ollama_running else "Not installed or version unavailable", "detail": "Ollama is serving Bookinator's local models." if ollama_running else "Bookinator requires a running Ollama service for local model analysis.", "action": "update-ollama" if brew_available and not ollama_installed and not ollama_running else "", "instructions": "ollama" if not brew_available and not ollama_running else ""},
+        {"id": "ollama", "label": "Ollama runtime", "status": "ready" if ollama_running else "repairable", "value": f"Ollama {ollama_version}" if ollama_version else "Running (version unavailable)" if ollama_running else "Installed but not running" if ollama_installed else "Not installed", "detail": "Ollama is serving Bookinator's local models." if ollama_running else "Bookinator requires a running Ollama service for local model analysis.", "instructions": "ollama"},
         {"id": "package-installer", "label": "Library installer", "status": "ready" if pip_available or uv_available else "warning", "value": "uv" if uv_available else "pip" if pip_available else "Missing", "detail": "Bookinator can install its managed Python components." if pip_available or uv_available else "Automatic repair of Python components is unavailable until uv or pip is installed.", "instructions": "package-installer" if not pip_available and not uv_available else ""},
         {"id": "storage", "label": "Working storage", "status": "warning" if not free_disk_gib else "ready" if free_disk_gib >= 10 else "blocked", "value": f"{free_disk_gib:g} GB free" if free_disk_gib else "Unknown", "detail": "At least 10 GB of working headroom is required in addition to model downloads." if free_disk_gib else "Bookinator could not measure free space on its data volume.", "instructions": "storage" if not free_disk_gib or free_disk_gib < 10 else ""},
         {"id": "pdf-reader", "label": "Document reader", "status": "ready" if pdf_reader_ready() else "repairable" if pip_available or uv_available else "blocked", "value": "PyMuPDF ready" if pdf_reader_ready() else "PyMuPDF missing", "detail": "PDF and normalized manuscript pages can be read locally." if pdf_reader_ready() else "Bookinator needs its local document reader for manuscript ingestion.", "action": "install-pdf-reader" if not pdf_reader_ready() and (pip_available or uv_available) else "", "instructions": "package-installer" if not pdf_reader_ready() and not (pip_available or uv_available) else ""},
@@ -13278,26 +13269,7 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
             self.send_json({"installed": installed, "message": message}, HTTPStatus.OK if installed else HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         if route.path == "/api/setup/ollama":
-            brew_path = local_executable("brew") if platform.system() == "Darwin" else None
-            if not brew_path:
-                self.send_json({"error": "Automatic Ollama installation is currently available only for Homebrew-managed macOS systems.", "instructions": "ollama"}, HTTPStatus.NOT_IMPLEMENTED)
-                return
-            if pipeline_is_enabled():
-                self.send_json({"error": "Stop the analysis queue before installing or updating Ollama so an active model response is not interrupted."}, HTTPStatus.CONFLICT)
-                return
-            installed = subprocess.run([brew_path, "list", "--versions", "ollama"], capture_output=True, text=True, timeout=30).returncode == 0
-            command = [brew_path, "upgrade" if installed else "install", "ollama"]
-            try:
-                result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
-            except (OSError, subprocess.TimeoutExpired) as error:
-                self.send_json({"error": f"Bookinator could not run Homebrew: {error}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
-                return
-            if result.returncode != 0:
-                detail = (result.stderr or result.stdout or "Homebrew did not explain the failure.").strip()
-                self.send_json({"error": f"Homebrew could not {'update' if installed else 'install'} Ollama.", "detail": detail}, HTTPStatus.BAD_GATEWAY)
-                return
-            verified = ollama_status()
-            self.send_json({"installed": True, "updated": installed, "version": verified.get("version"), "running": verified.get("running"), "restartRequired": not bool(verified.get("running"))})
+            self.send_json({"error": "Ollama installation is handled by its official platform installer, not a system package manager.", "instructions": "ollama", "url": "https://ollama.com/download"}, HTTPStatus.NOT_IMPLEMENTED)
             return
         if route.path == "/api/setup/emotion-model":
             installed, message = install_emotion_model()

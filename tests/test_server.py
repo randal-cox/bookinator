@@ -526,11 +526,7 @@ def test_system_status_is_local_only() -> None:
     assert isinstance(status["ollama"], dict)
     assert status["readiness"]["status"] in {"ready", "warning", "blocked"}
     expected_checks = {"operating-system", "memory", "python", "ollama", "package-installer", "storage", "pdf-reader"}
-    if status["platform"] == "Darwin":
-        expected_checks.add("homebrew")
     assert {check["id"] for check in status["readiness"]["checks"]} == expected_checks
-    if status["platform"] == "Darwin":
-        assert [check["id"] for check in status["readiness"]["checks"]][:3] == ["operating-system", "memory", "homebrew"]
     assert all(check["status"] in {"ready", "repairable", "warning", "blocked"} for check in status["readiness"]["checks"])
     assert set(status["emotionModel"]) >= {"runtime", "model", "ready", "modelId", "runtimeError"}
     assert set(status["glinerModel"]) >= {"runtime", "model", "ready", "modelId", "runtimeError", "provider"}
@@ -547,9 +543,10 @@ def test_machine_readiness_trusts_a_reachable_ollama_service() -> None:
     assert "serving Bookinator" in ollama["detail"]
 
 
-def test_local_executable_checks_canonical_homebrew_location_when_path_is_restricted() -> None:
-    with patch("bookinator.server.__main__.shutil.which", return_value=None), patch.object(Path, "is_file", lambda path: str(path) == "/opt/homebrew/bin/brew"), patch("bookinator.server.__main__.os.access", return_value=True):
-        assert server.local_executable("brew") == "/opt/homebrew/bin/brew"
+def test_local_executable_checks_official_ollama_app_when_path_is_restricted() -> None:
+    official = "/Applications/Ollama.app/Contents/Resources/ollama"
+    with patch("bookinator.server.__main__.shutil.which", return_value=None), patch.object(Path, "is_file", lambda path: str(path) == official), patch("bookinator.server.__main__.os.access", return_value=True):
+        assert server.local_executable("ollama") == official
 
 
 def test_analysis_ui_does_not_offer_per_task_model_overrides() -> None:

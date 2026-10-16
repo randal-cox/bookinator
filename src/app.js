@@ -1750,7 +1750,6 @@ document.querySelectorAll("[data-coverage-mode]").forEach((button) => button.add
 const setupInstructions = {
   "operating-system": ["Update this computer to a supported operating system and architecture.", "Bookinator currently targets macOS 14+ on Apple silicon, current 64-bit Windows 10+, and explicitly tested 64-bit Linux distributions.", "Return here after the operating-system update; Bookinator will run the check again."],
   memory: ["This computer does not meet Bookinator’s 32 GB supported memory floor for local analysis.", "Memory cannot usually be added through Bookinator. Use a machine with at least 32 GB, or move this library to one when workspace export is available.", "The library UI may still open, but model-backed analysis is blocked."],
-  homebrew: ["Install Homebrew from https://brew.sh using its official installer.", "Reopen Bookinator after installation so it can verify the brew command.", "Bookinator will then use Homebrew—with confirmation—to install and update Ollama and other native dependencies."],
   python: ["Install a current Python 3 release supported by Bookinator; source builds require Python 3.11 or newer.", "Restart Bookinator from that Python environment.", "Packaged Bookinator releases will include their own tested Python and will not require this manual step."],
   "package-installer": ["This source environment has neither uv nor pip, so Bookinator cannot repair its Python components.", "Install uv from its official installer, or restore pip for this exact Python environment.", "Restart Bookinator and reopen Machine to verify the installer before adding components."],
   storage: ["Free space on the volume containing Bookinator’s data and model caches.", "Keep at least 10 GB of working headroom after accounting for every model you plan to install.", "Reopen Machine after moving data or removing files; Bookinator will measure again."],
@@ -1865,12 +1864,7 @@ async function handleBookMachineRepair(check) {
     await confirmAction({context: "Local setup", title: check.label, message: steps.join(" ") || check.explanation, acceptLabel: "Close"});
     return;
   }
-  if (action === "update-ollama") {
-    const approved = await confirmAction({context: "Local dependency", title: "Install or update Ollama?", message: "Bookinator will ask Homebrew to install the current Ollama release. Existing models and completed analysis remain in place.", acceptLabel: "Install Ollama"});
-    if (!approved) return;
-    const response = await fetch("/api/setup/ollama", {method: "POST"}); const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Ollama could not be updated.");
-  } else if (action === "install-pdf-reader") {
+  if (action === "install-pdf-reader") {
     const response = await fetch("/api/setup/pdf-reader", {method: "POST"}); const result = await response.json();
     if (!response.ok) throw new Error(result.message || "The document reader could not be installed.");
   }

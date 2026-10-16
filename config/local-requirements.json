@@ -6,11 +6,10 @@
     { "id": "published-reader", "label": "Published reader", "execution": "publication-only", "publication": "public", "description": "Reads prepared Bookinator artifacts without local model infrastructure." }
   ],
   "requirements": [
-    { "id": "homebrew", "label": "Homebrew", "kind": "native-package", "profiles": ["local-full"], "provider": "system", "command": "brew", "purpose": "Approved native dependency installation on macOS.", "install": { "strategy": "guided-external", "approval": "required" } },
     { "id": "python", "label": "Python", "kind": "runtime", "profiles": ["local-full"], "version": ">=3.11", "command": "python3", "purpose": "Book server, document ingestion, and isolated specialist runtimes." },
     { "id": "uv-or-pip", "label": "Python package installer", "kind": "command", "profiles": ["local-full"], "command": "uv", "required": false, "purpose": "Installs managed Python components; pip is an accepted fallback." },
     { "id": "pymupdf", "label": "PyMuPDF", "kind": "python-package", "profiles": ["local-full"], "package": "PyMuPDF", "version": ">=1.26,<2", "purpose": "Local PDF and normalized manuscript ingestion.", "install": { "strategy": "managed-python", "approval": "required" } },
-    { "id": "ollama", "label": "Ollama", "kind": "model-provider", "profiles": ["local-full"], "provider": "homebrew-or-app", "command": "ollama", "capabilities": ["chat", "structured-output"], "purpose": "Local chapter reading and synthesis.", "install": { "strategy": "managed-native", "approval": "required" } },
+    { "id": "ollama", "label": "Ollama", "kind": "model-provider", "profiles": ["local-full"], "provider": "official-or-managed", "command": "ollama", "capabilities": ["chat", "structured-output"], "purpose": "Local chapter reading and synthesis.", "install": { "strategy": "guided-official", "url": "https://ollama.com/download", "approval": "required" } },
     { "id": "qwen-primary", "label": "Primary Qwen reader", "kind": "model", "profiles": ["local-full"], "provider": "ollama", "package": "qwen3.8:27b", "purpose": "Deep reading and editorial analysis." },
     { "id": "qwen-fast", "label": "Fast Qwen reader", "kind": "model", "profiles": ["local-full"], "provider": "ollama", "package": "qwen2.5:7b", "purpose": "Intake and inexpensive utilities." },
     { "id": "gliner2", "label": "GLiNER 2 specialist", "kind": "python-package", "profiles": ["local-full"], "provider": "isolated-python-hugging-face", "package": "gliner2", "purpose": "Source-anchored entity and classification candidates." },
