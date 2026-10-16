@@ -1,0 +1,568 @@
+{
+  "schema": "bookinator.pipeline-acceptance.v1",
+  "observedAt": "2026-10-16T19:13:18.366Z",
+  "subject": {
+    "bookId": "acceptance-dunwich",
+    "title": "The Dunwich Horror — Acceptance",
+    "source": "public-domain local fixture",
+    "developmentLimit": 5
+  },
+  "boundary": {
+    "baseURL": "http://127.0.0.1:4892",
+    "dataRootKind": "isolated-disposable",
+    "minimumAuthoredChapters": 4,
+    "rawManuscriptRetained": false
+  },
+  "summary": {
+    "status": "failed",
+    "checks": 34,
+    "passed": 25,
+    "failed": 9
+  },
+  "checks": [
+    {
+      "id": "checkpoint.locked",
+      "status": "passed",
+      "evidence": {
+        "status": "paused",
+        "phase": "development-checkpoint",
+        "locked": true,
+        "limit": 5
+      }
+    },
+    {
+      "id": "chapters.minimum",
+      "status": "passed",
+      "evidence": {
+        "completedSpecimens": 4,
+        "required": 4
+      }
+    },
+    {
+      "id": "chapter.2.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 657.7
+      }
+    },
+    {
+      "id": "chapter.2.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.2.content-breadth",
+      "status": "passed",
+      "evidence": {
+        "sourceWords": 1330,
+        "summaryWords": 86,
+        "summaryClaims": 4,
+        "dossierClaims": 23,
+        "minimum": {
+          "summaryWords": 60,
+          "summaryClaims": 3,
+          "dossierClaims": 3
+        }
+      }
+    },
+    {
+      "id": "chapter.2.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 46,
+        "exactInCanonicalSource": 46
+      }
+    },
+    {
+      "id": "chapter.2.semantic-hygiene",
+      "status": "failed",
+      "evidence": {
+        "endingCovered": false,
+        "endingReason": "no-anchored-final-quarter-fact",
+        "castEntries": 12,
+        "uniqueCanonicalCast": 9,
+        "probableDuplicateCast": [
+          [
+            "satan",
+            "satan worship"
+          ],
+          [
+            "satan worship",
+            "satan"
+          ],
+          [
+            "satan worship",
+            "satan"
+          ]
+        ],
+        "incidentalCast": [],
+        "castRolesEvidenceBound": true,
+        "castRoleGeneralizations": 0
+      }
+    },
+    {
+      "id": "chapter.2.referential-integrity",
+      "status": "failed",
+      "evidence": {
+        "unresolvedSubjects": [
+          "G001",
+          "G002"
+        ],
+        "unsupportedKinshipClaims": []
+      }
+    },
+    {
+      "id": "chapter.2.review-structure",
+      "status": "failed",
+      "evidence": {
+        "editorialVerdict": "no_material_concerns",
+        "rubricDimensions": 10,
+        "applicableDimensionsHaveExactEvidence": false
+      }
+    },
+    {
+      "id": "chapter.2.consistency-closure",
+      "status": "passed",
+      "evidence": {
+        "rejectedSummaryCandidates": [],
+        "summaryCorrectionApplied": false,
+        "castExclusionsApplied": 0,
+        "ignoredCastExclusions": 0
+      }
+    },
+    {
+      "id": "chapter.3.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 621.5
+      }
+    },
+    {
+      "id": "chapter.3.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.3.content-breadth",
+      "status": "passed",
+      "evidence": {
+        "sourceWords": 1428,
+        "summaryWords": 81,
+        "summaryClaims": 3,
+        "dossierClaims": 13,
+        "minimum": {
+          "summaryWords": 60,
+          "summaryClaims": 3,
+          "dossierClaims": 3
+        }
+      }
+    },
+    {
+      "id": "chapter.3.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 32,
+        "exactInCanonicalSource": 32
+      }
+    },
+    {
+      "id": "chapter.3.semantic-hygiene",
+      "status": "failed",
+      "evidence": {
+        "endingCovered": false,
+        "endingReason": "no-anchored-final-quarter-fact",
+        "castEntries": 7,
+        "uniqueCanonicalCast": 7,
+        "probableDuplicateCast": [],
+        "incidentalCast": [],
+        "castRolesEvidenceBound": true,
+        "castRoleGeneralizations": 0
+      }
+    },
+    {
+      "id": "chapter.3.referential-integrity",
+      "status": "failed",
+      "evidence": {
+        "unresolvedSubjects": [
+          "G001",
+          "G002",
+          "G003",
+          "G006"
+        ],
+        "unsupportedKinshipClaims": []
+      }
+    },
+    {
+      "id": "chapter.3.review-structure",
+      "status": "failed",
+      "evidence": {
+        "editorialVerdict": "no_material_concerns",
+        "rubricDimensions": 10,
+        "applicableDimensionsHaveExactEvidence": false
+      }
+    },
+    {
+      "id": "chapter.3.consistency-closure",
+      "status": "failed",
+      "evidence": {
+        "rejectedSummaryCandidates": [
+          "summary.key_points:0",
+          "summary.key_points:1",
+          "summary.key_points:2",
+          "summary.ending_state:0",
+          "summary.ending_state:1",
+          "summary.ending_state:2"
+        ],
+        "summaryCorrectionApplied": false,
+        "castExclusionsApplied": 0,
+        "ignoredCastExclusions": 0
+      }
+    },
+    {
+      "id": "chapter.4.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 863.3
+      }
+    },
+    {
+      "id": "chapter.4.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.4.content-breadth",
+      "status": "passed",
+      "evidence": {
+        "sourceWords": 1204,
+        "summaryWords": 127,
+        "summaryClaims": 4,
+        "dossierClaims": 16,
+        "minimum": {
+          "summaryWords": 60,
+          "summaryClaims": 3,
+          "dossierClaims": 3
+        }
+      }
+    },
+    {
+      "id": "chapter.4.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 30,
+        "exactInCanonicalSource": 30
+      }
+    },
+    {
+      "id": "chapter.4.semantic-hygiene",
+      "status": "passed",
+      "evidence": {
+        "endingCovered": true,
+        "endingReason": "late-fact-overlap",
+        "castEntries": 3,
+        "uniqueCanonicalCast": 3,
+        "probableDuplicateCast": [],
+        "incidentalCast": [],
+        "castRolesEvidenceBound": true,
+        "castRoleGeneralizations": 3
+      }
+    },
+    {
+      "id": "chapter.4.referential-integrity",
+      "status": "failed",
+      "evidence": {
+        "unresolvedSubjects": [
+          "G001",
+          "G003",
+          "G004",
+          "G005"
+        ],
+        "unsupportedKinshipClaims": [
+          "Wilbur, the son of Old Whateley"
+        ]
+      }
+    },
+    {
+      "id": "chapter.4.review-structure",
+      "status": "passed",
+      "evidence": {
+        "editorialVerdict": "no_material_concerns",
+        "rubricDimensions": 10,
+        "applicableDimensionsHaveExactEvidence": true
+      }
+    },
+    {
+      "id": "chapter.4.consistency-closure",
+      "status": "passed",
+      "evidence": {
+        "rejectedSummaryCandidates": [],
+        "summaryCorrectionApplied": false,
+        "castExclusionsApplied": 0,
+        "ignoredCastExclusions": 0
+      }
+    },
+    {
+      "id": "chapter.5.complete",
+      "status": "passed",
+      "evidence": {
+        "readingStatus": "complete",
+        "chapterStatus": "complete",
+        "model": "qwen2.5:7b",
+        "durationSeconds": 0.1
+      }
+    },
+    {
+      "id": "chapter.5.projections",
+      "status": "passed",
+      "evidence": {
+        "summary": true,
+        "dossier": true,
+        "review": true
+      }
+    },
+    {
+      "id": "chapter.5.content-breadth",
+      "status": "failed",
+      "evidence": {
+        "sourceWords": 1241,
+        "summaryWords": 30,
+        "summaryClaims": 1,
+        "dossierClaims": 1,
+        "minimum": {
+          "summaryWords": 60,
+          "summaryClaims": 3,
+          "dossierClaims": 3
+        }
+      }
+    },
+    {
+      "id": "chapter.5.anchors",
+      "status": "passed",
+      "evidence": {
+        "observed": 14,
+        "exactInCanonicalSource": 14
+      }
+    },
+    {
+      "id": "chapter.5.semantic-hygiene",
+      "status": "passed",
+      "evidence": {
+        "endingCovered": true,
+        "endingReason": "late-fact-overlap",
+        "castEntries": 6,
+        "uniqueCanonicalCast": 6,
+        "probableDuplicateCast": [],
+        "incidentalCast": [],
+        "castRolesEvidenceBound": true,
+        "castRoleGeneralizations": 2
+      }
+    },
+    {
+      "id": "chapter.5.referential-integrity",
+      "status": "passed",
+      "evidence": {
+        "unresolvedSubjects": [],
+        "unsupportedKinshipClaims": []
+      }
+    },
+    {
+      "id": "chapter.5.review-structure",
+      "status": "passed",
+      "evidence": {
+        "editorialVerdict": "no_material_concerns",
+        "rubricDimensions": 10,
+        "applicableDimensionsHaveExactEvidence": true
+      }
+    },
+    {
+      "id": "chapter.5.consistency-closure",
+      "status": "passed",
+      "evidence": {
+        "rejectedSummaryCandidates": [
+          "summary.key_points:0",
+          "summary.key_points:1",
+          "summary.key_points:2"
+        ],
+        "summaryCorrectionApplied": true,
+        "castExclusionsApplied": 0,
+        "ignoredCastExclusions": 0
+      }
+    }
+  ],
+  "chapters": [
+    {
+      "sequence": 2,
+      "label": "1",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 657.7,
+      "sourceSha256": "10c88de450b8021fa7a90983dc1371b64a4b319dc6d9312c8675b6d5d7d45101",
+      "artifactSha256": "4039ccfb34ad52811f44b160f7d0bfad094be62f2ffc778d11fa5c0ba8490352",
+      "claims": 27,
+      "sourceWords": 1330,
+      "summaryWords": 86,
+      "summaryClaims": 4,
+      "dossierClaims": 23,
+      "contentBreadth": true,
+      "evidenceAnchors": 46,
+      "exactEvidenceAnchors": 46,
+      "endingCovered": false,
+      "castEntries": 12,
+      "uniqueCanonicalCast": 9,
+      "probableDuplicateCast": [
+        [
+          "satan",
+          "satan worship"
+        ],
+        [
+          "satan worship",
+          "satan"
+        ],
+        [
+          "satan worship",
+          "satan"
+        ]
+      ],
+      "incidentalCast": [],
+      "castRolesEvidenceBound": true,
+      "castRoleGeneralizations": 0,
+      "unresolvedSubjects": [
+        "G001",
+        "G002"
+      ],
+      "unsupportedKinshipClaims": [],
+      "rubricDimensions": 10,
+      "applicableDimensionsHaveExactEvidence": false,
+      "consistencyClosed": true,
+      "castExclusionsApplied": 0,
+      "ignoredCastExclusions": 0
+    },
+    {
+      "sequence": 3,
+      "label": "2",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 621.5,
+      "sourceSha256": "79576d5057b054ea869e294eb19a729bf93fce8a6aae31c90227818f3d9a5bf7",
+      "artifactSha256": "1e066ee4195b2d7a990884d25cdb93cc1d6b763d4cfee808878e0d17f7903063",
+      "claims": 16,
+      "sourceWords": 1428,
+      "summaryWords": 81,
+      "summaryClaims": 3,
+      "dossierClaims": 13,
+      "contentBreadth": true,
+      "evidenceAnchors": 32,
+      "exactEvidenceAnchors": 32,
+      "endingCovered": false,
+      "castEntries": 7,
+      "uniqueCanonicalCast": 7,
+      "probableDuplicateCast": [],
+      "incidentalCast": [],
+      "castRolesEvidenceBound": true,
+      "castRoleGeneralizations": 0,
+      "unresolvedSubjects": [
+        "G001",
+        "G002",
+        "G003",
+        "G006"
+      ],
+      "unsupportedKinshipClaims": [],
+      "rubricDimensions": 10,
+      "applicableDimensionsHaveExactEvidence": false,
+      "consistencyClosed": false,
+      "castExclusionsApplied": 0,
+      "ignoredCastExclusions": 0
+    },
+    {
+      "sequence": 4,
+      "label": "3",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 863.3,
+      "sourceSha256": "74fa02c98ad90217b0a71a089f3c6976870df56e1dbc3504fac46cf0e3d2ef1b",
+      "artifactSha256": "a926a5849f0f5652a35fe3a319596163f453f930af3e17a7ded67476583d27b7",
+      "claims": 20,
+      "sourceWords": 1204,
+      "summaryWords": 127,
+      "summaryClaims": 4,
+      "dossierClaims": 16,
+      "contentBreadth": true,
+      "evidenceAnchors": 30,
+      "exactEvidenceAnchors": 30,
+      "endingCovered": true,
+      "castEntries": 3,
+      "uniqueCanonicalCast": 3,
+      "probableDuplicateCast": [],
+      "incidentalCast": [],
+      "castRolesEvidenceBound": true,
+      "castRoleGeneralizations": 3,
+      "unresolvedSubjects": [
+        "G001",
+        "G003",
+        "G004",
+        "G005"
+      ],
+      "unsupportedKinshipClaims": [
+        "Wilbur, the son of Old Whateley"
+      ],
+      "rubricDimensions": 10,
+      "applicableDimensionsHaveExactEvidence": true,
+      "consistencyClosed": true,
+      "castExclusionsApplied": 0,
+      "ignoredCastExclusions": 0
+    },
+    {
+      "sequence": 5,
+      "label": "4",
+      "model": "qwen2.5:7b",
+      "durationSeconds": 0.1,
+      "sourceSha256": "c869397ddc7d6771553b8fc2377d3e29d9b7e7632a5d677c936c468e7cb21528",
+      "artifactSha256": "fe758daf59e168ac0ff0a4b31288103239278fdca9b58cd8b39ce55f5ff429fc",
+      "claims": 2,
+      "sourceWords": 1241,
+      "summaryWords": 30,
+      "summaryClaims": 1,
+      "dossierClaims": 1,
+      "contentBreadth": false,
+      "evidenceAnchors": 14,
+      "exactEvidenceAnchors": 14,
+      "endingCovered": true,
+      "castEntries": 6,
+      "uniqueCanonicalCast": 6,
+      "probableDuplicateCast": [],
+      "incidentalCast": [],
+      "castRolesEvidenceBound": true,
+      "castRoleGeneralizations": 2,
+      "unresolvedSubjects": [],
+      "unsupportedKinshipClaims": [],
+      "rubricDimensions": 10,
+      "applicableDimensionsHaveExactEvidence": true,
+      "consistencyClosed": true,
+      "castExclusionsApplied": 0,
+      "ignoredCastExclusions": 0
+    }
+  ],
+  "limitations": [
+    "Exact source-anchor matching checks provenance integrity, not whether every interpretation is persuasive.",
+    "A local public-domain specimen does not represent every manuscript format, language, model, or hardware profile.",
+    "Human editorial judgment remains required for usefulness, omissions, tone, and commercial readiness."
+  ]
+}

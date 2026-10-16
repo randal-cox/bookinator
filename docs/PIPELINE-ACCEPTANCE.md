@@ -35,7 +35,9 @@ offset-and-text matching for every emitted evidence anchor, an anchored
 final-quarter movement in each summary, one canonical cast record per identity,
 resolved cast references in Summary and Dossier, no unsupported compact
 kinship assertion in Summary prose, safely generalized unsupported cast roles,
-and all ten structured Review dimensions with one to three exact source
+no ignored or misaddressed cast exclusions, closure of rejected Summary claims,
+minimum evidence breadth for long chapters (three Summary claims, three Dossier
+claims, and a sixty-word digest), and all ten structured Review dimensions with one to three exact source
 quotations whenever applicable. It records hashes, counts, timings, model
 identity, role-generalization warnings, and these semantic-hygiene results under
 `evidence/pipeline-acceptance/`; it does not copy raw manuscript or generated

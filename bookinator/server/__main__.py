@@ -7938,7 +7938,12 @@ def refresh_analysis_result(book: dict[str, object], pipeline: dict[str, object]
         )
         # Chapter Reading consumes these candidates, so a refreshed signal set
         # deliberately invalidates its combined downstream views.
-        if chapter.get("chapterReadingStatus") == "complete":
+        # Signal refresh invalidates the combined reader regardless of its
+        # visible status. A previous interrupted refresh may already say
+        # chapterReadingStatus=pending while the legacy summary status still
+        # says complete; conditioning this reset on "complete" lets that split
+        # brain re-lock a checkpoint without producing the new reading.
+        if not is_front_matter(chapter):
             for key in (
                 "summary", "keyPoints", "endingState", "newQuestions", "questionDetails",
                 "promptVersion", "analysisMode", "error", "model", "startedAt", "completedAt",
@@ -7946,10 +7951,27 @@ def refresh_analysis_result(book: dict[str, object], pipeline: dict[str, object]
                 "chapterReadingCompletedAt", "chapterReadingDurationSeconds",
                 "chapterReadingPrimaryDurationSeconds", "chapterReadingModel",
                 "chapterReadingInputSignature", "chapterReadingPromptVersion",
+                "chapterReadingPhase", "chapterReadingCast", "chapterReadingConsistency",
+                "chapterReadingConsistencyDurationSeconds", "llmReview", "llmReviewModel",
+                "llmReviewStartedAt", "llmReviewCompletedAt", "llmReviewDurationSeconds",
+                "llmReviewInputSignature", "llmReviewError",
             ):
                 chapter.pop(key, None)
-            chapter.update({"status": "pending", "chapterReadingStatus": "pending"})
-            chapter_reading_path(book, sequence).unlink(missing_ok=True)
+            chapter.update({
+                "status": "pending", "chapterReadingStatus": "pending",
+                "llmReviewStatus": "pending",
+            })
+            reading_path = chapter_reading_path(book, sequence)
+            previous_reading = read_json_artifact(reading_path)
+            if isinstance(previous_reading.get("primaryResponse"), dict):
+                previous_reading.update({
+                    "status": "pending", "phase": "awaiting-refreshed-signals",
+                    "invalidatedAt": utc_now(),
+                })
+                previous_reading.pop("normalized", None)
+                write_json_artifact(reading_path, previous_reading)
+            else:
+                reading_path.unlink(missing_ok=True)
             for chunk in pipeline.get("chunks", []):
                 if int(chunk.get("chapterSequence") or 0) != sequence:
                     continue
@@ -8105,6 +8127,27 @@ def refresh_analysis_result(book: dict[str, object], pipeline: dict[str, object]
         invalidate_pipeline_stage(pipeline, "dossiers", include_self=True, status="pending", detail=f"Dossier chunk {sequence} is waiting for fresh analysis.")
         action = "dossiers"
     target = "the whole book" if kind in {"whole-summary", "whole-llm-review"} else f"dossier chunk {sequence}" if kind == "dossier" else f"chapter {sequence}"
+    # Refreshing an already admitted chapter is not authority to cross the
+    # bounded-development checkpoint. Temporarily reopen the existing bound so
+    # the requested result can run; normal chapter-order logic will lock the
+    # checkpoint again when every admitted result is complete.
+    target_chapter_sequence = sequence
+    if kind == "dossier":
+        target_chunk = next((
+            item for item in pipeline.get("chunks", [])
+            if int(item.get("sequence") or 0) == sequence
+        ), {})
+        target_chapter_sequence = int(target_chunk.get("chapterSequence") or 0)
+    development_limit = int(pipeline.get("developmentAnalysisLimit") or 0)
+    if (
+        kind not in {"whole-summary", "whole-llm-review"}
+        and pipeline.get("developmentCheckpointLocked")
+        and 0 < target_chapter_sequence <= development_limit
+    ):
+        pipeline["developmentCheckpointLocked"] = False
+        pipeline["developmentCheckpointReopenedForRefresh"] = {
+            "kind": kind, "sequence": target_chapter_sequence, "requestedAt": utc_now(),
+        }
     if sibling_running:
         pipeline.update({"message": f"Fresh {kind} requested for {target}; the active chapter continues first.", "updatedAt": utc_now()})
     else:
@@ -8632,7 +8675,10 @@ def run_book_chapter_pipeline(
         chapter_chunks = [item for item in pipeline.get("chunks", []) if int(item.get("chapterSequence") or 0) == sequence]
         summary_needs_read = bool(chapter and chapter.get("status") in {None, "pending", "ready", "paused", "running"})
         dossier_needs_read = bool(chapter_chunks and any(item.get("dossierStatus") in {None, "pending", "ready", "paused", "running"} for item in chapter_chunks))
-        if summaries and dossiers and summary_needs_read and dossier_needs_read:
+        combined_reading_needs_read = bool(
+            chapter and chapter.get("chapterReadingStatus") in {"pending", "ready", "paused", "running"}
+        )
+        if summaries and dossiers and (combined_reading_needs_read or (summary_needs_read and dossier_needs_read)):
             if not ({"summarize", "dossiers"} & paused_pipeline_actions(book_id)):
                 claim_stage_worker()
                 run_chapter_reading_pipeline(
@@ -10700,6 +10746,28 @@ def chapter_reading_consistency_schema() -> dict[str, object]:
                     "required": ["candidate_id", "canonical_name", "aliases", "role", "evidence_ref", "reason"],
                 },
             },
+            "cast_exclusions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_id": {"type": "string", "minLength": 1},
+                        "entity_id": {"type": "string", "minLength": 1},
+                        "canonical_name": {"type": "string", "minLength": 1},
+                        "classification": {
+                            "type": "string",
+                            "enum": ["non_participant", "incidental_mention", "duplicate_identity"],
+                        },
+                        "duplicate_of_entity_id": {"type": "string"},
+                        "evidence_quote": {"type": "string", "minLength": 1},
+                        "reason": {"type": "string", "minLength": 1},
+                    },
+                    "required": [
+                        "candidate_id", "entity_id", "canonical_name", "classification",
+                        "duplicate_of_entity_id", "evidence_quote", "reason",
+                    ],
+                },
+            },
             "decisions": {
                 "type": "array",
                 "items": {
@@ -10730,7 +10798,10 @@ def chapter_reading_consistency_schema() -> dict[str, object]:
             },
             "issues": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["corrected_summary", "corrected_dossier_synopsis", "cast_corrections", "decisions", "coverage_decisions", "issues"],
+        "required": [
+            "corrected_summary", "corrected_dossier_synopsis", "cast_corrections",
+            "cast_exclusions", "decisions", "coverage_decisions", "issues",
+        ],
     }
 
 
@@ -10803,6 +10874,66 @@ def apply_chapter_reading_consistency(
             "role": updated["role"],
             "reason": str(correction.get("reason") or "").strip(),
         })
+    cast_exclusions: list[dict[str, str]] = []
+    ignored_cast_exclusions = 0
+    critic_noop_exclusions = 0
+    excluded_indices: set[int] = set()
+    for exclusion in audit.get("cast_exclusions", []) if isinstance(audit.get("cast_exclusions"), list) else []:
+        if not isinstance(exclusion, dict):
+            continue
+        candidate_id = str(exclusion.get("candidate_id") or "")
+        path, _, index_value = candidate_id.rpartition(":")
+        if candidate_id not in candidate_ids or path != "cast" or not index_value.isdigit():
+            ignored_cast_exclusions += 1
+            continue
+        index = int(index_value)
+        if index >= len(cast_values) or not isinstance(cast_values[index], dict):
+            ignored_cast_exclusions += 1
+            continue
+        original = cast_values[index]
+        classification = str(exclusion.get("classification") or "")
+        original_ref = original.get("evidence_ref") if isinstance(original.get("evidence_ref"), dict) else {}
+        identity_matches = (
+            str(exclusion.get("entity_id") or "").casefold() == str(original.get("entity_id") or "").casefold()
+            and str(exclusion.get("canonical_name") or "").casefold() == str(original.get("canonical_name") or "").casefold()
+            and str(exclusion.get("evidence_quote") or "").strip() == str(original_ref.get("quote") or "").strip()
+        )
+        duplicate_of = str(exclusion.get("duplicate_of_entity_id") or "").strip()
+        if classification not in {"non_participant", "incidental_mention", "duplicate_identity"} or not identity_matches:
+            ignored_cast_exclusions += 1
+            continue
+        if classification == "duplicate_identity":
+            if duplicate_of and duplicate_of.casefold() == str(original.get("entity_id") or "").casefold():
+                critic_noop_exclusions += 1
+                continue
+            target = next((
+                item for item in cast_values if isinstance(item, dict)
+                and str(item.get("entity_id") or "").casefold() == duplicate_of.casefold()
+            ), None)
+            if not duplicate_of or target is None or target is original:
+                ignored_cast_exclusions += 1
+                continue
+            target_aliases = target.setdefault("aliases", [])
+            for label in (original.get("canonical_name"), *(original.get("aliases") or [])):
+                label_text = str(label or "").strip()
+                if label_text and label_text.casefold() not in {str(item).casefold() for item in target_aliases}:
+                    target_aliases.append(label_text)
+        elif duplicate_of:
+            ignored_cast_exclusions += 1
+            continue
+        excluded_indices.add(index)
+        cast_exclusions.append({
+            "candidateId": candidate_id,
+            "entityId": str(original.get("entity_id") or ""),
+            "canonicalName": str(original.get("canonical_name") or ""),
+            "classification": classification,
+            "duplicateOfEntityId": duplicate_of,
+            "reason": str(exclusion.get("reason") or "").strip(),
+        })
+    if excluded_indices:
+        cleaned["cast"] = cast_values = [
+            item for index, item in enumerate(cast_values) if index not in excluded_indices
+        ]
     rejected: dict[str, str] = {}
     decisions: list[dict[str, str]] = []
     for decision in audit.get("decisions", []) if isinstance(audit.get("decisions"), list) else []:
@@ -10890,6 +11021,103 @@ def apply_chapter_reading_consistency(
                     dossier.setdefault("events", []).append(addition)
                     coverage_additions += 1
         coverage_decisions.append(record)
+    deterministic_boundary_fallback = False
+    if summary is not None and any(candidate_id.startswith("summary.") for candidate_id in rejected):
+        late_threshold = int(max(0, max(
+            (
+                int((gap.get("evidence_ref") or {}).get("character_end") or 0)
+                for gap in (coverage_gaps or []) if isinstance(gap, dict)
+            ),
+            default=0,
+        ) * 0.75))
+        current_late_anchor = any(
+            isinstance(item, dict)
+            and int((item.get("evidence_ref") or {}).get("character_start") or 0) >= late_threshold
+            for item in summary.get("key_points", []) if isinstance(summary.get("key_points"), list)
+        )
+        late_gaps = sorted(
+            (
+                gap for gap in (coverage_gaps or [])
+                if isinstance(gap, dict)
+                and str(gap.get("target") or "") == "summary_key_point"
+                and isinstance(gap.get("evidence_ref"), dict)
+            ),
+            key=lambda gap: int(gap["evidence_ref"].get("character_start") or 0),
+        )
+        if not current_late_anchor and late_gaps:
+            gap = late_gaps[-1]
+            evidence = copy.deepcopy(gap["evidence_ref"])
+            quote = str(evidence.get("quote") or "").strip()
+            if quote:
+                summary.setdefault("key_points", []).append({
+                    "claim": quote,
+                    "subject": str(gap.get("audited_actor") or "Chapter boundary"),
+                    "evidence_ref": evidence,
+                })
+                coverage_additions += 1
+                deterministic_boundary_fallback = True
+                coverage_decisions.append({
+                    "passageId": str(gap.get("passage_id") or ""),
+                    "target": "summary_key_point",
+                    "verdict": "deterministic_boundary_fallback",
+                    "reason": "The critic omitted every anchored final movement; retained the latest canonical passage literally.",
+                })
+    summary_reconstruction = ""
+    rejected_summary_candidates = [
+        candidate_id for candidate_id in rejected if candidate_id.startswith("summary.")
+    ]
+    if summary is not None and rejected_summary_candidates:
+        surviving_claims: list[str] = []
+        for item in summary.get("key_points", []) if isinstance(summary.get("key_points"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            claim = str(item.get("claim") or "").strip()
+            if claim and claim.casefold() not in {known.casefold() for known in surviving_claims}:
+                surviving_claims.append(claim)
+        if surviving_claims:
+            summary_reconstruction = " ".join(
+                claim if claim.endswith((".", "!", "?")) else f"{claim}."
+                for claim in surviving_claims
+            )
+            summary["summary"] = summary_reconstruction
+    dossier_reconstruction = ""
+    rejected_dossier_candidates = [
+        candidate_id for candidate_id in rejected if candidate_id.startswith("dossier.")
+    ]
+    if dossier is not None and rejected_dossier_candidates:
+        surviving_dossier_claims: list[str] = []
+        for field in ("facts", "events", "entities", "locations", "current_times", "promises", "timeline_observations"):
+            for item in dossier.get(field, []) if isinstance(dossier.get(field), list) else []:
+                if not isinstance(item, dict):
+                    continue
+                claim = str(item.get("claim") or "").strip()
+                if claim and claim.casefold() not in {known.casefold() for known in surviving_dossier_claims}:
+                    surviving_dossier_claims.append(claim)
+        if not surviving_dossier_claims:
+            late_gaps = sorted(
+                (
+                    gap for gap in (coverage_gaps or [])
+                    if isinstance(gap, dict) and isinstance(gap.get("evidence_ref"), dict)
+                ),
+                key=lambda gap: int(gap["evidence_ref"].get("character_start") or 0),
+            )
+            if late_gaps:
+                gap = late_gaps[-1]
+                evidence = copy.deepcopy(gap["evidence_ref"])
+                quote = str(evidence.get("quote") or "").strip()
+                if quote:
+                    dossier.setdefault("events", []).append({
+                        "claim": quote,
+                        "subject": str(gap.get("audited_actor") or "Chapter boundary"),
+                        "evidence_ref": evidence,
+                    })
+                    surviving_dossier_claims.append(quote)
+        if surviving_dossier_claims:
+            dossier_reconstruction = " ".join(
+                claim if claim.endswith((".", "!", "?")) else f"{claim}."
+                for claim in surviving_dossier_claims
+            )
+            dossier["synopsis"] = dossier_reconstruction
     report = {
         "schema": CHAPTER_READING_CONSISTENCY_VERSION,
         "issues": [str(item).strip() for item in audit.get("issues", []) if str(item).strip()] if isinstance(audit.get("issues"), list) else [],
@@ -10897,11 +11125,18 @@ def apply_chapter_reading_consistency(
         "rejectedCandidateCount": len(rejected),
         "castCorrections": cast_corrections,
         "castCorrectionCount": len(cast_corrections),
+        "castExclusions": cast_exclusions,
+        "castExclusionCount": len(cast_exclusions),
+        "ignoredCastExclusionCount": ignored_cast_exclusions,
+        "criticNoopExclusionCount": critic_noop_exclusions,
         "coverageDecisions": coverage_decisions,
         "coverageAdditionCount": coverage_additions,
         "unsafeCoverageAdditionCount": unsafe_coverage_additions,
-        "summaryCorrectionApplied": bool(summary is not None and corrected_summary),
+        "deterministicBoundaryFallback": deterministic_boundary_fallback,
+        "summaryCorrectionApplied": bool(summary is not None and (corrected_summary or summary_reconstruction)),
+        "summaryCorrectionMode": "evidence-ledger-reconstruction" if summary_reconstruction else "model-prose" if corrected_summary else "none",
         "dossierSynopsisCorrectionApplied": bool(dossier is not None and corrected_synopsis),
+        "dossierCorrectionMode": "evidence-ledger-reconstruction" if dossier_reconstruction else "model-prose" if corrected_synopsis else "none",
         "rejectedSummaryCandidateCount": sum(
             1 for candidate_id in rejected if candidate_id.startswith("summary.")
         ),
@@ -10927,6 +11162,74 @@ def replace_cast_ids_with_names(raw: dict[str, object], cast: list[dict[str, obj
                 if isinstance(item, dict) and str(item.get("subject") or "").casefold() in names:
                     item["subject"] = names[str(item["subject"]).casefold()]
     return cleaned
+
+
+def merge_mutual_alias_cast_entries(
+    raw: dict[str, object],
+) -> tuple[dict[str, object], list[dict[str, str]]]:
+    """Merge only identities that explicitly name each other as aliases."""
+    cleaned = copy.deepcopy(raw)
+    cast = cleaned.get("cast") if isinstance(cleaned.get("cast"), list) else []
+    retained: list[dict[str, object]] = []
+    merges: list[dict[str, str]] = []
+    id_replacements: dict[str, str] = {}
+
+    def labels(item: dict[str, object]) -> set[str]:
+        return {
+            re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+            for value in (item.get("canonical_name"), *(item.get("aliases") or []))
+            if str(value or "").strip()
+        }
+
+    for item in cast:
+        if not isinstance(item, dict):
+            continue
+        item_labels = labels(item)
+        item_canonical = re.sub(
+            r"[^a-z0-9]+", " ", str(item.get("canonical_name") or "").casefold(),
+        ).strip()
+        duplicate = next((
+            existing for existing in retained
+            if item_canonical in labels(existing)
+            and re.sub(r"[^a-z0-9]+", " ", str(existing.get("canonical_name") or "").casefold()).strip() in item_labels
+        ), None)
+        if duplicate is None:
+            retained.append(item)
+            continue
+        retained_id = str(duplicate.get("entity_id") or "")
+        removed_id = str(item.get("entity_id") or "")
+        if not retained_id or not removed_id:
+            retained.append(item)
+            continue
+        known = {str(value).casefold() for value in duplicate.get("aliases", [])}
+        for value in (item.get("canonical_name"), *(item.get("aliases") or [])):
+            value_text = str(value or "").strip()
+            if value_text and value_text.casefold() not in known:
+                duplicate.setdefault("aliases", []).append(value_text)
+                known.add(value_text.casefold())
+        id_replacements[removed_id.casefold()] = retained_id
+        merges.append({
+            "retainedEntityId": retained_id,
+            "removedEntityId": removed_id,
+            "retainedCanonicalName": str(duplicate.get("canonical_name") or ""),
+            "removedCanonicalName": str(item.get("canonical_name") or ""),
+        })
+    cleaned["cast"] = retained
+
+    def rewrite_subjects(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                rewrite_subjects(item)
+        elif isinstance(value, dict):
+            subject = str(value.get("subject") or "")
+            if subject.casefold() in id_replacements:
+                value["subject"] = id_replacements[subject.casefold()]
+            for item in value.values():
+                rewrite_subjects(item)
+
+    rewrite_subjects(cleaned.get("summary"))
+    rewrite_subjects(cleaned.get("dossier"))
+    return cleaned, merges
 
 
 def unresolved_projection_subjects(raw: dict[str, object], cast: list[dict[str, object]]) -> list[str]:
@@ -10977,6 +11280,7 @@ def unsupported_summary_kinship_claims(summary: object, source_text: str) -> lis
 def audit_chapter_reading_consistency(
     raw: dict[str, object], cast: list[dict[str, object]], source_text: str, model: str,
     cancel_event: threading.Event, run_key: str, trace: dict[str, object],
+    precomputed_audit: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, object], list[dict[str, object]]]:
     candidates = chapter_reading_consistency_candidates(raw, source_text)
     coverage_gaps = chapter_action_coverage_gaps(raw, source_text)
@@ -10986,6 +11290,8 @@ def audit_chapter_reading_consistency(
 
 THE CANONICAL SOURCE IS THE ONLY IDENTITY AUTHORITY. The proposed cast is a hypothesis to audit, not a fact source. Correct a cast entry when its canonical name, aliases, role, or relationship conflicts with the source. In particular, if a sentence places a named person alongside "my ward", "her daughter", or another description, those labels identify different participants unless the source explicitly says otherwise. Preserve an entity_id when correcting its label or role.
 
+Cast is a participant ledger, not a bag of extracted nouns. Put a cast item in cast_exclusions when it is an abstract concept, sound, object, place, species/class mention, unnamed livestock, or another incidental mention that does not act as a distinct participant. Use duplicate_identity only when two entries are demonstrably the same participant; identify the retained entry with duplicate_of_entity_id. For every exclusion, copy candidate_id, entity_id, canonical_name, and the candidate's exact evidence quotation byte-for-byte. An exclusion with any identity mismatch will be ignored. Never exclude an identity merely because it seems minor or absent from the summary.
+
 For every non-cast candidate, ask whether the cited evidence and its local source actually entail the claim. An exact quotation proves location, not truth. Reject a claim when it changes the grammatical actor or object; invents a role or relationship; upgrades proximity or sequence into causation; supplies a location, clock time, chronology, number, polarity, motive, or diagnosis the source does not establish; or states an incorrect chapter-ending condition. For example, a father standing near a carriage is not necessarily its driver, "by this time" does not establish daytime, and a conversation does not by itself establish friendship or guardianship.
 
 KEEP IS THE DEFAULT only when the claim is genuinely supported. Do not reject for style, harmless incompleteness, or a qualified interpretation that the cited passage reasonably supports. A name and its true alias are one participant; two separately introduced or co-present people remain distinct. Do not delete a plausible cast alias merely because it is absent from this chapter; correct it only when this chapter's source conflicts with it.
@@ -10994,7 +11300,7 @@ Review every ACTION COVERAGE GAP exactly once. Use add only when that exact acti
 
 Before auditing individual candidates, compare CURRENT SUMMARY and CURRENT DOSSIER SYNOPSIS with the final 20 percent of CANONICAL SOURCE. They must include the last material action, revelation, arrival, departure, decision, or change actually reached by the chapter. If either stops early, return a minimally corrected replacement even when no individual candidate is rejected. This boundary check is mandatory.
 
-Return cast_corrections ONLY for cast entries that need correction, using exact source evidence. Return decisions ONLY for other candidates that must be rejected; omit keep decisions. Return an empty corrected_summary or corrected_dossier_synopsis when that prose is already sound. When either contains a rejected factual assertion, identity error, or boundary error, return a minimally corrected version that removes it without adding facts.
+Return cast_corrections ONLY for cast entries that need correction, using exact source evidence. Return cast_exclusions ONLY through the identity-addressed structure above; never use decisions to delete cast. Return decisions ONLY for other candidates that must be rejected; omit keep decisions. Return an empty corrected_summary or corrected_dossier_synopsis when that prose is already sound. When either contains a rejected factual assertion, identity error, or boundary error, return a minimally corrected version that removes it without adding facts.
 
 CAST LEDGER
 {json.dumps(cast, ensure_ascii=False)}
@@ -11014,14 +11320,75 @@ CURRENT DOSSIER SYNOPSIS
 CANONICAL SOURCE — supplied once; use candidate offsets to inspect local context
 {source_text}
 """
-    audit = run_llm_review_structured_step(
-        "chapter reading consistency", prompt, model, chapter_reading_consistency_schema(),
-        cancel_event, run_key, trace, attempts=2,
-    )
-    trace["result"] = audit
+    if isinstance(precomputed_audit, dict):
+        audit = copy.deepcopy(precomputed_audit)
+        trace["reusedResult"] = copy.deepcopy(precomputed_audit)
+    else:
+        audit = run_llm_review_structured_step(
+            "chapter reading consistency", prompt, model, chapter_reading_consistency_schema(),
+            cancel_event, run_key, trace, attempts=2,
+        )
     cleaned, report = apply_chapter_reading_consistency(
         raw, audit, {str(item["candidateId"]) for item in candidates}, coverage_gaps,
     )
+    closure_problems = []
+    if report.get("rejectedSummaryCandidateCount") and not report.get("summaryCorrectionApplied"):
+        closure_problems.append("Rejected Summary claims require a non-empty corrected_summary.")
+    if report.get("ignoredCastExclusionCount"):
+        closure_problems.append(
+            f"{report['ignoredCastExclusionCount']} cast exclusion(s) failed exact identity/evidence addressing."
+        )
+    provisional_summary = normalize_chapter_summary(
+        cleaned.get("summary") if isinstance(cleaned.get("summary"), dict) else {}, source_text,
+    )
+    ending_coverage = chapter_summary_ending_coverage(
+        provisional_summary.get("summary"), provisional_summary, source_text,
+    )
+    if not ending_coverage.get("covered"):
+        late_gaps = [
+            gap for gap in coverage_gaps
+            if int((gap.get("evidence_ref") or {}).get("character_start") or 0) >= int(len(source_text) * 0.75)
+        ]
+        closure_problems.append(
+            "The corrected Summary must reach the final-quarter movement. Add every material late gap "
+            f"with exact evidence and mention it in corrected_summary: {json.dumps(late_gaps[-6:], ensure_ascii=False)}"
+        )
+    if closure_problems:
+        trace["initialResult"] = audit
+        repair_prompt = f"""Repair your previous consistency audit. Return a COMPLETE replacement audit object, not commentary.
+
+These are hard contract failures:
+{json.dumps(closure_problems, ensure_ascii=False)}
+
+If you reject any summary.key_points candidate, corrected_summary MUST be a minimally corrected replacement for CURRENT SUMMARY with every rejected assertion removed or corrected. Do not leave it empty. A cast exclusion is valid only when candidate_id, entity_id, canonical_name, and evidence_quote exactly match the same CAST candidate. If you cannot support an exclusion under that rule, omit it. Never merge separately named or co-present people. Preserve all otherwise valid decisions and coverage decisions.
+
+PREVIOUS AUDIT
+{json.dumps(audit, ensure_ascii=False)}
+
+CAST CANDIDATES
+{json.dumps([item for item in candidates if item.get('path') == 'cast'], ensure_ascii=False)}
+
+CURRENT SUMMARY
+{str(summary.get('summary') or '')}
+
+CURRENT DOSSIER SYNOPSIS
+{str(dossier.get('synopsis') or '')}
+
+CANONICAL SOURCE
+{source_text}
+"""
+        audit = run_llm_review_structured_step(
+            "chapter reading consistency closure", repair_prompt, model,
+            chapter_reading_consistency_schema(), cancel_event, run_key, trace, attempts=2,
+        )
+        cleaned, report = apply_chapter_reading_consistency(
+            raw, audit, {str(item["candidateId"]) for item in candidates}, coverage_gaps,
+        )
+        trace["repairResult"] = audit
+    trace["result"] = audit
+    cleaned, deterministic_merges = merge_mutual_alias_cast_entries(cleaned)
+    report["deterministicCastMerges"] = deterministic_merges
+    report["deterministicCastMergeCount"] = len(deterministic_merges)
     verified_cast = normalize_chapter_reading_cast(cleaned.get("cast"), source_text)
     report["unresolvedProjectionSubjects"] = unresolved_projection_subjects(cleaned, verified_cast)
     return replace_cast_ids_with_names(cleaned, verified_cast), report, verified_cast
@@ -11138,6 +11505,16 @@ def mark_chapter_reading_chunks_started(
         write_chunk_artifact(book, sequence, artifact)
 
 
+def reusable_chapter_primary_response(
+    artifact: dict[str, object], input_signature: str,
+) -> dict[str, object] | None:
+    """Reuse an immutable primary read only when every prompt input still matches."""
+    response = artifact.get("primaryResponse")
+    if artifact.get("inputSignature") != input_signature or not isinstance(response, dict):
+        return None
+    return copy.deepcopy(response)
+
+
 def run_chapter_reading_pipeline(book_id: str, chapter_sequence: int, include_review: bool | None = None) -> None:
     """Produce Summary, Dossier, and optional first-reader analysis from one model read."""
     book = find_book(book_id)
@@ -11182,6 +11559,14 @@ def run_chapter_reading_pipeline(book_id: str, chapter_sequence: int, include_re
         "source": text, "priorContext": reading_context, "includeReview": include_review,
         "glinerSignals": specialist_signals.get("identityCandidates", []),
     })
+    prior_artifact = read_json_artifact(chapter_reading_path(book, chapter_sequence))
+    reusable_primary = reusable_chapter_primary_response(prior_artifact, signature)
+    prior_consistency_trace = prior_artifact.get("consistencyTrace") if isinstance(prior_artifact.get("consistencyTrace"), dict) else {}
+    reusable_consistency_audit = (
+        copy.deepcopy(prior_consistency_trace.get("result"))
+        if reusable_primary is not None and isinstance(prior_consistency_trace.get("result"), dict)
+        else None
+    )
     started_at = utc_now()
     started = time.monotonic()
     chapter.update({
@@ -11205,14 +11590,28 @@ def run_chapter_reading_pipeline(book_id: str, chapter_sequence: int, include_re
         "model": model, "startedAt": started_at, "inputSignature": signature,
         "input": {"book": {"title": book.get("title"), "author": book.get("author")}, "chapter": source, "priorContext": reading_context, "includeReview": include_review, "glinerSignals": specialist_signals},
     }
+    if reusable_primary is not None:
+        artifact.update({
+            "primaryResponseReused": True,
+            "reusedFromStatus": str(prior_artifact.get("status") or "unknown"),
+            "priorPrimaryDurationSeconds": prior_artifact.get("priorPrimaryDurationSeconds")
+            if prior_artifact.get("primaryResponseReused")
+            else prior_artifact.get("primaryDurationSeconds"),
+        })
+    if reusable_consistency_audit is not None:
+        artifact["consistencyAuditReused"] = True
     write_json_artifact(chapter_reading_path(book, chapter_sequence), artifact)
     persist_pipeline = True
     try:
-        primary_raw = run_llm_review_structured_step(
-            "chapter reading", prompt, model, chapter_reading_schema(include_review),
-            cancel_event, book_id, artifact, attempts=2,
-        )
-        primary_duration = round(time.monotonic() - started, 1)
+        if reusable_primary is not None:
+            primary_raw = reusable_primary
+            primary_duration = 0.0
+        else:
+            primary_raw = run_llm_review_structured_step(
+                "chapter reading", prompt, model, chapter_reading_schema(include_review),
+                cancel_event, book_id, artifact, attempts=2,
+            )
+            primary_duration = round(time.monotonic() - started, 1)
         cast = normalize_chapter_reading_cast(primary_raw.get("cast"), text)
         chapter["chapterReadingPhase"] = "consistency"
         pipeline.update({
@@ -11226,6 +11625,7 @@ def run_chapter_reading_pipeline(book_id: str, chapter_sequence: int, include_re
         consistency_trace: dict[str, object] = {}
         raw, consistency_report, cast = audit_chapter_reading_consistency(
             primary_raw, cast, text, model, cancel_event, book_id, consistency_trace,
+            precomputed_audit=reusable_consistency_audit,
         )
         artifact.update({"consistencyResponse": raw, "consistencyTrace": consistency_trace})
         write_json_artifact(chapter_reading_path(book, chapter_sequence), artifact)
@@ -11243,6 +11643,15 @@ def run_chapter_reading_pipeline(book_id: str, chapter_sequence: int, include_re
                     str(item.get("candidateId") or "")
                     for item in consistency_report.get("decisions", [])
                     if str(item.get("candidateId") or "").startswith("summary.")
+                ],
+            )
+        if consistency_report.get("ignoredCastExclusionCount"):
+            raise ChapterSummaryError(
+                "The consistency pass proposed a cast exclusion that did not exactly address its identity and evidence. This chapter remains retryable.",
+                json.dumps(raw, ensure_ascii=False),
+                [
+                    str(item.get("candidateId") or item.get("canonicalName") or "invalid cast exclusion")
+                    for item in consistency_report.get("castExclusions", [])
                 ],
             )
         summary = normalize_chapter_summary(raw.get("summary") if isinstance(raw.get("summary"), dict) else {}, text)
@@ -13297,7 +13706,11 @@ class BookinatorHandler(SimpleHTTPRequestHandler):
             if action in PAUSABLE_PIPELINE_ACTIONS:
                 set_pipeline_action_paused(book_id, action, False)
             queue_action = refresh_followup_action(action)
-            prioritize_pipeline_action(book_id, queue_action)
+            try:
+                prioritize_pipeline_action(book_id, queue_action)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.CONFLICT)
+                return
             self.send_json({"refreshing": True, "kind": kind, "id": sequence, "status": "pending", "queueAction": queue_action, "interruptedActiveWork": interrupted_active_work}, HTTPStatus.ACCEPTED)
             return
         chapter_map_match = re.fullmatch(r"/api/books/([A-Za-z0-9_-]{8,80})/chapter-map/(approve|variants|demote|restore)", route.path)

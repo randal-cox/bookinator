@@ -88,6 +88,13 @@ for (const chapter of authored) {
   const review = reading.normalized?.review || {};
   const complete = reading.status === "complete" && chapter.chapterReadingStatus === "complete";
   const projections = Boolean(String(summary.summary || "").trim() && Object.keys(dossier).length && Object.keys(review).length);
+  const sourceWords = source.trim().split(/\s+/).filter(Boolean).length;
+  const summaryWords = String(summary.summary || "").trim().split(/\s+/).filter(Boolean).length;
+  const summaryClaims = Array.isArray(summary.keyPointDetails) ? summary.keyPointDetails.length : 0;
+  const dossierClaims = Array.isArray(dossier.claimRecords) ? dossier.claimRecords.length : 0;
+  const contentBreadth = sourceWords < 500
+    ? summaryClaims >= 1 && dossierClaims >= 1
+    : summaryWords >= 60 && summaryClaims >= 3 && dossierClaims >= 3;
   const evidenceBound = anchors.length > 0 && exactAnchors.length === anchors.length;
   const cast = Array.isArray(reading.normalized?.cast) ? reading.normalized.cast : [];
   const castKeys = cast.map((entry) => String(entry.canonicalName || "").toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim()).filter(Boolean);
@@ -127,9 +134,15 @@ for (const chapter of authored) {
   const rejectedSummaryCandidates = Array.isArray(consistency.decisions)
     ? consistency.decisions.filter((item) => String(item.candidateId || "").startsWith("summary."))
     : [];
-  const consistencyClosed = rejectedSummaryCandidates.length === 0 || consistency.summaryCorrectionApplied === true;
+  const rejectedSummaryClosed = rejectedSummaryCandidates.length === 0 || consistency.summaryCorrectionApplied === true;
+  const ignoredCastExclusions = Number(consistency.ignoredCastExclusionCount || 0);
+  const consistencyClosed = rejectedSummaryClosed && ignoredCastExclusions === 0;
   check(`chapter.${sequence}.complete`, complete, { readingStatus: reading.status, chapterStatus: chapter.chapterReadingStatus, model: reading.model, durationSeconds: reading.durationSeconds });
   check(`chapter.${sequence}.projections`, projections, { summary: Boolean(String(summary.summary || "").trim()), dossier: Object.keys(dossier).length > 0, review: Object.keys(review).length > 0 });
+  check(`chapter.${sequence}.content-breadth`, contentBreadth, {
+    sourceWords, summaryWords, summaryClaims, dossierClaims,
+    minimum: sourceWords < 500 ? {summaryClaims: 1, dossierClaims: 1} : {summaryWords: 60, summaryClaims: 3, dossierClaims: 3},
+  });
   check(`chapter.${sequence}.anchors`, evidenceBound, { observed: anchors.length, exactInCanonicalSource: exactAnchors.length });
   check(`chapter.${sequence}.semantic-hygiene`, semanticHygiene, {
     endingCovered,
@@ -153,6 +166,8 @@ for (const chapter of authored) {
   check(`chapter.${sequence}.consistency-closure`, consistencyClosed, {
     rejectedSummaryCandidates: rejectedSummaryCandidates.map((item) => item.candidateId),
     summaryCorrectionApplied: consistency.summaryCorrectionApplied === true,
+    castExclusionsApplied: Number(consistency.castExclusionCount || 0),
+    ignoredCastExclusions,
   });
   chapters.push({
     sequence,
@@ -162,6 +177,11 @@ for (const chapter of authored) {
     sourceSha256: sha256(canonicalBytes),
     artifactSha256: sha256(readingBytes),
     claims: claims.length,
+    sourceWords,
+    summaryWords,
+    summaryClaims,
+    dossierClaims,
+    contentBreadth,
     evidenceAnchors: anchors.length,
     exactEvidenceAnchors: exactAnchors.length,
     endingCovered,
@@ -176,6 +196,8 @@ for (const chapter of authored) {
     rubricDimensions: dimensions.length,
     applicableDimensionsHaveExactEvidence: dimensionEvidenceComplete,
     consistencyClosed,
+    castExclusionsApplied: Number(consistency.castExclusionCount || 0),
+    ignoredCastExclusions,
   });
 }
 

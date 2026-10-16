@@ -1024,6 +1024,69 @@ def test_ordinary_product_command_rejects_a_locked_development_checkpoint() -> N
             server.prioritize_pipeline_action("project-a", "summarize")
 
 
+def test_refresh_reopens_only_an_already_admitted_development_chapter() -> None:
+    pipeline = {
+        "status": "paused", "phase": "development-checkpoint",
+        "developmentAnalysisLimit": 5, "developmentCheckpointLocked": True,
+        "chapters": [{
+            "sequence": 5, "status": "complete", "glinerStatus": "complete",
+            "chapterReadingStatus": "pending", "chapterReadingPhase": "complete",
+            "chapterReadingCast": [{"entityId": "old"}],
+            "chapterReadingConsistency": {"schema": "old"},
+            "llmReviewStatus": "complete", "llmReview": {"verdict": "old"},
+            "summary": "Saved",
+        }],
+        "chunks": [], "stages": [],
+    }
+    with patch.object(server, "gliner_signals_path") as artifact_path, patch.object(server, "write_pipeline"):
+        artifact_path.return_value.unlink.return_value = None
+        action, _was_running = server.refresh_analysis_result(
+            {"id": "book-1234"}, pipeline, "gliner", 5,
+        )
+
+    assert action == "gliner-signals"
+    assert pipeline["developmentCheckpointLocked"] is False
+    assert pipeline["developmentAnalysisLimit"] == 5
+    assert pipeline["developmentCheckpointReopenedForRefresh"]["sequence"] == 5
+    chapter = pipeline["chapters"][0]
+    assert chapter["chapterReadingStatus"] == "pending"
+    assert chapter["llmReviewStatus"] == "pending"
+    assert "chapterReadingPhase" not in chapter
+    assert "chapterReadingCast" not in chapter
+    assert "chapterReadingConsistency" not in chapter
+    assert "llmReview" not in chapter
+
+
+def test_gliner_refresh_preserves_primary_read_only_for_signature_checked_revalidation(tmp_path: Path) -> None:
+    pipeline = {
+        "status": "paused", "phase": "development-checkpoint",
+        "developmentAnalysisLimit": 5, "developmentCheckpointLocked": True,
+        "chapters": [{
+            "sequence": 5, "title": "4", "status": "complete",
+            "glinerStatus": "complete", "chapterReadingStatus": "complete",
+        }],
+        "chunks": [], "stages": [],
+    }
+    reading_path = tmp_path / "0005.json"
+    reading_path.write_text(json.dumps({
+        "status": "complete", "inputSignature": "frozen-signature",
+        "primaryResponse": {"summary": {"summary": "Frozen primary."}},
+        "normalized": {"summary": {"summary": "Old final."}},
+    }), encoding="utf-8")
+    with patch.object(server, "gliner_signals_path") as signals_path, \
+         patch.object(server, "chapter_reading_path", return_value=reading_path), \
+         patch.object(server, "write_pipeline"):
+        signals_path.return_value.unlink.return_value = None
+        server.refresh_analysis_result({"id": "book-1234"}, pipeline, "gliner", 5)
+
+    preserved = json.loads(reading_path.read_text(encoding="utf-8"))
+    assert preserved["status"] == "pending"
+    assert preserved["phase"] == "awaiting-refreshed-signals"
+    assert preserved["inputSignature"] == "frozen-signature"
+    assert preserved["primaryResponse"]["summary"]["summary"] == "Frozen primary."
+    assert "normalized" not in preserved
+
+
 def test_pipeline_panel_can_start_one_book_completely_over() -> None:
     root = Path(__file__).parents[1]
     app = (root / "src" / "app.js").read_text(encoding="utf-8")
@@ -5252,6 +5315,44 @@ def test_book_worker_runs_each_chapter_through_dependency_order_before_advancing
     assert calls == [("chapter-reading", 1), ("emotions", 1), ("tags", 1), ("chapter-reading", 2), ("summary-rollup", None), ("emotions", 2), ("tags", 2)]
 
 
+def test_pending_combined_reader_cannot_route_through_legacy_summary_when_dossier_looks_complete() -> None:
+    import bookinator.server.__main__ as server
+
+    pipeline = {
+        "stages": [
+            {"id": "summaries", "status": "pending"},
+            {"id": "dossiers", "status": "pending"},
+        ],
+        "chapters": [{
+            "sequence": 5, "title": "4", "status": "pending",
+            "chapterReadingStatus": "pending",
+        }],
+        "chunks": [{"sequence": 5, "chapterSequence": 5, "dossierStatus": "complete"}],
+    }
+    calls = []
+
+    def combined(_book_id: str, chapter_sequence: int, include_review: bool = False) -> None:
+        calls.append(("combined", chapter_sequence))
+        pipeline["chapters"][0].update({"status": "complete", "chapterReadingStatus": "complete"})
+
+    server.QUEUE_CANCEL_EVENT.clear()
+    with patch.object(server, "find_book", return_value={"id": "book-1234"}), \
+         patch.object(server, "load_pipeline", return_value=pipeline), \
+         patch.object(server, "ordered_chapter_sequences", return_value=[5]), \
+         patch.object(server, "run_chapter_reading_pipeline", side_effect=combined), \
+         patch.object(server, "run_summary_pipeline", side_effect=lambda *_args, **_kwargs: calls.append(("legacy", 5))), \
+         patch.object(server, "run_ready_stage_rollups"), \
+         patch.object(server, "reconcile_development_checkpoint", return_value=False):
+        server.run_book_chapter_pipeline(
+            "book-1234", emotions=False, tags=False, smells=False,
+            context=False, llm_review=False, gliner_signals=False,
+        )
+    server.PIPELINE_THREADS.pop("book-1234", None)
+    server.PIPELINE_CANCEL_EVENTS.pop("book-1234", None)
+
+    assert calls == [("combined", 5)]
+
+
 def test_summary_rollup_requires_summaries_but_not_independent_analysis_passes() -> None:
     pipeline = {
         "stages": [
@@ -6255,6 +6356,182 @@ def test_consistency_cannot_delete_cast_by_positional_decision() -> None:
     assert report["rejectedCandidateCount"] == 0
 
 
+def test_consistency_excludes_only_exactly_identity_addressed_incidental_cast() -> None:
+    raw = {
+        "cast": [
+            {
+                "entity_id": "g001", "canonical_name": "Lavinia", "aliases": [],
+                "role": "Participant", "evidence_ref": {"quote": "Lavinia screamed."},
+            },
+            {
+                "entity_id": "g002", "canonical_name": "pandemoniac cachinnation", "aliases": [],
+                "role": "Sound", "evidence_ref": {"quote": "a kind of pandemoniac cachinnation"},
+            },
+        ],
+        "summary": {"key_points": [{"claim": "Lavinia screamed.", "subject": "g001"}]},
+        "dossier": {"facts": []},
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [],
+        "decisions": [], "coverage_decisions": [], "issues": [],
+        "cast_exclusions": [{
+            "candidate_id": "cast:1", "entity_id": "g002",
+            "canonical_name": "pandemoniac cachinnation", "classification": "non_participant",
+            "duplicate_of_entity_id": "", "evidence_quote": "a kind of pandemoniac cachinnation",
+            "reason": "This is a description of the birds' sound, not a participant.",
+        }],
+    }, {"cast:0", "cast:1"}, [])
+
+    assert [item["canonical_name"] for item in cleaned["cast"]] == ["Lavinia"]
+    assert report["castExclusionCount"] == 1
+    assert report["ignoredCastExclusionCount"] == 0
+
+
+def test_consistency_ignores_misaddressed_cast_exclusion() -> None:
+    raw = {
+        "cast": [{
+            "entity_id": "g001", "canonical_name": "Lavinia", "aliases": [],
+            "role": "Participant", "evidence_ref": {"quote": "Lavinia screamed."},
+        }],
+        "summary": {"key_points": []}, "dossier": {"facts": []},
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [],
+        "decisions": [], "coverage_decisions": [], "issues": [],
+        "cast_exclusions": [{
+            "candidate_id": "cast:0", "entity_id": "wrong-id", "canonical_name": "Lavinia",
+            "classification": "incidental_mention", "duplicate_of_entity_id": "",
+            "evidence_quote": "Lavinia screamed.", "reason": "Wrongly addressed.",
+        }],
+    }, {"cast:0"}, [])
+
+    assert [item["canonical_name"] for item in cleaned["cast"]] == ["Lavinia"]
+    assert report["castExclusionCount"] == 0
+    assert report["ignoredCastExclusionCount"] == 1
+
+
+def test_consistency_merges_identity_addressed_duplicate_cast_as_alias() -> None:
+    raw = {
+        "cast": [
+            {
+                "entity_id": "lavinia", "canonical_name": "Lavinia", "aliases": [],
+                "role": "Participant", "evidence_ref": {"quote": "Lavinia screamed."},
+            },
+            {
+                "entity_id": "lavinia-full", "canonical_name": "Lavinia Whateley", "aliases": [],
+                "role": "Participant", "evidence_ref": {"quote": "poor Lavinia Whateley was never seen again"},
+            },
+        ],
+        "summary": {"key_points": []}, "dossier": {"facts": []},
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [],
+        "decisions": [], "coverage_decisions": [], "issues": [],
+        "cast_exclusions": [{
+            "candidate_id": "cast:1", "entity_id": "lavinia-full",
+            "canonical_name": "Lavinia Whateley", "classification": "duplicate_identity",
+            "duplicate_of_entity_id": "lavinia",
+            "evidence_quote": "poor Lavinia Whateley was never seen again",
+            "reason": "The full name and short name identify the same person.",
+        }],
+    }, {"cast:0", "cast:1"}, [])
+
+    assert len(cleaned["cast"]) == 1
+    assert cleaned["cast"][0]["aliases"] == ["Lavinia Whateley"]
+    assert report["castExclusionCount"] == 1
+
+
+def test_consistency_records_self_duplicate_exclusion_as_critic_noop() -> None:
+    raw = {
+        "cast": [{
+            "entity_id": "earl", "canonical_name": "Earl Sawyer", "aliases": [],
+            "role": "Witness", "evidence_ref": {"quote": "Earl Sawyer spoke."},
+        }],
+        "summary": {"key_points": []}, "dossier": {"facts": []},
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "", "cast_corrections": [],
+        "decisions": [], "coverage_decisions": [], "issues": [],
+        "cast_exclusions": [{
+            "candidate_id": "cast:0", "entity_id": "earl", "canonical_name": "Earl Sawyer",
+            "classification": "duplicate_identity", "duplicate_of_entity_id": "earl",
+            "evidence_quote": "Earl Sawyer spoke.", "reason": "Duplicate of itself.",
+        }],
+    }, {"cast:0"}, [])
+
+    assert len(cleaned["cast"]) == 1
+    assert report["castExclusionCount"] == 0
+    assert report["ignoredCastExclusionCount"] == 0
+    assert report["criticNoopExclusionCount"] == 1
+
+
+def test_rejected_summary_uses_literal_latest_boundary_when_critic_omits_all_late_facts() -> None:
+    early_quote = "Wilbur called for the doctor."
+    late_quote = "Wilbur closed every ground-floor window and removed the partitions."
+    raw = {
+        "cast": [],
+        "summary": {
+            "summary": "Wilbur called for his father.",
+            "key_points": [{
+                "claim": "Wilbur called for his father.", "subject": "Wilbur",
+                "evidence_ref": {"quote": early_quote},
+            }],
+        },
+        "dossier": {"facts": []},
+    }
+    gap = {
+        "passage_id": "P0099", "target": "summary_key_point", "audited_actor": "Wilbur",
+        "evidence_ref": {
+            "passage_id": "P0099", "quote": late_quote,
+            "character_start": 900, "character_end": 970,
+        },
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "Wilbur called for his father.",
+        "corrected_dossier_synopsis": "", "cast_corrections": [], "cast_exclusions": [],
+        "coverage_decisions": [{
+            "passage_id": "P0099", "target": "summary_key_point",
+            "verdict": "omit_as_immaterial", "claim": "", "subject": "",
+            "evidence_ref": gap["evidence_ref"], "reason": "Wrongly omitted.",
+        }],
+        "decisions": [{
+            "candidate_id": "summary.key_points:0", "verdict": "reject",
+            "reason": "The relationship is unsupported.",
+        }],
+        "issues": [],
+    }, {"summary.key_points:0"}, [gap])
+
+    assert cleaned["summary"]["summary"] == late_quote
+    assert cleaned["summary"]["key_points"][0]["claim"] == late_quote
+    assert report["deterministicBoundaryFallback"] is True
+    assert report["summaryCorrectionMode"] == "evidence-ledger-reconstruction"
+
+
+def test_rejected_dossier_rebuilds_synopsis_from_surviving_evidence_claims() -> None:
+    raw = {
+        "cast": [], "summary": {"key_points": []},
+        "dossier": {
+            "synopsis": "Wilbur called for his father.",
+            "facts": [
+                {"claim": "Wilbur called for his father.", "subject": "Wilbur"},
+                {"claim": "The windows are closed.", "subject": "Wilbur"},
+            ],
+            "events": [],
+        },
+    }
+    cleaned, report = server.apply_chapter_reading_consistency(raw, {
+        "corrected_summary": "", "corrected_dossier_synopsis": "Still unsupported.",
+        "cast_corrections": [], "cast_exclusions": [], "coverage_decisions": [], "issues": [],
+        "decisions": [{
+            "candidate_id": "dossier.facts:0", "verdict": "reject",
+            "reason": "The source says grandfather.",
+        }],
+    }, {"dossier.facts:0", "dossier.facts:1"}, [])
+
+    assert cleaned["dossier"]["synopsis"] == "The windows are closed."
+    assert report["dossierCorrectionMode"] == "evidence-ledger-reconstruction"
+
+
 def test_consistency_report_exposes_unclosed_summary_rejections() -> None:
     raw = {
         "cast": [],
@@ -6277,6 +6554,80 @@ def test_consistency_report_exposes_unclosed_summary_rejections() -> None:
     assert report["summaryCorrectionApplied"] is False
 
 
+def test_consistency_audit_repairs_its_own_unclosed_summary_rejection() -> None:
+    source = "Wilbur called Dr. Houghton for his grandfather. Lavinia screamed."
+    raw = {
+        "cast": [],
+        "summary": {
+            "summary": "Wilbur calls a doctor for his father, and Lavinia is afraid.",
+            "key_points": [{
+                "claim": "Wilbur calls a doctor for his father.", "subject": "Wilbur",
+                "evidence_ref": {"quote": "Wilbur called Dr. Houghton for his grandfather."},
+            }],
+        },
+        "dossier": {"synopsis": "Wilbur calls for help.", "facts": []},
+    }
+    initial = {
+        "corrected_summary": "", "corrected_dossier_synopsis": "",
+        "cast_corrections": [], "cast_exclusions": [], "coverage_decisions": [], "issues": [],
+        "decisions": [{
+            "candidate_id": "summary.key_points:0", "verdict": "reject",
+            "reason": "The source says grandfather, not father.",
+        }],
+    }
+    repaired = {
+        **initial,
+        "corrected_summary": "Wilbur calls Dr. Houghton for his grandfather; Lavinia screams.",
+    }
+    trace = {}
+    with patch.object(server, "run_llm_review_structured_step", side_effect=[initial, repaired]) as run:
+        cleaned, report, _cast = server.audit_chapter_reading_consistency(
+            raw, [], source, "reader", threading.Event(), "book-1234", trace,
+        )
+
+    assert run.call_count == 2
+    assert cleaned["summary"]["summary"] == repaired["corrected_summary"]
+    assert report["summaryCorrectionApplied"] is True
+    assert trace["initialResult"] == initial
+    assert trace["repairResult"] == repaired
+
+
+def test_consistency_audit_can_reapply_a_frozen_result_without_model_call() -> None:
+    source = "Wilbur closed the windows."
+    raw = {
+        "cast": [],
+        "summary": {"summary": "Wilbur closed the windows.", "key_points": []},
+        "dossier": {"synopsis": "Wilbur closed the windows.", "facts": []},
+    }
+    frozen = {
+        "corrected_summary": "", "corrected_dossier_synopsis": "",
+        "cast_corrections": [], "cast_exclusions": [], "decisions": [],
+        "coverage_decisions": [], "issues": [],
+    }
+    trace = {}
+    with patch.object(server, "run_llm_review_structured_step") as run:
+        cleaned, _report, _cast = server.audit_chapter_reading_consistency(
+            raw, [], source, "reader", threading.Event(), "book-1234", trace,
+            precomputed_audit=frozen,
+        )
+
+    run.assert_not_called()
+    assert cleaned["summary"]["summary"] == "Wilbur closed the windows."
+    assert trace["reusedResult"] == frozen
+
+
+def test_failed_chapter_retry_reuses_primary_only_for_identical_input_signature() -> None:
+    artifact = {
+        "status": "failed", "inputSignature": "same",
+        "primaryResponse": {"summary": {"summary": "Frozen primary."}},
+    }
+
+    reused = server.reusable_chapter_primary_response(artifact, "same")
+    assert reused == artifact["primaryResponse"]
+    assert reused is not artifact["primaryResponse"]
+    assert server.reusable_chapter_primary_response(artifact, "changed") is None
+
+
 def test_projection_subject_integrity_is_case_insensitive_and_detects_removed_ids() -> None:
     raw = {
         "cast": [
@@ -6291,6 +6642,28 @@ def test_projection_subject_integrity_is_case_insensitive_and_detects_removed_id
     assert server.unresolved_projection_subjects(raw, cast) == ["G001"]
     replaced = server.replace_cast_ids_with_names(raw, cast)
     assert replaced["summary"]["key_points"][1]["subject"] == "Wilbur"
+
+
+def test_mutual_alias_cast_merge_rewrites_projection_subjects() -> None:
+    raw = {
+        "cast": [
+            {"entity_id": "G001", "canonical_name": "Wilbur", "aliases": ["Wilbur Whateley"]},
+            {"entity_id": "G004", "canonical_name": "Wilbur Whateley", "aliases": ["Wilbur"]},
+        ],
+        "summary": {"key_points": [{"claim": "He acts.", "subject": "G004"}]},
+        "dossier": {"events": [{"claim": "He acts.", "subject": "g004"}]},
+    }
+
+    cleaned, merges = server.merge_mutual_alias_cast_entries(raw)
+
+    assert len(cleaned["cast"]) == 1
+    assert cleaned["cast"][0]["aliases"] == ["Wilbur Whateley", "Wilbur"]
+    assert cleaned["summary"]["key_points"][0]["subject"] == "G001"
+    assert cleaned["dossier"]["events"][0]["subject"] == "G001"
+    assert merges == [{
+        "retainedEntityId": "G001", "removedEntityId": "G004",
+        "retainedCanonicalName": "Wilbur", "removedCanonicalName": "Wilbur Whateley",
+    }]
 
 
 def test_summary_kinship_requires_local_source_support() -> None:
@@ -6448,10 +6821,11 @@ def test_chapter_reading_consistency_rejects_only_addressed_claims_and_corrects_
     assert [item["claim"] for item in cleaned["summary"]["key_points"]] == ["Millarca arrives masked."]
     assert cleaned["summary"]["ending_state"] == []
     assert cleaned["dossier"]["facts"] == []
-    assert cleaned["summary"]["summary"].startswith("The General's unnamed ward")
+    assert cleaned["summary"]["summary"] == "Millarca arrives masked."
     assert cleaned["assessment"]["dimensions"]["coherence_and_continuity"]["applicable"] is False
     assert cleaned["assessment"]["dimensions"]["coherence_and_continuity"]["score"] == 0
     assert report["rejectedCandidateCount"] == 4
+    assert report["summaryCorrectionMode"] == "evidence-ledger-reconstruction"
     assert report["issues"] == ["The primary reading merged two characters."]
 
 
